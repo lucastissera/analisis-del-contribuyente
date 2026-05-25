@@ -13,6 +13,10 @@ class CredencialesArchivoError(ArcaProcesoError):
     """Archivo .xlsx de credenciales ilegible o incompleto."""
 
 
+class CertificadoArchivoError(ArcaProcesoError):
+    """Certificado digital ilegible, incompleto o sin CUIT identificable."""
+
+
 class CuitRepresentadoNoEncontradoError(ArcaProcesoError):
     """I → No: el CUIT representado no aparece en la lista de perfiles."""
 

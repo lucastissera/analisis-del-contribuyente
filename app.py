@@ -19,6 +19,8 @@ except ImportError:
 # En Render: definí CUIT_EN_ARCA_PLAYWRIGHT=1 en Environment si querés la descarga automática.
 if os.environ.get("RENDER", "").strip().lower() not in ("true", "1", "yes"):
     os.environ.setdefault("CUIT_EN_ARCA_PLAYWRIGHT", "1")
+# Copia ENLACE ARCA: mostrar descarga automática por defecto en desarrollo local.
+os.environ.setdefault("CUIT_EN_ARCA_UI", "1")
 
 from flask import (
     Flask,
@@ -41,7 +43,12 @@ else:
     app = Flask(__name__)
 
 from auth import verify_credentials, whatsapp_new_user_url
-from cuit_en_arca import ArcaProcesoError, ejecutar_flujo_cuit_en_arca
+from cuit_en_arca import (
+    ArcaProcesoError,
+    DescargaArcaResult,
+    ejecutar_flujo_certificado_arca,
+    ejecutar_flujo_cuit_en_arca,
+)
 from i18n import (
     LANG_LABELS,
     MESES,
@@ -317,6 +324,323 @@ def _mimetype_por_nombre(nombre: str) -> str:
     if nl.endswith(".csv"):
         return "text/csv; charset=utf-8"
     return MIME_XLSX
+
+
+def _tipo_comprobantes_desde_form() -> str:
+    """emitidos | recibidos | ambos."""
+    t = (request.form.get("tipo_comprobantes") or "emitidos").strip().lower()
+    if t in ("recibidos", "ambos"):
+        return t
+    return "emitidos"
+
+
+def _nombre_descarga_arca(nombre_sug: str, fallback: str) -> str:
+    nombre_out = Path(nombre_sug).name if nombre_sug else fallback
+    if not nombre_out.lower().endswith((".xlsx", ".csv")):
+        nombre_out = f"{nombre_out}.xlsx"
+    return nombre_out
+
+
+def _procesar_descarga_arca_y_renderizar(
+    lg: str,
+    data: bytes,
+    nombre_orig: str,
+    *,
+    emitidos: bool,
+    mapa_imputaciones: dict[str, tuple[str, str]] | None,
+) -> dict:
+    """Procesa bytes descargados de ARCA y devuelve kwargs para index.html."""
+    buf = io.BytesIO(data)
+    (
+        df_ajustado,
+        totales,
+        totales_por_periodo,
+        notas_credito_extras,
+        tabla_contrapartes,
+    ) = procesar_archivo(
+        buf,
+        0,
+        nombre_archivo=nombre_orig,
+        ui_lang=lg,
+        emitidos=emitidos,
+    )
+    con_cols_imp = mapa_imputaciones is not None
+    tabla_contrapartes = enriquecer_contrapartes_con_imputacion(
+        tabla_contrapartes, mapa_imputaciones
+    )
+    res_imp = (
+        resumen_totales_por_imputacion(tabla_contrapartes) if con_cols_imp else None
+    )
+    salida = io.BytesIO()
+    periodos_orden = periodos_orden_crono(
+        totales_por_periodo,
+        notas_credito_extras.get("neto_nc_por_periodo", {}),
+        notas_credito_extras.get("iva_nc_por_periodo", {}),
+    )
+    totales_resumen = {c: totales[c] for c in COLUMNAS_TOTAL_RESUMEN}
+    totales_detalle = {c: totales[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
+    escribir_excel_informe_completo(
+        df_ajustado,
+        salida,
+        emitidos=emitidos,
+        totales=totales,
+        totales_por_periodo=totales_por_periodo,
+        periodos_orden=periodos_orden,
+        notas_credito_extras=notas_credito_extras,
+        totales_resumen=totales_resumen,
+        totales_detalle=totales_detalle,
+        suma_total=round(total_resumen_pantalla(totales), 2),
+        columnas_orden=COLUMNAS_A_AJUSTAR,
+        tabla_contrapartes=tabla_contrapartes,
+        resumen_imputacion=res_imp,
+        con_columnas_imputacion_en_contrapartes=con_cols_imp,
+        mapa_imputaciones=mapa_imputaciones,
+    )
+    contenido = salida.getvalue()
+    nombre_salida = f"{Path(nombre_orig).stem}_ajustado.xlsx"
+    download_id = uuid4().hex
+    DESCARGAS[download_id] = (contenido, nombre_salida, MIME_XLSX)
+    return {
+        "mostrar_resultado": True,
+        "procesamiento_dual": False,
+        "emitidos": emitidos,
+        "totales_resumen": totales_resumen,
+        "totales_detalle": totales_detalle,
+        "columnas_orden": COLUMNAS_A_AJUSTAR,
+        "suma_total": round(total_resumen_pantalla(totales), 2),
+        "totales_por_periodo": totales_por_periodo,
+        "periodos_orden": periodos_orden,
+        "resumen_total_periodo": totales_resumen_por_periodo(totales_por_periodo),
+        "total_neto_nc": notas_credito_extras["total_neto_nc"],
+        "total_iva_nc": notas_credito_extras["total_iva_nc"],
+        "neto_nc_por_periodo": notas_credito_extras["neto_nc_por_periodo"],
+        "iva_nc_por_periodo": notas_credito_extras["iva_nc_por_periodo"],
+        "tabla_contrapartes": tabla_contrapartes,
+        "download_id": download_id,
+        "nombre_salida": nombre_salida,
+        "imputacion_activa": con_cols_imp,
+        "resumen_imputacion": res_imp,
+        "arca_procesado_auto": True,
+    }
+
+
+def _procesar_dual_arca_y_renderizar(
+    lg: str,
+    descarga: DescargaArcaResult,
+    mapa_imputaciones: dict[str, tuple[str, str]] | None,
+) -> dict:
+    assert descarga.emitidos and descarga.recibidos
+    data_e, nom_e = descarga.emitidos
+    data_r, nom_r = descarga.recibidos
+    nombre_e = _nombre_descarga_arca(nom_e, "mis_comprobantes_emitidos.xlsx")
+    nombre_r = _nombre_descarga_arca(nom_r, "mis_comprobantes_recibidos.xlsx")
+    (
+        df_e,
+        tot_e,
+        tpp_e,
+        nce_e,
+        tabla_e,
+    ) = procesar_archivo(
+        io.BytesIO(data_e),
+        0,
+        nombre_archivo=nombre_e,
+        ui_lang=lg,
+        emitidos=True,
+    )
+    (
+        df_r,
+        tot_r,
+        tpp_r,
+        nce_r,
+        tabla_r,
+    ) = procesar_archivo(
+        io.BytesIO(data_r),
+        0,
+        nombre_archivo=nombre_r,
+        ui_lang=lg,
+        emitidos=False,
+    )
+    con_cols_imp = mapa_imputaciones is not None
+    tabla_e = enriquecer_contrapartes_con_imputacion(tabla_e, mapa_imputaciones)
+    tabla_r = enriquecer_contrapartes_con_imputacion(tabla_r, mapa_imputaciones)
+    res_imp_e = resumen_totales_por_imputacion(tabla_e) if con_cols_imp else None
+    res_imp_r = resumen_totales_por_imputacion(tabla_r) if con_cols_imp else None
+    per_e = periodos_orden_crono(
+        tpp_e,
+        nce_e.get("neto_nc_por_periodo", {}),
+        nce_e.get("iva_nc_por_periodo", {}),
+    )
+    per_r = periodos_orden_crono(
+        tpp_r,
+        nce_r.get("neto_nc_por_periodo", {}),
+        nce_r.get("iva_nc_por_periodo", {}),
+    )
+    tres_e = {c: tot_e[c] for c in COLUMNAS_TOTAL_RESUMEN}
+    tdet_e = {c: tot_e[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
+    tres_r = {c: tot_r[c] for c in COLUMNAS_TOTAL_RESUMEN}
+    tdet_r = {c: tot_r[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
+    salida = io.BytesIO()
+    escribir_excel_informe_dual(
+        salida,
+        df_recibidos=df_r,
+        totales_por_periodo_rec=tpp_r,
+        periodos_orden_rec=per_r,
+        notas_credito_extras_rec=nce_r,
+        totales_resumen_rec=tres_r,
+        totales_detalle_rec=tdet_r,
+        suma_total_rec=round(total_resumen_pantalla(tot_r), 2),
+        tabla_contrapartes_rec=tabla_r,
+        df_emitidos=df_e,
+        totales_por_periodo_emit=tpp_e,
+        periodos_orden_emit=per_e,
+        notas_credito_extras_emit=nce_e,
+        totales_resumen_emit=tres_e,
+        totales_detalle_emit=tdet_e,
+        suma_total_emit=round(total_resumen_pantalla(tot_e), 2),
+        tabla_contrapartes_emit=tabla_e,
+        columnas_orden=COLUMNAS_A_AJUSTAR,
+        resumen_imputacion_rec=res_imp_r,
+        resumen_imputacion_emit=res_imp_e,
+        con_columnas_imputacion_en_contrapartes=con_cols_imp,
+        mapa_imputaciones=mapa_imputaciones,
+    )
+    contenido = salida.getvalue()
+    nombre_salida = f"{Path(nombre_r).stem}_{Path(nombre_e).stem}_ajustado.xlsx"
+    download_id = uuid4().hex
+    DESCARGAS[download_id] = (contenido, nombre_salida, MIME_XLSX)
+    return {
+        "mostrar_resultado": True,
+        "procesamiento_dual": True,
+        "totales_resumen_recibidos": tres_r,
+        "totales_detalle_recibidos": tdet_r,
+        "suma_total_recibidos": round(total_resumen_pantalla(tot_r), 2),
+        "totales_resumen_emitidos": tres_e,
+        "totales_detalle_emitidos": tdet_e,
+        "suma_total_emitidos": round(total_resumen_pantalla(tot_e), 2),
+        "columnas_orden": COLUMNAS_A_AJUSTAR,
+        "totales_por_periodo_recibidos": tpp_r,
+        "periodos_orden_recibidos": per_r,
+        "resumen_total_periodo_recibidos": totales_resumen_por_periodo(tpp_r),
+        "total_neto_nc_recibidos": nce_r["total_neto_nc"],
+        "total_iva_nc_recibidos": nce_r["total_iva_nc"],
+        "neto_nc_por_periodo_recibidos": nce_r["neto_nc_por_periodo"],
+        "iva_nc_por_periodo_recibidos": nce_r["iva_nc_por_periodo"],
+        "totales_por_periodo_emitidos": tpp_e,
+        "periodos_orden_emitidos": per_e,
+        "resumen_total_periodo_emitidos": totales_resumen_por_periodo(tpp_e),
+        "total_neto_nc_emitidos": nce_e["total_neto_nc"],
+        "total_iva_nc_emitidos": nce_e["total_iva_nc"],
+        "neto_nc_por_periodo_emitidos": nce_e["neto_nc_por_periodo"],
+        "iva_nc_por_periodo_emitidos": nce_e["iva_nc_por_periodo"],
+        "tabla_contrapartes_recibidos": tabla_r,
+        "tabla_contrapartes_emitidos": tabla_e,
+        "download_id": download_id,
+        "nombre_salida": nombre_salida,
+        "imputacion_activa": con_cols_imp,
+        "resumen_imputacion_recibidos": res_imp_r,
+        "resumen_imputacion_emitidos": res_imp_e,
+        "arca_procesado_auto": True,
+        "msg_arca_procesado_ok": True,
+    }
+
+
+def _respuesta_tras_descarga_arca(
+    lg: str,
+    descarga: DescargaArcaResult,
+    *,
+    procesar_auto: bool,
+):
+    if descarga.es_dual:
+        if procesar_auto:
+            mapa_imputaciones, err_imp, _, _ = _mapa_imputaciones_desde_peticion(lg)
+            if err_imp:
+                return render_template("index.html", error=err_imp)
+            try:
+                return render_template(
+                    "index.html",
+                    **_procesar_dual_arca_y_renderizar(lg, descarga, mapa_imputaciones),
+                )
+            except ValueError as exc:
+                return render_template("index.html", error=str(exc))
+            except Exception as exc:
+                return render_template(
+                    "index.html",
+                    error=tr(lg, "err_processing", exc=exc),
+                )
+        assert descarga.emitidos and descarga.recibidos
+        did_e = uuid4().hex
+        did_r = uuid4().hex
+        nom_e = _nombre_descarga_arca(descarga.emitidos[1], "emitidos.xlsx")
+        nom_r = _nombre_descarga_arca(descarga.recibidos[1], "recibidos.xlsx")
+        DESCARGAS[did_e] = (
+            descarga.emitidos[0],
+            nom_e,
+            _mimetype_por_nombre(nom_e),
+        )
+        DESCARGAS[did_r] = (
+            descarga.recibidos[0],
+            nom_r,
+            _mimetype_por_nombre(nom_r),
+        )
+        return render_template(
+            "index.html",
+            cuit_arca_ok=True,
+            cuit_arca_dual=True,
+            cuit_arca_download_id_emit=did_e,
+            cuit_arca_nombre_emit=nom_e,
+            cuit_arca_download_id_rec=did_r,
+            cuit_arca_nombre_rec=nom_r,
+        )
+
+    par = descarga.simple_par
+    assert par is not None
+    data, nombre_sug = par
+    emitidos = descarga.emitidos is not None
+    nombre_out = _nombre_descarga_arca(
+        nombre_sug,
+        "mis_comprobantes_emitidos.xlsx"
+        if emitidos
+        else "mis_comprobantes_recibidos.xlsx",
+    )
+
+    if procesar_auto:
+        mapa_imputaciones, err_imp, _, _ = _mapa_imputaciones_desde_peticion(lg)
+        if err_imp:
+            return render_template("index.html", error=err_imp)
+        try:
+            kwargs = _procesar_descarga_arca_y_renderizar(
+                lg,
+                data,
+                nombre_out,
+                emitidos=emitidos,
+                mapa_imputaciones=mapa_imputaciones,
+            )
+            kwargs["msg_arca_procesado_ok"] = True
+            return render_template("index.html", **kwargs)
+        except ValueError as exc:
+            did = uuid4().hex
+            DESCARGAS[did] = (data, nombre_out, _mimetype_por_nombre(nombre_out))
+            return render_template(
+                "index.html",
+                error=str(exc),
+                cuit_arca_ok=True,
+                cuit_arca_download_id=did,
+                cuit_arca_nombre=nombre_out,
+            )
+        except Exception as exc:
+            return render_template(
+                "index.html",
+                error=tr(lg, "err_processing", exc=exc),
+            )
+
+    did = uuid4().hex
+    DESCARGAS[did] = (data, nombre_out, _mimetype_por_nombre(nombre_out))
+    return render_template(
+        "index.html",
+        cuit_arca_ok=True,
+        cuit_arca_download_id=did,
+        cuit_arca_nombre=nombre_out,
+    )
 
 
 @app.get("/")
@@ -684,12 +1008,21 @@ def cuit_en_arca():
             "index.html",
             error=tr(lg, "err_arca_xlsx"),
         )
+    procesar_auto = (request.form.get("procesar_automatico") or "").strip() in (
+        "1",
+        "on",
+        "true",
+        "yes",
+    )
+    tipo = _tipo_comprobantes_desde_form()
+
     try:
         buf = io.BytesIO(cred_file.read())
-        data, nombre_sug = ejecutar_flujo_cuit_en_arca(
+        descarga = ejecutar_flujo_cuit_en_arca(
             buf,
             fecha_desde or None,
             fecha_hasta or None,
+            tipo_comprobantes=tipo,
         )
     except ArcaProcesoError as exc:
         return render_template("index.html", error=str(exc))
@@ -699,18 +1032,83 @@ def cuit_en_arca():
             error=tr(lg, "err_arca_unexpected", exc=exc),
         )
 
-    nombre_out = Path(nombre_sug).name if nombre_sug else "mis_comprobantes_descarga.xlsx"
-    if not nombre_out.lower().endswith((".xlsx", ".csv")):
-        nombre_out = f"{nombre_out}.xlsx"
+    return _respuesta_tras_descarga_arca(
+        lg,
+        descarga,
+        procesar_auto=procesar_auto,
+    )
 
-    did = uuid4().hex
-    DESCARGAS[did] = (data, nombre_out, _mimetype_por_nombre(nombre_out))
 
-    return render_template(
-        "index.html",
-        cuit_arca_ok=True,
-        cuit_arca_download_id=did,
-        cuit_arca_nombre=nombre_out,
+@app.post("/cuit-en-arca-certificado")
+def cuit_en_arca_certificado():
+    lg = normalize_lang(session.get("lang"))
+    if not _mostrar_ui_cuit_arca():
+        return (
+            render_template(
+                "index.html",
+                error=tr(lg, "err_arca_disabled"),
+            ),
+            403,
+        )
+
+    fecha_desde = (request.form.get("fecha_desde") or "").strip()
+    fecha_hasta = (request.form.get("fecha_hasta") or "").strip()
+    cuit_login = (request.form.get("cuit_login") or "").strip()
+    cuit_repr = (request.form.get("cuit_representado") or "").strip()
+    passphrase = (request.form.get("cert_passphrase") or "").strip() or None
+
+    pfx = request.files.get("cert_pfx")
+    cert = request.files.get("cert_crt")
+    key = request.files.get("cert_key")
+
+    tiene_pfx = bool(pfx and (pfx.filename or "").strip())
+    tiene_par = bool(
+        cert
+        and (cert.filename or "").strip()
+        and key
+        and (key.filename or "").strip()
+    )
+    if not tiene_pfx and not tiene_par:
+        return render_template(
+            "index.html",
+            error=tr(lg, "err_arca_cert_missing"),
+        )
+
+    procesar_auto = (request.form.get("procesar_automatico") or "").strip() in (
+        "1",
+        "on",
+        "true",
+        "yes",
+    )
+    tipo = _tipo_comprobantes_desde_form()
+
+    try:
+        descarga = ejecutar_flujo_certificado_arca(
+            archivo_pfx=io.BytesIO(pfx.read()) if tiene_pfx else None,
+            nombre_pfx=Path(pfx.filename).name if tiene_pfx else None,
+            archivo_cert=io.BytesIO(cert.read()) if tiene_par else None,
+            nombre_cert=Path(cert.filename).name if tiene_par else None,
+            archivo_key=io.BytesIO(key.read()) if tiene_par else None,
+            nombre_key=Path(key.filename).name if tiene_par else None,
+            passphrase=passphrase,
+            cuit_login_texto=cuit_login or None,
+            cuit_representado_texto=cuit_repr,
+            fecha_desde_texto=fecha_desde or None,
+            fecha_hasta_texto=fecha_hasta or None,
+            tipo_comprobantes=tipo,
+        )
+    except ArcaProcesoError as exc:
+        return render_template("index.html", error=str(exc))
+    except Exception as exc:
+        return render_template(
+            "index.html",
+            error=tr(lg, "err_arca_unexpected", exc=exc),
+        )
+
+    return _respuesta_tras_descarga_arca(
+        lg,
+        descarga,
+        procesar_auto=procesar_auto,
     )
 
 

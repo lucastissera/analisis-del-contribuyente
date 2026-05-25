@@ -271,6 +271,26 @@
       .lista-plantilla li {
         margin-bottom: 0.35rem;
       }
+      .arca-metodo {
+        margin: 1rem 0 0.5rem;
+        padding: 0.75rem 0 0;
+        border-top: 1px solid var(--border-divider);
+      }
+      .arca-metodo h3 {
+        margin: 0 0 0.5rem;
+        font-size: 1rem;
+      }
+      .arca-campos-comunes {
+        margin: 0.75rem 0;
+        padding: 0.65rem 0.75rem;
+        background: var(--bg-panel);
+        border-radius: 8px;
+        border: 1px solid var(--border-soft);
+      }
+      .arca-campos-comunes label {
+        display: inline-block;
+        margin-right: 0.75rem;
+      }
       .nota-tecnica {
         font-size: 0.82rem;
         color: var(--text-muted-2);
@@ -800,43 +820,161 @@
         {% if mostrar_cuit_arca_ui %}
         <section class="recuadro recuadro-izq" aria-labelledby="titulo-arca">
           <h2 id="titulo-arca">{{ t('arca_title') }}</h2>
-          <p class="subtitulo-detalle" style="margin-top: 0">{{ t('arca_intro')|safe }}</p>
-          <ul class="lista-plantilla">
-            <li>{{ t('arca_li1')|safe }}</li>
-            <li>{{ t('arca_li2')|safe }}</li>
-          </ul>
+          <p class="subtitulo-detalle" style="margin-top: 0">{{ t('arca_intro_enlace')|safe }}</p>
           <p class="nota-tecnica">{{ t('arca_nota')|safe }}</p>
 
-          <form method="post" action="/cuit-en-arca" enctype="multipart/form-data">
-            <label for="credenciales"><strong>{{ t('arca_label_file') }}</strong></label><br />
-            <input id="credenciales" name="credenciales" type="file" accept=".xlsx" required />
-            <br /><br />
-            <label for="fecha_desde">{{ t('arca_label_desde') }}</label><br />
+          <div class="arca-campos-comunes" aria-label="{{ t('arca_common_aria') }}">
+            <p><strong>{{ t('arca_common_period') }}</strong></p>
+            <label for="fecha_desde_cert">{{ t('arca_label_desde') }}</label>
             <input
-              id="fecha_desde"
+              id="fecha_desde_cert"
               name="fecha_desde"
               type="text"
               placeholder="dd/mm/yyyy"
               style="max-width: 12rem"
+              form="form-arca-cert"
+              required
             />
-            <br /><br />
-            <label for="fecha_hasta">{{ t('arca_label_hasta') }}</label><br />
+            <label for="fecha_hasta_cert" style="margin-left: 0.5rem">{{ t('arca_label_hasta') }}</label>
             <input
-              id="fecha_hasta"
+              id="fecha_hasta_cert"
               name="fecha_hasta"
               type="text"
               placeholder="dd/mm/yyyy"
               style="max-width: 12rem"
+              form="form-arca-cert"
+              required
             />
-            <br />
-            <button type="submit">{{ t('arca_submit') }}</button>
-          </form>
+            <p style="margin-top: 0.65rem"><strong>{{ t('arca_label_tipo') }}</strong></p>
+            <label
+              ><input type="radio" name="tipo_comprobantes" value="ambos" form="form-arca-cert" checked />
+              {{ t('arca_tipo_ambos') }}</label
+            >
+            <label style="margin-left: 0.75rem"
+              ><input type="radio" name="tipo_comprobantes" value="emitidos" form="form-arca-cert" />
+              {{ t('arca_tipo_emitidos') }}</label
+            >
+            <label style="margin-left: 0.75rem"
+              ><input type="radio" name="tipo_comprobantes" value="recibidos" form="form-arca-cert" />
+              {{ t('arca_tipo_recibidos') }}</label
+            >
+            <p style="margin-top: 0.65rem">
+              <label
+                ><input type="checkbox" name="procesar_automatico" value="1" form="form-arca-cert" checked />
+                {{ t('arca_procesar_auto')|safe }}</label
+              >
+            </p>
+          </div>
+
+          <div class="arca-metodo">
+            <h3>{{ t('arca_cert_title') }}</h3>
+            <p class="subtitulo-detalle">{{ t('arca_cert_help')|safe }}</p>
+            <form id="form-arca-cert" method="post" action="/cuit-en-arca-certificado" enctype="multipart/form-data">
+              <label for="cert_pfx"><strong>{{ t('arca_cert_pfx') }}</strong></label><br />
+              <input id="cert_pfx" name="cert_pfx" type="file" accept=".pfx,.p12" />
+              <p class="subtitulo-detalle" style="margin: 0.35rem 0">{{ t('arca_cert_or') }}</p>
+              <label for="cert_crt"><strong>{{ t('arca_cert_crt') }}</strong></label><br />
+              <input id="cert_crt" name="cert_crt" type="file" accept=".crt,.cer,.pem" />
+              <br /><br />
+              <label for="cert_key"><strong>{{ t('arca_cert_key') }}</strong></label><br />
+              <input id="cert_key" name="cert_key" type="file" accept=".key,.pem" />
+              <br /><br />
+              <label for="cert_passphrase">{{ t('arca_cert_pass') }}</label><br />
+              <input id="cert_passphrase" name="cert_passphrase" type="password" autocomplete="off" style="max-width: 14rem" />
+              <br /><br />
+              <label for="cuit_login">{{ t('arca_cert_cuit_login') }}</label><br />
+              <input
+                id="cuit_login"
+                name="cuit_login"
+                type="text"
+                placeholder="20123456789"
+                style="max-width: 14rem"
+              />
+              <span class="subtitulo-detalle"> {{ t('arca_cert_cuit_login_hint') }}</span>
+              <br /><br />
+              <label for="cuit_representado"><strong>{{ t('arca_cert_cuit_repr') }}</strong></label><br />
+              <input
+                id="cuit_representado"
+                name="cuit_representado"
+                type="text"
+                placeholder="20987654321"
+                style="max-width: 14rem"
+                required
+              />
+              <br /><br />
+              <button type="submit">{{ t('arca_cert_submit') }}</button>
+            </form>
+          </div>
+
+          <div class="arca-metodo">
+            <h3>{{ t('arca_xlsx_title') }}</h3>
+            <p class="subtitulo-detalle">{{ t('arca_intro')|safe }}</p>
+            <ul class="lista-plantilla">
+              <li>{{ t('arca_li1')|safe }}</li>
+              <li>{{ t('arca_li2')|safe }}</li>
+            </ul>
+            <form method="post" action="/cuit-en-arca" enctype="multipart/form-data">
+              <label for="credenciales"><strong>{{ t('arca_label_file') }}</strong></label><br />
+              <input id="credenciales" name="credenciales" type="file" accept=".xlsx" required />
+              <br /><br />
+              <label for="fecha_desde_xlsx">{{ t('arca_label_desde') }}</label><br />
+              <input
+                id="fecha_desde_xlsx"
+                name="fecha_desde"
+                type="text"
+                placeholder="dd/mm/yyyy"
+                style="max-width: 12rem"
+              />
+              <br /><br />
+              <label for="fecha_hasta_xlsx">{{ t('arca_label_hasta') }}</label><br />
+              <input
+                id="fecha_hasta_xlsx"
+                name="fecha_hasta"
+                type="text"
+                placeholder="dd/mm/yyyy"
+                style="max-width: 12rem"
+              />
+              <br /><br />
+              <p><strong>{{ t('arca_label_tipo') }}</strong></p>
+              <label
+                ><input type="radio" name="tipo_comprobantes" value="ambos" checked />
+                {{ t('arca_tipo_ambos') }}</label
+              >
+              <label style="margin-left: 0.75rem"
+                ><input type="radio" name="tipo_comprobantes" value="emitidos" />
+                {{ t('arca_tipo_emitidos') }}</label
+              >
+              <label style="margin-left: 0.75rem"
+                ><input type="radio" name="tipo_comprobantes" value="recibidos" />
+                {{ t('arca_tipo_recibidos') }}</label
+              >
+              <br /><br />
+              <label
+                ><input type="checkbox" name="procesar_automatico" value="1" checked />
+                {{ t('arca_procesar_auto')|safe }}</label
+              >
+              <br /><br />
+              <button type="submit">{{ t('arca_submit') }}</button>
+            </form>
+          </div>
 
           {% if cuit_arca_ok %}
           <p class="mensaje-exito">{{ t('msg_arca_ok') }}</p>
+          {% if cuit_arca_dual %}
+          <p>
+            <a href="/descargar/{{ cuit_arca_download_id_emit }}">{{ t('download_link', name=cuit_arca_nombre_emit) }}</a>
+          </p>
+          <p>
+            <a href="/descargar/{{ cuit_arca_download_id_rec }}">{{ t('download_link', name=cuit_arca_nombre_rec) }}</a>
+          </p>
+          {% else %}
           <p>
             <a href="/descargar/{{ cuit_arca_download_id }}">{{ t('download_link', name=cuit_arca_nombre) }}</a>
           </p>
+          {% endif %}
+          {% endif %}
+          {% if msg_arca_procesado_ok %}
+          <p class="mensaje-exito">{{ t('msg_arca_procesado_ok') }}</p>
           {% endif %}
         </section>
         {% endif %}

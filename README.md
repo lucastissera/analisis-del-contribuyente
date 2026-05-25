@@ -6,10 +6,33 @@ Analiza Mis Comprobantes ARCA y emite un `.xlsx` ajustado (notas de crédito en 
 
 ```bash
 python -m pip install -r requirements.txt
+playwright install chromium
 python app.py
 ```
 
 Abrir en navegador: `http://127.0.0.1:5000` (o el puerto que indique la consola).
+
+### Enlace ARCA (certificado digital)
+
+En el panel izquierdo podés:
+
+1. Subir certificado **.pfx/.p12** o par **.crt + .key** (emitidos en Administración de Certificados Digitales de ARCA).
+2. Indicar **CUIT representado** y el **período** (máximo un año).
+3. Elegir **emitidos** o **recibidos** y, por defecto, **procesar automáticamente** el Excel descargado.
+
+Requisitos: `CUIT_EN_ARCA_UI=1` y `CUIT_EN_ARCA_PLAYWRIGHT=1` (en local suelen activarse solos). La automatización usa Chromium vía Playwright; los selectores de AFIP pueden requerir ajustes si el sitio cambia.
+
+Alternativa sin certificado: planilla Excel con CUIT, clave fiscal y CUIT representado (misma sección).
+
+**Certificado paso a paso:** ver [docs/CERTIFICADO_ARCA.md](docs/CERTIFICADO_ARCA.md).
+
+### Actualizar el `.exe` en `dist/` (obligatorio tras cada cambio)
+
+```bat
+build_windows.bat
+```
+
+O dejá corriendo `watch_portable.bat` mientras editás. Los agentes de Cursor deben seguir [AGENTS.md](AGENTS.md).
 
 ### Plantillas de imputación en disco (solo modo local / escritorio)
 
