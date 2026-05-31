@@ -15,12 +15,15 @@ try:
 except ImportError:
     pass
 
-# En local (sin RENDER) habilitar Playwright/AFIP si no definiste la variable.
-# En Render: definí CUIT_EN_ARCA_PLAYWRIGHT=1 en Environment si querés la descarga automática.
-if os.environ.get("RENDER", "").strip().lower() not in ("true", "1", "yes"):
-    os.environ.setdefault("CUIT_EN_ARCA_PLAYWRIGHT", "1")
-# Copia ENLACE ARCA: mostrar descarga automática por defecto en desarrollo local.
+# Habilitar descarga ARCA por defecto (local, portable y servidor web).
+# Desactivar solo con CUIT_EN_ARCA_PLAYWRIGHT=0
+os.environ.setdefault("CUIT_EN_ARCA_PLAYWRIGHT", "1")
 os.environ.setdefault("CUIT_EN_ARCA_UI", "1")
+
+if getattr(sys, "frozen", False):
+    from cuit_en_arca.playwright_env import aplicar_entorno_playwright_portable
+
+    aplicar_entorno_playwright_portable()
 
 from flask import (
     Flask,

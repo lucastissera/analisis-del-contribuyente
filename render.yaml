@@ -1,0 +1,17 @@
+# Render.com — build con Chromium para descarga ARCA
+services:
+  - type: web
+    name: mis-comprobantes-arca
+    runtime: python
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      python -m playwright install chromium &&
+      python -m playwright install-deps chromium
+    startCommand: gunicorn app:app
+    envVars:
+      - key: CUIT_EN_ARCA_PLAYWRIGHT
+        value: "1"
+      - key: CUIT_EN_ARCA_UI
+        value: "1"
+      - key: PYTHON_VERSION
+        value: "3.12.8"

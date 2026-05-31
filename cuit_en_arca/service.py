@@ -26,10 +26,23 @@ from cuit_en_arca.validacion import parsear_fecha_argentina, validar_rango_max_u
 TipoComprobantes = Literal["emitidos", "recibidos", "ambos"]
 
 
+def _playwright_importable() -> bool:
+    try:
+        import playwright  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def automatizacion_cuit_arca_habilitada() -> bool:
-    """Variable de entorno explícita (evita lanzar Chromium en Render sin deps)."""
+    """Habilitada por defecto; desactivar con CUIT_EN_ARCA_PLAYWRIGHT=0."""
     v = os.environ.get("CUIT_EN_ARCA_PLAYWRIGHT", "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    if v in ("0", "false", "no", "off"):
+        return False
+    if v in ("1", "true", "yes", "on"):
+        return True
+    return _playwright_importable()
 
 
 def _resolver_fechas(
@@ -58,16 +71,20 @@ def _requiere_playwright() -> None:
 
     from cuit_en_arca.playwright_env import chromium_instalado_en_portable
 
-    if getattr(sys, "frozen", False) and not chromium_instalado_en_portable():
+    if getattr(sys, "frozen", False):
+        if not chromium_instalado_en_portable():
+            raise AutomatizacionNoDisponibleError(
+                "Chromium no está instalado junto al ejecutable (carpeta ms-playwright). "
+                "Recompilá el portable con build_windows.bat para incluir el navegador."
+            )
+    elif not _playwright_importable():
         raise AutomatizacionNoDisponibleError(
-            "Chromium no está instalado junto al ejecutable (carpeta ms-playwright). "
-            "Recompilá el portable con build_windows.bat para incluir el navegador."
+            "Playwright no está instalado en el servidor. "
+            "Ejecutá: pip install playwright && playwright install chromium"
         )
     if not automatizacion_cuit_arca_habilitada():
         raise AutomatizacionNoDisponibleError(
-            "La descarga automática desde AFIP está deshabilitada en este servidor. "
-            "Para usarla en local: definí la variable de entorno CUIT_EN_ARCA_PLAYWRIGHT=1, "
-            "instalá dependencias (pip install playwright) y ejecutá: playwright install chromium"
+            "La descarga automática ARCA está deshabilitada (CUIT_EN_ARCA_PLAYWRIGHT=0)."
         )
 
 
