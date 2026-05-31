@@ -20,6 +20,14 @@ except ImportError:
 os.environ.setdefault("CUIT_EN_ARCA_PLAYWRIGHT", "1")
 os.environ.setdefault("CUIT_EN_ARCA_UI", "1")
 
+if not getattr(sys, "frozen", False):
+    try:
+        from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
+
+        asegurar_chromium_playwright()
+    except Exception:
+        pass
+
 if getattr(sys, "frozen", False):
     from cuit_en_arca.playwright_env import aplicar_entorno_playwright_portable
 

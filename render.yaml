@@ -5,13 +5,19 @@ services:
     runtime: python
     buildCommand: >-
       pip install -r requirements.txt &&
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers &&
       python -m playwright install chromium &&
       python -m playwright install-deps chromium
-    startCommand: gunicorn app:app
+    startCommand: >-
+      export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers &&
+      python -c "from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright; asegurar_chromium_playwright()" &&
+      gunicorn app:app
     envVars:
       - key: CUIT_EN_ARCA_PLAYWRIGHT
         value: "1"
       - key: CUIT_EN_ARCA_UI
         value: "1"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/.playwright-browsers
       - key: PYTHON_VERSION
         value: "3.12.8"

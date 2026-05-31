@@ -11,6 +11,7 @@ Habilitar en servidor: variable de entorno CUIT_EN_ARCA_PLAYWRIGHT=1
 from __future__ import annotations
 
 import re
+import sys
 import time
 from datetime import date
 from pathlib import Path
@@ -34,10 +35,10 @@ from cuit_en_arca.stealth import (
 )
 
 LOGIN_URL = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
-# Tras login, la sesión permite ir directo (evita buscador del portal ARCA).
-URL_MIS_COMPROBANTES = (
+PORTAL_ARCA_URL = "https://portalcf.cloud.afip.gob.ar/portal/app/"
+# Tras login con sesión válida, el flujo Selenium probado abre esta URL.
+URL_MIS_COMPROBANTES_DIRECTA = (
     "https://serviciosweb.afip.gob.ar/genericos/comprobantes/Default.aspx",
-    "https://serviciosweb.afip.gob.ar/generico/misComprobantes/",
 )
 ESPERA_CORTA_SEC = 3.5
 TipoComprobantes = Literal["emitidos", "recibidos", "ambos"]
@@ -104,7 +105,9 @@ def _encontrar_seccion_tipo(root, etiqueta: str):
     )
     for texto in variantes:
         estrategias = (
-            root.get_by_role("link", name=re.compile(rf"\s*{re.escape(texto)}\s*", re.I)),
+            root.get_by_role("link", name=texto, exact=True),
+            root.locator(f"a:text-is('{texto}')"),
+            root.get_by_role("link", name=re.compile(rf"^\s*{re.escape(texto)}\s*$", re.I)),
             root.get_by_role("tab", name=re.compile(re.escape(texto), re.I)),
             root.get_by_role("button", name=re.compile(re.escape(texto), re.I)),
             root.get_by_text(re.compile(rf"^\s*{re.escape(texto)}\s*$", re.I)),
@@ -275,39 +278,56 @@ def _pagina_es_login_afip(page) -> bool:
         return False
 
 
-def _pagina_parece_mis_comprobantes(page) -> bool:
-    """Indicios de que cargó el servicio Mis Comprobantes."""
-    if _pagina_es_login_afip(page):
-        return False
+def _pagina_es_constatacion(page) -> bool:
+    """Página pública de constatación (no es Mis Comprobantes autenticado)."""
     try:
         url = page.url.lower()
-        if "serviciosweb.afip" in url and "comprobante" in url:
-            for ctx in _iter_contextos(page):
-                if _encontrar_seccion_tipo(ctx, "Emitidos") or _encontrar_seccion_tipo(
-                    ctx, "Recibidos"
-                ):
-                    return True
+        if "servicioscf.afip" in url and "comprobante" in url:
             return True
     except Exception:
         pass
+    try:
+        cuerpo = page.locator("body").inner_text(timeout=4000).lower()
+    except Exception:
+        return False
+    return (
+        "constataci" in cuerpo
+        or "se ha movido" in cuerpo
+        or "esta pagina se ha movido" in cuerpo
+    )
+
+
+def _tiene_ui_mis_comprobantes(page) -> bool:
+    """Emitidos/Recibidos o filtros de fecha visibles (validación estricta)."""
+    if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
+        return False
     for ctx in _iter_contextos(page):
         try:
-            if ctx.locator(
+            fechas = ctx.locator(
                 "input[id*='fechaEmision' i], input[name*='fechaDesde' i]"
-            ).count():
-                return True
-            if _encontrar_seccion_tipo(ctx, "Emitidos") or _encontrar_seccion_tipo(
-                ctx, "Recibidos"
-            ):
+            ).first
+            if fechas.count() and fechas.is_visible(timeout=700):
                 return True
         except Exception:
-            continue
+            pass
+        if _encontrar_seccion_tipo(ctx, "Emitidos") or _encontrar_seccion_tipo(
+            ctx, "Recibidos"
+        ):
+            return True
+    return False
+
+
+def _pagina_parece_mis_comprobantes(page) -> bool:
+    """Indicios de que cargó el servicio Mis Comprobantes."""
+    if _tiene_ui_mis_comprobantes(page):
+        return True
+    if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
+        return False
     try:
         cuerpo = page.locator("body").inner_text(timeout=4000).lower()
         return (
             "mis comprobantes" in cuerpo
-            or "comprobantes emitidos" in cuerpo
-            or "comprobantes recibidos" in cuerpo
+            and ("emitidos" in cuerpo or "recibidos" in cuerpo)
         )
     except Exception:
         return False
@@ -331,32 +351,47 @@ def _esperar_post_login(page, timeout_sec: float = 25) -> None:
     _esperar_pagina(page, timeout=15_000)
 
 
+def _ir_al_portal_arca(page) -> None:
+    try:
+        if "portalcf.cloud.afip" in page.url.lower():
+            _esperar_pagina(page, timeout=35_000)
+            return
+    except Exception:
+        pass
+    page.goto(PORTAL_ARCA_URL, wait_until="domcontentloaded")
+    _esperar_pagina(page, timeout=42_000)
+    pausa_humana(0.7, 1.4)
+
+
 def _ir_directo_mis_comprobantes(page):
     """Navega directo al servicio con la cookie de sesión (flujo Selenium probado)."""
-    for url in URL_MIS_COMPROBANTES:
+    try:
+        page.goto(URL_MIS_COMPROBANTES_DIRECTA, wait_until="domcontentloaded")
+        _esperar_pagina(page, timeout=42_000)
+        pausa_humana(1.2, 2.4)
+        _esperar_mis_comprobantes_listo(page, timeout_sec=28)
+        if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
+            return None
         try:
-            page.goto(url, wait_until="domcontentloaded")
-            _esperar_pagina(page, timeout=42_000)
-            pausa_humana(1.0, 2.0)
-            _esperar_mis_comprobantes_listo(page)
-            if _pagina_es_login_afip(page):
-                continue
-            try:
-                page.wait_for_selector(
-                    "a:has-text('Emitidos'), a:has-text('Recibidos'), "
-                    "input[id*='fechaEmision' i], input[name*='fechaDesde' i]",
-                    timeout=12_000,
-                )
-            except Exception:
-                pass
-            if _pagina_parece_mis_comprobantes(page):
-                return page
+            page.wait_for_selector(
+                "a:has-text('Emitidos'), a:has-text('Recibidos'), "
+                "input[id*='fechaEmision' i], input[name*='fechaDesde' i]",
+                timeout=14_000,
+            )
         except Exception:
-            continue
+            pass
+        if _tiene_ui_mis_comprobantes(page):
+            return page
+    except Exception:
+        pass
     return None
 
 
 def _nuevo_contexto_stealth(playwright, *, headless: bool):
+    if not getattr(sys, "frozen", False):
+        from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
+
+        asegurar_chromium_playwright()
     browser = playwright.chromium.launch(
         headless=headless,
         args=list(CHROMIUM_ARGS),
@@ -480,23 +515,36 @@ def _abrir_mis_comprobantes(page):
 
     for _ in range(2):
         mc = _ir_directo_mis_comprobantes(page)
-        if mc is not None:
+        if mc is not None and _tiene_ui_mis_comprobantes(mc):
             pausa_humana(0.56, 1.12)
             return mc
         pausa_humana(1.5, 2.5)
 
-    link = _esperar_resultado_mis_comprobantes(page, intentos=6)
+    link = _esperar_resultado_mis_comprobantes(page, intentos=8)
     if link is not None:
-        return _click_servicio_y_obtener_pagina(page, link)
+        mc = _click_servicio_y_obtener_pagina(page, link)
+        if _tiene_ui_mis_comprobantes(mc):
+            return mc
 
     try:
-        return _buscar_mis_comprobantes_en_portal(page)
-    except AutomatizacionArcaError as exc:
-        raise AutomatizacionArcaError(
-            "No se pudo abrir Mis Comprobantes tras el login "
-            "(URL directa, enlace en home y buscador del portal fallaron). "
-            f"Detalle: {exc}"
-        ) from exc
+        _ir_al_portal_arca(page)
+        mc = _buscar_mis_comprobantes_en_portal(page)
+        if _tiene_ui_mis_comprobantes(mc):
+            return mc
+    except AutomatizacionArcaError:
+        pass
+
+    for _ in range(2):
+        mc = _ir_directo_mis_comprobantes(page)
+        if mc is not None and _tiene_ui_mis_comprobantes(mc):
+            return mc
+        pausa_humana(1.0, 2.0)
+
+    raise AutomatizacionArcaError(
+        "No se pudo abrir Mis Comprobantes tras el login "
+        "(URL directa, enlace en home y buscador del portal fallaron). "
+        "Verifique que el CUIT tenga el servicio «Mis Comprobantes» habilitado."
+    )
 
 
 def _ya_en_pantalla_comprobantes(mc) -> bool:
@@ -596,7 +644,13 @@ def _ir_a_tipo_comprobantes(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
     pausa_humana(0.5, 1.0)
     _esperar_pagina(mc, timeout=42_000)
 
-    for intento in range(10):
+    if _pagina_es_constatacion(mc):
+        raise AutomatizacionArcaError(
+            f"No se encontró la sección {etiqueta} en Mis Comprobantes "
+            "(se abrió la página de constatación pública en lugar del servicio autenticado)."
+        )
+
+    for intento in range(14):
         for ctx in _iter_contextos(mc):
             loc = _encontrar_seccion_tipo(ctx, etiqueta)
             if loc is not None:
@@ -604,7 +658,7 @@ def _ir_a_tipo_comprobantes(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
                 _esperar_pagina(mc, timeout=42_000)
                 pausa_humana(0.35, 0.7)
                 return
-        pausa_humana(0.4, 0.8)
+        pausa_humana(0.5, 1.0)
 
     raise AutomatizacionArcaError(
         f"No se encontró la sección {etiqueta} en Mis Comprobantes."
