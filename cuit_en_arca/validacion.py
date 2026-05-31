@@ -40,6 +40,7 @@ def parsear_rango_fechas_texto(texto: str | None) -> tuple[str, str] | None:
     patrones = (
         r"^\s*(.+?)\s+[-–—]\s+(.+?)\s*$",
         r"^\s*(.+?)\s+al\s+(.+?)\s*$",
+        r"^\s*(.+?)\s+a\s+(.+?)\s*$",
         r"^\s*(.+?)\s+hasta\s+(.+?)\s*$",
     )
     for pat in patrones:

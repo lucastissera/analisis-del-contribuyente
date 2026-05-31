@@ -27,3 +27,7 @@ class AutomatizacionArcaError(ArcaProcesoError):
 
 class AutomatizacionNoDisponibleError(ArcaProcesoError):
     """Playwright/Chromium no instalado o deshabilitado en este entorno."""
+
+
+class LoginArcaError(ArcaProcesoError):
+    """CUIT o clave fiscal incorrectos; no reintentar en lote."""

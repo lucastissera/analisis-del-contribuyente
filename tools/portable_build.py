@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Compila el portable con PyInstaller y copia ``auth_users.json`` a la carpeta del
-ejecutable (junto a ``MisComprobantesAnalisis.exe``) si existe en la raíz del repo.
+Compila el portable con PyInstaller, copia ``auth_users.json`` e instala Chromium
+en ``dist/MisComprobantesAnalisis/ms-playwright`` para descarga ARCA en el .exe.
 
 Uso: desde la raíz del proyecto
   python tools/portable_build.py
-
-Lo invoca ``build_windows.bat`` y ``tools/portable_watch.py``.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +19,26 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist" / "MisComprobantesAnalisis"
 SPEC = ROOT / "MisComprobantesDesktop.spec"
 AUTH_SRC = ROOT / "auth_users.json"
+BROWSERS_DIR = DIST_DIR / "ms-playwright"
+
+
+def _instalar_chromium_portable() -> int:
+    BROWSERS_DIR.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSERS_DIR)
+    print(f"Instalando Chromium para ARCA en {BROWSERS_DIR}…", flush=True)
+    r = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        env=env,
+        cwd=str(ROOT),
+    )
+    if r.returncode != 0:
+        print(
+            "AVISO: falló playwright install chromium. "
+            "La descarga ARCA no funcionará en el .exe hasta reinstalarlo.",
+            file=sys.stderr,
+        )
+    return r.returncode
 
 
 def main() -> int:
@@ -46,6 +65,12 @@ def main() -> int:
             "el portable usará el ejemplo empaquetado o credenciales por entorno.",
             flush=True,
         )
+    _instalar_chromium_portable()
+    print(
+        f"\nListo: {DIST_DIR}\n"
+        "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n",
+        flush=True,
+    )
     return 0
 
 

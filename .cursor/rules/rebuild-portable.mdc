@@ -1,0 +1,24 @@
+---
+description: Recompilar el portable automáticamente tras cambios de código
+alwaysApply: true
+---
+
+# Build portable obligatorio
+
+Tras modificar código de la aplicación (`app.py`, `run_desktop.py`, `cuit_en_arca/`, `templates/`, `i18n.py`, `MisComprobantesDesktop.spec`, `auth_users.json`, etc.), **recompilá el ejecutable** sin que el usuario lo pida:
+
+```powershell
+python tools/portable_build.py
+```
+
+## Cuándo hacerlo
+
+- Al **terminar** una tarea que tocó archivos de la app (no solo al final de la conversación).
+- Si el build falla por `.exe` en uso, avisá que cierre `MisComprobantesAnalisis.exe` y reintentá.
+- Podés lanzarlo en **segundo plano** (`block_until_ms: 0`) si la tarea ya está explicada al usuario.
+
+## Salida esperada
+
+`dist/MisComprobantesAnalisis/MisComprobantesAnalisis.exe` (+ `_internal` + `ms-playwright`).
+
+No versionar `dist/` ni `build/` (están en `.gitignore`).

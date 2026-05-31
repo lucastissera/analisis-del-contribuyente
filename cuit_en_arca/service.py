@@ -54,6 +54,15 @@ def _resolver_fechas(
 
 
 def _requiere_playwright() -> None:
+    import sys
+
+    from cuit_en_arca.playwright_env import chromium_instalado_en_portable
+
+    if getattr(sys, "frozen", False) and not chromium_instalado_en_portable():
+        raise AutomatizacionNoDisponibleError(
+            "Chromium no está instalado junto al ejecutable (carpeta ms-playwright). "
+            "Recompilá el portable con build_windows.bat para incluir el navegador."
+        )
     if not automatizacion_cuit_arca_habilitada():
         raise AutomatizacionNoDisponibleError(
             "La descarga automática desde AFIP está deshabilitada en este servidor. "

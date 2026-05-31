@@ -120,7 +120,7 @@ Opciones: `python tools/portable_watch.py --no-initial` (no compila al arrancar)
 
 La salida del build queda en `dist\MisComprobantesAnalisis\`. El empaquetado se define en `MisComprobantesDesktop.spec`.
 
-**Nota:** en el `.exe` no se empaqueta Playwright; la sección **CUIT en ARCA** queda deshabilitada en el build de escritorio (comportamiento pensado para evitar dependencias pesadas).
+**Nota:** el portable incluye **Playwright + Chromium** en la subcarpeta `ms-playwright\` (se instala al compilar con `build_windows.bat`). Distribuí **toda** la carpeta `MisComprobantesAnalisis`, no solo el `.exe`. El ejecutable no muestra ventana de consola negra.
 
 ---
 

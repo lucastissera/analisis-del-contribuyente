@@ -11,23 +11,58 @@ Habilitar en servidor: variable de entorno CUIT_EN_ARCA_PLAYWRIGHT=1
 from __future__ import annotations
 
 import re
-import time
 from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from cuit_en_arca.certificados import CredencialesCertificado
 from cuit_en_arca.credenciales import CredencialesArca
 from cuit_en_arca.descarga import DescargaArcaResult
 from cuit_en_arca.errores import (
     AutomatizacionArcaError,
     AutomatizacionNoDisponibleError,
     CuitRepresentadoNoEncontradoError,
+    LoginArcaError,
+)
+from cuit_en_arca.stealth import (
+    CHROMIUM_ARGS,
+    STEALTH_INIT_SCRIPT,
+    USER_AGENT_CHROME,
+    clic_humano,
+    escribir_como_humano,
+    pausa_humana,
 )
 
 LOGIN_URL = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
-ESPERA_CORTA_SEC = 5
+# Tras login, la sesión permite ir directo (evita buscador del portal ARCA).
+URL_MIS_COMPROBANTES = (
+    "https://serviciosweb.afip.gob.ar/genericos/comprobantes/Default.aspx",
+    "https://serviciosweb.afip.gob.ar/generico/misComprobantes/",
+)
+ESPERA_CORTA_SEC = 3.5
 TipoComprobantes = Literal["emitidos", "recibidos", "ambos"]
+
+
+def _esperar_pagina(page, timeout: int = 42_000) -> None:
+    """AFIP rara vez alcanza networkidle; domcontentloaded + pausa breve."""
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=timeout)
+    except Exception:
+        pass
+    pausa_humana(0.35, 0.84)
+
+_FRASES_ERROR_LOGIN = (
+    "clave incorrect",
+    "cuit incorrect",
+    "datos incorrect",
+    "usuario o contraseña",
+    "usuario o contrasena",
+    "no coincide",
+    "error de autent",
+    "verifique los datos",
+    "credenciales",
+    "acceso denegado",
+    "no pudimos validar",
+)
 
 
 def _playwright_disponible() -> bool:
@@ -47,18 +82,229 @@ def _normalizar_cuit_busqueda(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
+_PATRON_MIS_COMPROBANTES = re.compile(r"mis\s*comprobantes", re.I)
+_TERMINO_BUSQUEDA_MC = "Mis Comprobantes"
+
+
+def _iter_contextos(page):
+    """Página principal e iframes (el portal ARCA a veces los usa)."""
+    yield page
+    for frame in page.frames:
+        if frame != page.main_frame:
+            yield frame
+
+
+def _locator_enlace_mis_comprobantes(root):
+    candidatos = (
+        root.get_by_role("link", name=_PATRON_MIS_COMPROBANTES),
+        root.locator("a", has_text=_PATRON_MIS_COMPROBANTES),
+        root.locator(
+            "button, [role='button'], [role='option'], li, div, span",
+            has_text=_PATRON_MIS_COMPROBANTES,
+        ),
+    )
+    for loc in candidatos:
+        try:
+            n = min(loc.count(), 15)
+            for i in range(n):
+                item = loc.nth(i)
+                if item.is_visible(timeout=800):
+                    return item
+        except Exception:
+            continue
+    return None
+
+
+def _locator_buscador_servicios(root):
+    selectores = (
+        'input[placeholder*="Buscar" i]',
+        'input[placeholder*="servicio" i]',
+        'input[id*="buscador" i]',
+        'input[name*="buscador" i]',
+        'input[type="search"]',
+        "#buscadorInput",
+        "#inputSearch",
+        ".buscador input",
+        'input[aria-label*="Buscar" i]',
+    )
+    for sel in selectores:
+        loc = root.locator(sel).first
+        try:
+            if loc.count() > 0 and loc.is_visible(timeout=1200):
+                return loc
+        except Exception:
+            continue
+    try:
+        sb = root.get_by_role("searchbox").first
+        if sb.count() > 0 and sb.is_visible(timeout=1200):
+            return sb
+    except Exception:
+        pass
+    try:
+        ph = root.get_by_placeholder(re.compile(r"buscar", re.I)).first
+        if ph.count() > 0 and ph.is_visible(timeout=1200):
+            return ph
+    except Exception:
+        pass
+    return None
+
+
+def _click_servicio_y_obtener_pagina(page, link) -> object:
+    try:
+        with page.expect_popup(timeout=20_000) as pop:
+            clic_humano(link)
+        mc = pop.value
+    except Exception:
+        clic_humano(link)
+        _esperar_pagina(page, timeout=42_000)
+        mc = page
+    _esperar_pagina(mc, timeout=42_000)
+    pausa_humana(0.56, 1.12)
+    return mc
+
+
+def _esperar_resultado_mis_comprobantes(page, intentos: int = 10):
+    for _ in range(intentos):
+        for ctx in _iter_contextos(page):
+            link = _locator_enlace_mis_comprobantes(ctx)
+            if link is not None:
+                return link
+        pausa_humana(0.35, 0.7)
+    return None
+
+
+def _buscar_mis_comprobantes_en_portal(page):
+    buscador = None
+    ctx_buscador = page
+    for ctx in _iter_contextos(page):
+        buscador = _locator_buscador_servicios(ctx)
+        if buscador is not None:
+            ctx_buscador = ctx
+            break
+    if buscador is None:
+        raise AutomatizacionArcaError(
+            "No se encontró la barra de búsqueda de servicios en ARCA."
+        )
+
+    escribir_como_humano(buscador, _TERMINO_BUSQUEDA_MC)
+    pausa_humana(0.5, 1.0)
+
+    btn_clicado = False
+    for ctx in (ctx_buscador, page):
+        try:
+            btn = ctx.locator(
+                "button[type='submit'], button .fa-search, .btn-search, "
+                "[class*='search'] button, button[aria-label*='buscar' i]"
+            ).first
+            if btn.count() > 0 and btn.is_visible(timeout=800):
+                clic_humano(btn)
+                btn_clicado = True
+                break
+        except Exception:
+            pass
+        try:
+            btn = ctx.get_by_role("button", name=re.compile(r"buscar|search", re.I)).first
+            if btn.count() > 0 and btn.is_visible(timeout=800):
+                clic_humano(btn)
+                btn_clicado = True
+                break
+        except Exception:
+            pass
+    if not btn_clicado:
+        page.keyboard.press("Enter")
+
+    pausa_humana(0.7, 1.3)
+    _esperar_pagina(page, timeout=35_000)
+
+    link = _esperar_resultado_mis_comprobantes(page)
+    if link is None:
+        raise AutomatizacionArcaError(
+            "No apareció «Mis Comprobantes» en los resultados del buscador de ARCA."
+        )
+    return _click_servicio_y_obtener_pagina(page, link)
+
+
+def _pagina_parece_mis_comprobantes(page) -> bool:
+    """Indicios de que cargó el servicio Mis Comprobantes."""
+    try:
+        if page.get_by_role("link", name=re.compile(r"emitidos|recibidos", re.I)).count():
+            return True
+        if page.locator("a", has_text=re.compile(r"emitidos|recibidos", re.I)).count():
+            return True
+        cuerpo = page.locator("body").inner_text(timeout=4000).lower()
+        return "mis comprobantes" in cuerpo or "comprobantes emitidos" in cuerpo
+    except Exception:
+        return False
+
+
+def _ir_directo_mis_comprobantes(page):
+    """Navega directo al servicio con la cookie de sesión (flujo Selenium probado)."""
+    for url in URL_MIS_COMPROBANTES:
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            _esperar_pagina(page, timeout=42_000)
+            if _pagina_parece_mis_comprobantes(page):
+                return page
+        except Exception:
+            continue
+    return None
+
+
+def _nuevo_contexto_stealth(playwright, *, headless: bool):
+    browser = playwright.chromium.launch(
+        headless=headless,
+        args=list(CHROMIUM_ARGS),
+    )
+    context = browser.new_context(
+        locale="es-AR",
+        timezone_id="America/Argentina/Buenos_Aires",
+        accept_downloads=True,
+        user_agent=USER_AGENT_CHROME,
+        viewport={"width": 1366, "height": 768},
+        device_scale_factor=1,
+        has_touch=False,
+        is_mobile=False,
+    )
+    context.add_init_script(STEALTH_INIT_SCRIPT)
+    return browser, context
+
+
+def _detectar_fallo_login(page, cuit: str) -> None:
+    pausa_humana(0.84, 1.75)
+    try:
+        cuerpo = page.locator("body").inner_text(timeout=5000).lower()
+    except Exception:
+        cuerpo = ""
+    if any(f in cuerpo for f in _FRASES_ERROR_LOGIN):
+        raise LoginArcaError(
+            f"No se pudo ingresar a ARCA con CUIT {cuit} (clave o CUIT incorrectos)."
+        )
+    url = page.url.lower()
+    if "login" in url or "auth.afip" in url:
+        pwd = page.locator('input[type="password"]')
+        try:
+            if pwd.count() and pwd.first.is_visible(timeout=2000):
+                raise LoginArcaError(
+                    f"No se pudo ingresar a ARCA con CUIT {cuit} (clave o CUIT incorrectos)."
+                )
+        except LoginArcaError:
+            raise
+        except Exception:
+            pass
+
+
 def _llenar_cuit_y_avanzar(page, cuit: str) -> None:
     cuit_llenado = False
     for sel in (
+        "input#F1\\:username",
         'input[name*="cuit" i]',
         'input[id*="cuit" i]',
-        "input#F1\\:username",
         'input[type="text"]',
     ):
         loc = page.locator(sel).first
         try:
             if loc.count() > 0 and loc.is_visible(timeout=2000):
-                loc.fill(cuit)
+                escribir_como_humano(loc, cuit)
                 cuit_llenado = True
                 break
         except Exception:
@@ -67,19 +313,25 @@ def _llenar_cuit_y_avanzar(page, cuit: str) -> None:
         raise AutomatizacionArcaError(
             "No se encontró el campo de CUIT en el login de AFIP (selector desactualizado)."
         )
-    for texto_btn in ("Siguiente", "Continuar", "Ingresar", "Aceptar"):
-        btn = page.get_by_role("button", name=re.compile(texto_btn, re.I))
-        if btn.count():
-            btn.first.click()
-            break
+    btn_sig = page.locator("input#F1\\:btnSiguiente, button#F1\\:btnSiguiente").first
+    if btn_sig.count() and btn_sig.is_visible(timeout=1500):
+        clic_humano(btn_sig)
     else:
-        page.keyboard.press("Enter")
-    page.wait_for_load_state("networkidle", timeout=60_000)
+        for texto_btn in ("Siguiente", "Continuar", "Ingresar", "Aceptar"):
+            btn = page.get_by_role("button", name=re.compile(texto_btn, re.I))
+            if btn.count():
+                clic_humano(btn.first)
+                break
+        else:
+            page.keyboard.press("Enter")
+    _esperar_pagina(page, timeout=42_000)
+    pausa_humana(0.35, 0.84)
 
 
-def _login_clave_fiscal(page, clave: str) -> None:
+def _login_clave_fiscal(page, clave: str, cuit: str) -> None:
     clave_ok = False
     for sel in (
+        "input#F1\\:password",
         'input[type="password"]',
         'input[name*="password" i]',
         'input[id*="password" i]',
@@ -87,7 +339,7 @@ def _login_clave_fiscal(page, clave: str) -> None:
         loc = page.locator(sel).first
         try:
             if loc.count() > 0 and loc.is_visible(timeout=2000):
-                loc.fill(clave)
+                escribir_como_humano(loc, clave)
                 clave_ok = True
                 break
         except Exception:
@@ -96,66 +348,43 @@ def _login_clave_fiscal(page, clave: str) -> None:
         raise AutomatizacionArcaError(
             "No se encontró el campo de clave fiscal (selector desactualizado)."
         )
-    ingresar = page.get_by_role("button", name=re.compile("ingresar|aceptar", re.I))
-    if ingresar.count():
-        ingresar.first.click()
-    else:
-        page.keyboard.press("Enter")
-    page.wait_for_load_state("networkidle", timeout=90_000)
-
-
-def _intentar_ingreso_con_certificado(page) -> None:
-    """Tras el CUIT, AFIP puede pedir certificado en lugar de clave."""
-    for patron in (
-        r"certificado",
-        r"ingresar\s+con\s+cert",
-        r"sin\s+clave",
-        r"digital",
-    ):
-        link = page.get_by_role("link", name=re.compile(patron, re.I))
-        if link.count():
-            link.first.click()
-            page.wait_for_load_state("networkidle", timeout=60_000)
-            return
-        btn = page.get_by_role("button", name=re.compile(patron, re.I))
-        if btn.count():
-            btn.first.click()
-            page.wait_for_load_state("networkidle", timeout=60_000)
-            return
-    # Con client_certificates TLS puede autenticar sin clic extra
-    time.sleep(2)
-    ing = page.get_by_role("button", name=re.compile("ingresar|aceptar|continuar", re.I))
-    if ing.count():
+    btn_ing = page.locator("input#F1\\:btnIngresar, button#F1\\:btnIngresar").first
+    if btn_ing.count():
         try:
-            ing.first.click(timeout=3000)
-            page.wait_for_load_state("networkidle", timeout=60_000)
+            if btn_ing.is_visible(timeout=1500):
+                clic_humano(btn_ing)
+            else:
+                page.keyboard.press("Enter")
         except Exception:
-            pass
+            page.keyboard.press("Enter")
+    else:
+        ingresar = page.get_by_role("button", name=re.compile("ingresar|aceptar", re.I))
+        if ingresar.count():
+            clic_humano(ingresar.first)
+        else:
+            page.keyboard.press("Enter")
+    _esperar_pagina(page, timeout=63_000)
+    _detectar_fallo_login(page, cuit)
 
 
 def _abrir_mis_comprobantes(page):
-    time.sleep(ESPERA_CORTA_SEC)
-    link = page.get_by_role("link", name=re.compile(r"mis\s*comprobantes", re.I))
-    if not link.count():
-        link = page.locator("a", has_text=re.compile(r"mis\s*comprobantes", re.I))
-    if not link.count():
-        raise AutomatizacionArcaError(
-            "No se encontró el enlace al servicio Mis Comprobantes tras el login."
-        )
-    try:
-        with page.expect_popup(timeout=15_000) as pop:
-            link.first.click()
-        mc = pop.value
-    except Exception:
-        link.first.click()
-        page.wait_for_load_state("networkidle", timeout=60_000)
-        mc = page
-    mc.wait_for_load_state("domcontentloaded", timeout=60_000)
-    return mc
+    pausa_humana(ESPERA_CORTA_SEC * 0.8, ESPERA_CORTA_SEC * 1.4)
+    _esperar_pagina(page, timeout=42_000)
+
+    mc = _ir_directo_mis_comprobantes(page)
+    if mc is not None:
+        pausa_humana(0.56, 1.12)
+        return mc
+
+    link = _esperar_resultado_mis_comprobantes(page, intentos=4)
+    if link is not None:
+        return _click_servicio_y_obtener_pagina(page, link)
+
+    return _buscar_mis_comprobantes_en_portal(page)
 
 
 def _elegir_perfil_representado(mc, cuit_repr: str) -> None:
-    time.sleep(1)
+    pausa_humana(0.6, 1.2)
     filas = mc.locator("tr, li, div[role='option'], a").filter(
         has_text=re.compile(r"\d{2}[-.]?\d{8}[-.]?\d")
     )
@@ -163,106 +392,166 @@ def _elegir_perfil_representado(mc, cuit_repr: str) -> None:
     for i in range(min(filas.count(), 200)):
         txt = filas.nth(i).inner_text()
         if cuit_repr in re.sub(r"\D", "", txt):
-            filas.nth(i).click()
+            clic_humano(filas.nth(i))
             encontrado = True
             break
     if not encontrado:
         fmt = f"{cuit_repr[:2]}-{cuit_repr[2:10]}-{cuit_repr[10]}"
         alt = mc.get_by_text(fmt, exact=False)
         if alt.count():
-            alt.first.click()
+            clic_humano(alt.first)
             encontrado = True
     if not encontrado:
         raise CuitRepresentadoNoEncontradoError(
             "Verificar datos ingresados: el CUIT representado no aparece en la lista."
         )
-    time.sleep(ESPERA_CORTA_SEC)
+    pausa_humana(ESPERA_CORTA_SEC * 0.7, ESPERA_CORTA_SEC * 1.2)
 
 
-def _ir_a_tipo_comprobantes(mc, tipo: TipoComprobantes) -> None:
-    etiqueta = "emitidos" if tipo == "emitidos" else "recibidos"
-    link = mc.get_by_role("link", name=re.compile(etiqueta, re.I))
+def _ir_a_tipo_comprobantes(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
+    etiqueta = "Emitidos" if tipo == "emitidos" else "Recibidos"
+    link = mc.get_by_role("link", name=re.compile(rf"^{etiqueta}$", re.I))
+    if not link.count():
+        link = mc.get_by_role("link", name=re.compile(etiqueta, re.I))
+    if not link.count():
+        link = mc.locator("a", has_text=re.compile(rf"^{etiqueta}$", re.I))
     if not link.count():
         link = mc.locator("a", has_text=re.compile(etiqueta, re.I))
     if link.count():
-        link.first.click()
+        clic_humano(link.first)
     else:
         tab = mc.get_by_role("tab", name=re.compile(etiqueta, re.I))
         if tab.count():
-            tab.first.click()
+            clic_humano(tab.first)
         else:
             raise AutomatizacionArcaError(
-                f"No se encontró la sección {etiqueta.capitalize()} en Mis Comprobantes."
+                f"No se encontró la sección {etiqueta} en Mis Comprobantes."
             )
-    mc.wait_for_load_state("networkidle", timeout=60_000)
+    _esperar_pagina(mc, timeout=42_000)
+    pausa_humana(0.35, 0.7)
+
+
+def _llenar_campo_fecha(mc, selectores: tuple[str, ...], valor: str) -> bool:
+    for sel in selectores:
+        loc = mc.locator(sel).first
+        try:
+            if loc.count() > 0 and loc.is_visible(timeout=1500):
+                escribir_como_humano(loc, valor)
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _aplicar_filtro_fechas_y_buscar(mc, fd: str, fh: str) -> None:
-    inputs_date = mc.locator('input[type="text"], input:not([type="hidden"])')
-    n_inp = min(inputs_date.count(), 24)
     filled = 0
-    for i in range(n_inp):
-        el = inputs_date.nth(i)
-        try:
-            if not el.is_visible():
+    if _llenar_campo_fecha(
+        mc,
+        (
+            "input[id*='fechaEmisionDesde' i]",
+            "input[name*='fechaDesde' i]",
+            "input[name*='fechaEmisionDesde' i]",
+        ),
+        fd,
+    ):
+        filled += 1
+    if _llenar_campo_fecha(
+        mc,
+        (
+            "input[id*='fechaEmisionHasta' i]",
+            "input[name*='fechaHasta' i]",
+            "input[name*='fechaEmisionHasta' i]",
+        ),
+        fh,
+    ):
+        filled += 1
+
+    if filled < 2:
+        inputs_date = mc.locator('input[type="text"], input:not([type="hidden"])')
+        n_inp = min(inputs_date.count(), 24)
+        for i in range(n_inp):
+            el = inputs_date.nth(i)
+            try:
+                if not el.is_visible():
+                    continue
+                ph = (el.get_attribute("placeholder") or "").lower()
+                nm = (el.get_attribute("name") or "").lower()
+                el_id = (el.get_attribute("id") or "").lower()
+                if filled == 0 and (
+                    "desde" in ph
+                    or "inicio" in ph
+                    or "desde" in nm
+                    or "desde" in el_id
+                    or "emision" in nm
+                ):
+                    escribir_como_humano(el, fd)
+                    filled += 1
+                elif filled == 1 and (
+                    "hasta" in ph or "fin" in ph or "hasta" in nm or "hasta" in el_id
+                ):
+                    escribir_como_humano(el, fh)
+                    filled += 1
+            except Exception:
                 continue
-            ph = (el.get_attribute("placeholder") or "").lower()
-            nm = (el.get_attribute("name") or "").lower()
-            if filled == 0 and (
-                "desde" in ph or "inicio" in ph or "fecha" in nm or "emision" in nm
-            ):
-                el.fill(fd)
-                filled += 1
-            elif filled == 1 and ("hasta" in ph or "fin" in ph):
-                el.fill(fh)
-                filled += 1
-        except Exception:
-            continue
     if filled < 2:
         idx = 0
+        inputs_date = mc.locator('input[type="text"], input:not([type="hidden"])')
+        n_inp = min(inputs_date.count(), 24)
         for i in range(n_inp):
             el = inputs_date.nth(i)
             try:
                 if not el.is_visible():
                     continue
                 if idx == 0:
-                    el.fill(fd)
+                    escribir_como_humano(el, fd)
                     idx += 1
                 elif idx == 1:
-                    el.fill(fh)
+                    escribir_como_humano(el, fh)
                     idx += 1
             except Exception:
                 continue
 
-    buscar = mc.get_by_role("button", name=re.compile("buscar|consultar|aplicar", re.I))
-    if not buscar.count():
-        buscar = mc.locator("button, input[type='submit']").filter(
-            has_text=re.compile("buscar|consultar", re.I)
-        )
-    if buscar.count():
-        buscar.first.click()
-    mc.wait_for_load_state("networkidle", timeout=120_000)
+    buscar = mc.locator(
+        "input[value='Buscar'], input[value='BUSCAR'], button:has-text('Buscar')"
+    ).first
+    if buscar.count() and buscar.is_visible(timeout=1500):
+        clic_humano(buscar)
+    else:
+        btn = mc.get_by_role("button", name=re.compile("buscar|consultar|aplicar", re.I))
+        if not btn.count():
+            btn = mc.locator("button, input[type='submit']").filter(
+                has_text=re.compile("buscar|consultar", re.I)
+            )
+        if btn.count():
+            clic_humano(btn.first)
+    _esperar_pagina(mc, timeout=84_000)
+    pausa_humana(0.56, 1.05)
 
 
 def _descargar_excel_o_csv(mc) -> tuple[bytes, str]:
     with mc.expect_download(timeout=120_000) as dl_info:
-        excel_btn = mc.get_by_role("button", name=re.compile("excel|xlsx", re.I))
-        if not excel_btn.count():
-            excel_btn = mc.locator("a, button").filter(
-                has_text=re.compile(r"excel|\.xlsx", re.I)
-            )
-        if excel_btn.count():
-            excel_btn.first.click()
+        excel_btn = mc.locator(
+            "a[href*='Excel' i], a:has-text('Excel'), "
+            "a:has-text('Descargar'), input[value*='Excel' i]"
+        ).first
+        if excel_btn.count() and excel_btn.is_visible(timeout=2000):
+            clic_humano(excel_btn)
         else:
-            csv_btn = mc.get_by_role("button", name=re.compile("csv", re.I))
-            if not csv_btn.count():
-                csv_btn = mc.locator("a, button").filter(has_text=re.compile("csv", re.I))
-            if csv_btn.count():
-                csv_btn.first.click()
-            else:
-                raise AutomatizacionArcaError(
-                    "No se encontró botón de descarga Excel ni CSV tras la búsqueda."
+            alt = mc.get_by_role("button", name=re.compile("excel|xlsx", re.I))
+            if not alt.count():
+                alt = mc.locator("a, button").filter(
+                    has_text=re.compile(r"excel|\.xlsx", re.I)
                 )
+            if alt.count():
+                clic_humano(alt.first)
+            else:
+                csv_btn = mc.locator("a, button").filter(has_text=re.compile("csv", re.I))
+                if csv_btn.count():
+                    clic_humano(csv_btn.first)
+                else:
+                    raise AutomatizacionArcaError(
+                        "No se encontró botón de descarga Excel ni CSV tras la búsqueda."
+                    )
     download = dl_info.value
     path = download.path()
     if path is None:
@@ -295,6 +584,7 @@ def _flujo_post_login(
         data_e, nom_e = _descargar_tipo_en_sesion(
             mc, cuit_repr, fd, fh, "emitidos", elegir_perfil=True
         )
+        pausa_humana(0.7, 1.4)
         data_r, nom_r = _descargar_tipo_en_sesion(
             mc, cuit_repr, fd, fh, "recibidos", elegir_perfil=False
         )
@@ -327,79 +617,19 @@ def ejecutar_descarga_mis_comprobantes(
     browser = None
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(
-                locale="es-AR",
-                timezone_id="America/Argentina/Buenos_Aires",
-                accept_downloads=True,
-            )
+            browser, context = _nuevo_contexto_stealth(p, headless=headless)
             page = context.new_page()
             page.set_default_timeout(60_000)
 
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
+            pausa_humana(0.56, 1.26)
             _llenar_cuit_y_avanzar(page, cred.cuit_login)
-            _login_clave_fiscal(page, cred.clave_fiscal)
+            _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
             mc = _abrir_mis_comprobantes(page)
             return _flujo_post_login(mc, cuit_repr, fd, fh, tipo)
 
-    except CuitRepresentadoNoEncontradoError:
+    except LoginArcaError:
         raise
-    except PlaywrightTimeout as exc:
-        raise AutomatizacionArcaError(
-            "Tiempo de espera agotado en AFIP (sitio lento o página distinta a la esperada)."
-        ) from exc
-    except AutomatizacionArcaError:
-        raise
-    except Exception as exc:
-        raise AutomatizacionArcaError(f"Error en automatización: {exc}") from exc
-    finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                pass
-
-
-def ejecutar_descarga_mis_comprobantes_certificado(
-    cred: CredencialesCertificado,
-    fecha_desde: date,
-    fecha_hasta: date,
-    *,
-    headless: bool = True,
-    tipo: TipoComprobantes = "emitidos",
-) -> DescargaArcaResult:
-    if not _playwright_disponible():
-        raise AutomatizacionNoDisponibleError(
-            "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
-        )
-
-    from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    from playwright.sync_api import sync_playwright
-
-    fd, fh = _formatear_rango_afip(fecha_desde, fecha_hasta)
-    cuit_repr = _normalizar_cuit_busqueda(cred.cuit_representado)
-
-    browser = None
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
-            context = browser.new_context(
-                locale="es-AR",
-                timezone_id="America/Argentina/Buenos_Aires",
-                accept_downloads=True,
-                client_certificates=list(cred.client_certificates),
-            )
-            page = context.new_page()
-            page.set_default_timeout(60_000)
-
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            _llenar_cuit_y_avanzar(page, cred.cuit_login)
-            _intentar_ingreso_con_certificado(page)
-            page.wait_for_load_state("networkidle", timeout=90_000)
-            time.sleep(ESPERA_CORTA_SEC)
-            mc = _abrir_mis_comprobantes(page)
-            return _flujo_post_login(mc, cuit_repr, fd, fh, tipo)
-
     except CuitRepresentadoNoEncontradoError:
         raise
     except PlaywrightTimeout as exc:

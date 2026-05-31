@@ -28,9 +28,18 @@ Dejá abierto en una terminal (recompila ~3,5 s después del último guardado):
 watch_portable.bat
 ```
 
-### Hook de Cursor
+### Hook de Cursor (automático)
 
-El proyecto incluye `.cursor/hooks.json`: al **terminar** una sesión del agente (`stop`), se lanza el build portable en segundo plano. Si el `.exe` está en ejecución, cerralo antes del build para evitar archivos bloqueados.
+El proyecto incluye `.cursor/hooks.json`:
+
+- **`afterFileEdit`**: tras guardar cambios relevantes (`.py`, `templates/`, etc.), programa un rebuild con debounce (~3,5 s) vía `tools/hook_schedule_build.py`.
+- **`stop`**: al terminar el agente, lanza un rebuild inmediato.
+
+Log del hook: `build/hook-rebuild.log`. Si el `.exe` está en ejecución, cerralo antes del build para evitar archivos bloqueados.
+
+### Regla del agente
+
+`.cursor/rules/rebuild-portable.mdc` obliga a recompilar el portable al finalizar cualquier tarea con cambios de código, sin pedírselo al usuario.
 
 ### Qué no versionar
 
