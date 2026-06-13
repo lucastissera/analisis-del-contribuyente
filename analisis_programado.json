@@ -1,0 +1,24 @@
+{
+  "activo": false,
+  "dia_semana": 0,
+  "hora": 9,
+  "minuto": 0,
+  "sistemas": [
+    "mis_comprobantes"
+  ],
+  "carpeta_destino": "D:/Temp/test-ap",
+  "filas": [
+    {
+      "fila_excel": 1,
+      "cuit_login": "20364326743",
+      "clave_fiscal": "secret",
+      "cuit_representado": "20364326743",
+      "fechas_mis_comprobantes": "",
+      "fecha_dfe_desde": "",
+      "fecha_dfe_hasta": "",
+      "ejercicio_nuestra_parte": ""
+    }
+  ],
+  "ultima_ejecucion": null,
+  "ultimo_resultado": null
+}
