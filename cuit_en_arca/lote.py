@@ -25,6 +25,16 @@ from cuit_en_arca.validacion import parsear_fecha_argentina
 
 OnProgresoLote = Callable[[int, int, str, bool], None]
 OnPasoLote = Callable[[str, str], None]
+OnLogLote = Callable[[str], None]
+
+
+def _log_lote(on_log: OnLogLote | None, msg: str) -> None:
+    if on_log is None:
+        return
+    try:
+        on_log(msg)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -93,6 +103,7 @@ def ejecutar_lote_arca(
     errores_planilla: list[str] | None = None,
     on_progreso: OnProgresoLote | None = None,
     on_paso: OnPasoLote | None = None,
+    on_log: OnLogLote | None = None,
     on_reiniciar_pasos: Callable[[], None] | None = None,
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
     carpeta_destino: str | Path | None = None,
@@ -128,6 +139,7 @@ def ejecutar_lote_arca(
     if carpeta is not None:
         dir_proc = carpeta / SUBCARPETA_PROCESADOS
         dir_proc.mkdir(exist_ok=True)
+        _log_lote(on_log, f"Carpeta de destino: {carpeta}")
     # Filas inválidas (CUIT/clave/fechas): se reportan, no frenan el lote.
     ingresos_fallidos: list[str] = list(errores_planilla or [])
     advertencias: list[str] = []
@@ -136,6 +148,10 @@ def ejecutar_lote_arca(
     headless = _headless_desde_env() if headless is None else headless
 
     from cuit_en_arca.cancelacion import verificar_cancelacion
+
+    _log_lote(on_log, f"Lote: {total} fila(s) a procesar.")
+    if errores_planilla:
+        _log_lote(on_log, f"Planilla: {len(errores_planilla)} fila(s) con error de formato.")
 
     for i, fila in enumerate(filas):
         if job_id:
@@ -155,6 +171,11 @@ def ejecutar_lote_arca(
                 f"CUIT {fila.cuit_representado} (fila {fila.fila_excel})…",
                 False,
             )
+        _log_lote(
+            on_log,
+            f"— Fila {i + 1}/{total} (Excel {fila.fila_excel}): "
+            f"CUIT {fila.cuit_representado} · {fila.fecha_desde} – {fila.fecha_hasta} —",
+        )
 
         cred = CredencialesArca(
             cuit_login=fila.cuit_login,
@@ -172,11 +193,13 @@ def ejecutar_lote_arca(
                 headless=headless,
                 tipo="ambos",
                 on_paso=on_paso,
+                on_log=on_log,
             )
         except LoginArcaError as exc:
             ingresos_fallidos.append(
                 f"CUIT ingreso {fila.cuit_login} (fila {fila.fila_excel}): {exc}"
             )
+            _log_lote(on_log, f"Ingreso fallido (fila {fila.fila_excel}): {exc}")
             if on_progreso:
                 on_progreso(i + 1, total, f"Fila {fila.fila_excel}: ingreso fallido", True)
             continue
@@ -184,6 +207,7 @@ def ejecutar_lote_arca(
             advertencias.append(
                 f"CUIT {fila.cuit_representado} (fila {fila.fila_excel}): {exc}"
             )
+            _log_lote(on_log, f"Error en fila {fila.fila_excel}: {exc}")
             if on_progreso:
                 on_progreso(i + 1, total, f"Fila {fila.fila_excel}: error", True)
             continue
@@ -198,6 +222,7 @@ def ejecutar_lote_arca(
             nuevos.append((nombre_e, data_e, True))
             if carpeta is not None:
                 (carpeta / nombre_e).write_bytes(data_e)
+            _log_lote(on_log, f"  • Emitidos guardado: {nombre_e}")
         if resultado.recibidos:
             data_r, nom_r = resultado.recibidos
             nombre_r = _nombre_seguro(cuit, "recibidos", nom_r)
@@ -205,6 +230,7 @@ def ejecutar_lote_arca(
             nuevos.append((nombre_r, data_r, False))
             if carpeta is not None:
                 (carpeta / nombre_r).write_bytes(data_r)
+            _log_lote(on_log, f"  • Recibidos guardado: {nombre_r}")
         if resultado.aviso_parcial:
             advertencias.append(
                 f"CUIT {cuit} (fila {fila.fila_excel}): {resultado.aviso_parcial}"
@@ -216,6 +242,7 @@ def ejecutar_lote_arca(
         if nuevos:
             if on_paso:
                 on_paso("procesamiento", "en_curso")
+            _log_lote(on_log, "Procesando archivos descargados…")
             fallo_proc = False
             for nombre, datos, es_emit in nuevos:
                 try:
@@ -231,6 +258,7 @@ def ejecutar_lote_arca(
                     procesados[nombre_proc] = excel_proc
                     if dir_proc is not None:
                         (dir_proc / nombre_proc).write_bytes(excel_proc)
+                    _log_lote(on_log, f"  • Procesado: {nombre_proc}")
                     resumen_cuit.agregar(
                         cuit,
                         emitidos=es_emit,
@@ -248,6 +276,10 @@ def ejecutar_lote_arca(
                     )
             if on_paso:
                 on_paso("procesamiento", "error" if fallo_proc else "ok")
+            if fallo_proc:
+                _log_lote(on_log, "Procesamiento completado con advertencias.")
+            else:
+                _log_lote(on_log, "Procesamiento completado.")
 
         if on_progreso:
             on_progreso(
@@ -256,6 +288,7 @@ def ejecutar_lote_arca(
                 f"Fila {fila.fila_excel} completada",
                 True,
             )
+        _log_lote(on_log, f"Fila {fila.fila_excel} completada.")
 
     lineas_errores = []
     if ingresos_fallidos:
@@ -295,6 +328,7 @@ def ejecutar_lote_arca(
         if extra_raiz.get(NOMBRE_RESUMEN):
             (carpeta / NOMBRE_RESUMEN).write_bytes(extra_raiz[NOMBRE_RESUMEN])
         (carpeta / NOMBRE_ERRORES).write_text(texto_errores, encoding="utf-8")
+        _log_lote(on_log, f"Listo. Archivos en {carpeta}")
         return ResultadoLoteArca(
             contenido=b"",
             nombre_archivo=carpeta.name,
@@ -326,6 +360,7 @@ def ejecutar_lote_planilla_arca(
     *,
     on_progreso: OnProgresoLote | None = None,
     on_paso: OnPasoLote | None = None,
+    on_log: OnLogLote | None = None,
     on_reiniciar_pasos: Callable[[], None] | None = None,
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
     carpeta_destino: str | Path | None = None,
@@ -336,6 +371,7 @@ def ejecutar_lote_planilla_arca(
         errores_planilla=errores,
         on_progreso=on_progreso,
         on_paso=on_paso,
+        on_log=on_log,
         on_reiniciar_pasos=on_reiniciar_pasos,
         mapa_imputaciones=mapa_imputaciones,
         carpeta_destino=carpeta_destino,

@@ -83,6 +83,7 @@ from cuit_en_arca.planilla_lote import (
 )
 from cuit_en_arca.progreso_lote import (
     agregar_archivo_lote,
+    callback_log_lote,
     callback_paso,
     callback_progreso,
     crear_job,
@@ -164,6 +165,23 @@ DESCARGAS: dict[str, tuple[bytes, str, str]] = {}
 from cuit_en_arca.entrega_web import init_descargas  # noqa: E402
 
 init_descargas(DESCARGAS)
+
+
+def _bootstrap_analisis_programado_scheduler() -> None:
+    """Gunicorn/Render no ejecutan ``if __name__ == '__main__'``; el hilo va acá."""
+    try:
+        from cuit_en_arca.analisis_programado import iniciar_scheduler
+
+        iniciar_scheduler()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "No se pudo iniciar el scheduler de análisis programado"
+        )
+
+
+_bootstrap_analisis_programado_scheduler()
 
 # Inactividad: sin peticiones al servidor durante este tiempo → cerrar sesión.
 # Cada petición (refresco, nueva pestaña con la misma app, navegación) renueva el plazo.
@@ -950,19 +968,24 @@ def arca_descarga_lote():
 
     reset_cancelacion(job_id)
     crear_job(job_id, len(filas))
+    from cuit_en_arca.entrega_web import envolver_log_con_entrega
+
     on_prog = _wrap_progreso_con_entrega(callback_progreso(job_id), entrega)
     on_paso = callback_paso(job_id)
+    on_log = envolver_log_con_entrega(callback_log_lote(job_id), entrega)
 
     def _on_reiniciar() -> None:
         reiniciar_pasos(job_id)
 
     def _worker() -> None:
         try:
+            on_log(f"Iniciando descarga de Mis Comprobantes ({len(filas)} fila(s))…")
             resultado = ejecutar_lote_arca(
                 filas,
                 errores_planilla=_errores_planilla,
                 on_progreso=on_prog,
                 on_paso=on_paso,
+                on_log=on_log,
                 on_reiniciar_pasos=_on_reiniciar,
                 mapa_imputaciones=mapa_imputaciones,
                 carpeta_destino=carpeta_destino,
@@ -1446,9 +1469,12 @@ def analisis_programado_plantilla():
 
 @app.get("/analisis-programado/estado")
 def analisis_programado_estado():
-    from cuit_en_arca.analisis_programado import cargar_config
+    from cuit_en_arca.analisis_programado import cargar_config, scheduler_estado
 
-    return jsonify(cargar_config().a_dict_publico())
+    cfg = cargar_config()
+    payload = cfg.a_dict_publico()
+    payload["scheduler"] = scheduler_estado(cfg)
+    return jsonify(payload)
 
 
 @app.get("/analisis-programado/ejecucion")
@@ -1552,17 +1578,26 @@ def analisis_programado_guardar():
 def cancelar_descarga():
     from cuit_en_arca.browser_desktop import cerrar_navegador_desktop
     from cuit_en_arca.cancelacion import solicitar_cancelacion, solicitar_cancelacion_ap
+    from cuit_en_arca.progreso_analisis_programado import marcar_cancelado_ap
 
     payload = request.get_json(silent=True) or {}
     tipo = (payload.get("tipo") or request.form.get("tipo") or "").strip()
     job_id = (payload.get("job_id") or request.form.get("job_id") or "").strip()
+    lg = normalize_lang(session.get("lang"))
+    msg = tr(lg, "msg_descarga_cancelada")
 
     if tipo == "ap":
         solicitar_cancelacion_ap()
+        marcar_cancelado_ap(msg)
     elif job_id:
         solicitar_cancelacion(job_id)
+        if tipo == "dfe":
+            marcar_cancelado_dfe(job_id, msg)
+        elif tipo == "np":
+            marcar_cancelado_np(job_id, msg)
+        else:
+            marcar_cancelado(job_id, msg)
     else:
-        lg = normalize_lang(session.get("lang"))
         return jsonify({"error": tr(lg, "err_arca_unexpected", exc="sin job")}), 400
 
     try:

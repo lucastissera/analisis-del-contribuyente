@@ -22,6 +22,9 @@ def log_indica_archivo_nuevo(texto: str) -> bool:
         or "guardada en pdf" in t
         or "pdf de pantalla" in t
         or " pantalla guardada" in t
+        or "emitidos guardado" in t
+        or "recibidos guardado" in t
+        or "procesado:" in t
     )
 
 

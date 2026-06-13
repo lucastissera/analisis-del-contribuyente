@@ -117,6 +117,8 @@ def marcar_ok_ap(*, carpeta: str, mensaje: str, fallos: list[str] | None = None)
     with _lock:
         if _estado is None:
             return
+        if _estado.estado == "cancelado":
+            return
         for paso in _estado.pasos:
             if paso["estado"] == "pendiente":
                 paso["estado"] = "ok" if paso["clave"] == "finalizado" else paso["estado"]
@@ -134,6 +136,8 @@ def marcar_error_ap(error: str) -> None:
     with _lock:
         if _estado is None:
             _estado = EstadoEjecucionAP(estado="error", error=error, mensaje=error)
+            return
+        if _estado.estado == "cancelado":
             return
         for paso in _estado.pasos:
             if paso["estado"] in ("pendiente", "en_curso"):

@@ -375,7 +375,8 @@
         fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
         fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
         cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
-        limpiarConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }}
+        limpiarConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+        msgCancelado: {{ t('msg_descarga_cancelada')|tojson }}
       };
 
       (function filas() {
@@ -425,6 +426,14 @@
         var okBox = document.getElementById("resultado-ok");
         var errProg = document.getElementById("error-progreso");
         var timer = null;
+        var pollActivo = false;
+        function detenerPollNp() {
+          pollActivo = false;
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+        }
         var carpetaApi = McElegirCarpeta.enlazar({
           inputId: "np-carpeta-destino",
           labelId: "np-carpeta-label",
@@ -501,6 +510,7 @@
         }
 
         function poll(jobId) {
+          if (!pollActivo) return;
           fetch("{{ url_for('np_estado', job_id='__ID__') }}".replace("__ID__", jobId), {
             credentials: "same-origin",
           })
@@ -509,6 +519,7 @@
               return r.json();
             })
             .then(function (st) {
+              if (!pollActivo) return;
               if (st.error === "job_not_found") return;
               McCarpetaWebSync.syncDesdeEstado(st, jobId);
               barra.style.width = (st.porcentaje || 0) + "%";
@@ -559,6 +570,8 @@
                 return;
               }
               if (res.data.job_id) {
+                pollActivo = true;
+                McCancelarDescarga.setDetenerPoll(detenerPollNp);
                 timer = setInterval(function () { poll(res.data.job_id); }, 1200);
                 poll(res.data.job_id);
               }
@@ -607,17 +620,26 @@
 
         McCancelarDescarga.enlazar(document.getElementById("np-btn-cancelar"), {
           confirm: I18N.cancelarConfirm,
+          submitBtn: btn,
+          submitLabel: "{{ t('np_submit') }}",
+          progreso: prog,
+          errProg: errProg,
+          okBox: okBox,
+          mensajeCancelado: I18N.msgCancelado,
         });
 
         document.getElementById("np-btn-limpiar-datos").addEventListener("click", function () {
           McLimpiarDatos({
             confirm: I18N.limpiarConfirm,
+            mensajeCancelado: I18N.msgCancelado,
             formId: "form-np",
             fileNames: ["np_excel"],
             manualContainerId: "filas-manual",
             carpetaInputId: "np-carpeta-destino",
             carpetaLabelId: "np-carpeta-label",
             onListo: function () {
+              btn.disabled = false;
+              btn.textContent = "{{ t('np_submit') }}";
               prog.style.display = "none";
               okBox.style.display = "none";
               errProg.style.display = "none";
@@ -627,6 +649,8 @@
         });
 
         {% if np_job_id %}
+        pollActivo = true;
+        McCancelarDescarga.setDetenerPoll(detenerPollNp);
         McCancelarDescarga.registrar("np", "{{ np_job_id }}");
         timer = setInterval(function () { poll("{{ np_job_id }}"); }, 1200);
         poll("{{ np_job_id }}");

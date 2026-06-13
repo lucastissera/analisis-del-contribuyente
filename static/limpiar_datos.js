@@ -3,6 +3,12 @@ window.McLimpiarDatos = function (opts) {
   var confirmMsg = opts.confirm || "¿Borrar los datos cargados?";
   if (!confirm(confirmMsg)) return;
 
+  if (window.McCancelarDescarga && McCancelarDescarga.activo()) {
+    McCancelarDescarga.abortarActivo({
+      mensaje: opts.mensajeCancelado,
+    });
+  }
+
   var form = opts.formId ? document.getElementById(opts.formId) : null;
 
   if (typeof opts.onLimpiar === "function") {

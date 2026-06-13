@@ -378,7 +378,8 @@
         fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
         fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
         cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
-        limpiarConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }}
+        limpiarConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+        msgCancelado: {{ t('msg_descarga_cancelada')|tojson }}
       };
 
       (function filas() {
@@ -429,6 +430,14 @@
         var okBox = document.getElementById("resultado-ok");
         var errProg = document.getElementById("error-progreso");
         var timer = null;
+        var pollActivo = false;
+        function detenerPollDfe() {
+          pollActivo = false;
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+        }
         var carpetaApi = McElegirCarpeta.enlazar({
           inputId: "dfe-carpeta-destino",
           labelId: "dfe-carpeta-label",
@@ -507,11 +516,13 @@
         }
 
         function poll(jobId) {
+          if (!pollActivo) return;
           fetch("{{ url_for('dfe_estado', job_id='__ID__') }}".replace("__ID__", jobId), {
             credentials: "same-origin",
           })
             .then(function (r) { return r.json(); })
             .then(function (st) {
+              if (!pollActivo) return;
               if (st.error === "job_not_found") return;
               McCarpetaWebSync.syncDesdeEstado(st, jobId);
               barra.style.width = (st.porcentaje || 0) + "%";
@@ -562,6 +573,8 @@
                 return;
               }
               if (res.data.job_id) {
+                pollActivo = true;
+                McCancelarDescarga.setDetenerPoll(detenerPollDfe);
                 timer = setInterval(function () { poll(res.data.job_id); }, 1200);
                 poll(res.data.job_id);
               }
@@ -610,17 +623,26 @@
 
         McCancelarDescarga.enlazar(document.getElementById("dfe-btn-cancelar"), {
           confirm: I18N.cancelarConfirm,
+          submitBtn: btn,
+          submitLabel: "{{ t('dfe_submit') }}",
+          progreso: prog,
+          errProg: errProg,
+          okBox: okBox,
+          mensajeCancelado: I18N.msgCancelado,
         });
 
         document.getElementById("dfe-btn-limpiar-datos").addEventListener("click", function () {
           McLimpiarDatos({
             confirm: I18N.limpiarConfirm,
+            mensajeCancelado: I18N.msgCancelado,
             formId: "form-dfe",
             fileNames: ["dfe_excel"],
             manualContainerId: "filas-manual",
             carpetaInputId: "dfe-carpeta-destino",
             carpetaLabelId: "dfe-carpeta-label",
             onListo: function () {
+              btn.disabled = false;
+              btn.textContent = "{{ t('dfe_submit') }}";
               prog.style.display = "none";
               okBox.style.display = "none";
               errProg.style.display = "none";
@@ -630,6 +652,8 @@
         });
 
         {% if dfe_job_id %}
+        pollActivo = true;
+        McCancelarDescarga.setDetenerPoll(detenerPollDfe);
         McCancelarDescarga.registrar("dfe", "{{ dfe_job_id }}");
         timer = setInterval(function () { poll("{{ dfe_job_id }}"); }, 1200);
         poll("{{ dfe_job_id }}");

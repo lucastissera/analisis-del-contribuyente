@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import sys
 import threading
 import time
@@ -11,8 +13,11 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+_LOG = logging.getLogger(__name__)
+
 _lock = threading.Lock()
 _ejecutando = False
+_scheduler_iniciado = False
 
 SISTEMAS_VALIDOS = frozenset({"mis_comprobantes", "dfe", "nuestra_parte"})
 
@@ -30,6 +35,11 @@ DIAS_SEMANA = (
 def _directorio_datos() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
+    # Web (Render/gunicorn): misma raíz que carpeta_ap_servidor (temp/aic_ap_data).
+    if os.environ.get("CUIT_EN_ARCA_UI", "").strip() == "1":
+        from cuit_en_arca.entrega_web import carpeta_ap_servidor
+
+        return carpeta_ap_servidor().parent
     return Path(__file__).resolve().parent.parent
 
 
@@ -104,6 +114,7 @@ class ConfigAnalisisProgramado:
         d["filas"] = filas_pub
         d["total_filas"] = len(filas_pub)
         d["programacion_lista"] = _config_completa(self)
+        d["scheduler"] = scheduler_estado(self)
         return d
 
 
@@ -138,11 +149,23 @@ def guardar_config(cfg: ConfigAnalisisProgramado) -> None:
 
 
 def limpiar_cache_programacion(cfg: ConfigAnalisisProgramado | None = None) -> ConfigAnalisisProgramado:
-    """Desactiva la programación automática y borra el estado de la última ejecución."""
+    """Desactiva la programación tras cancelación/error (sin borrar datos cargados)."""
     cfg = cfg or cargar_config()
     cfg.activo = False
-    cfg.ultima_ejecucion = None
-    cfg.ultimo_resultado = None
+    guardar_config(cfg)
+    return cfg
+
+
+def pausar_programacion_tras_ejecucion(
+    cfg: ConfigAnalisisProgramado,
+    *,
+    ultimo_resultado: dict[str, Any] | None = None,
+) -> ConfigAnalisisProgramado:
+    """Marca la ejecución como hecha y pausa hasta que el usuario guarde de nuevo."""
+    cfg.activo = False
+    cfg.ultima_ejecucion = datetime.now().isoformat(timespec="seconds")
+    if ultimo_resultado is not None:
+        cfg.ultimo_resultado = ultimo_resultado
     guardar_config(cfg)
     return cfg
 
@@ -301,6 +324,7 @@ def ejecutar_analisis_programado(
                         carpeta_destino=base / "Mis Comprobantes",
                         headless=headless,
                         modo_ap=True,
+                        on_log=log,
                     )
                     resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
                     resultado["sistemas"]["mis_comprobantes"]["fallos"] = list(res.ingresos_fallidos)
@@ -421,7 +445,14 @@ def ejecutar_analisis_programado(
             mensaje=resultado["mensaje"],
             fallos=resultado["fallos"],
         )
-        limpiar_cache_programacion(cfg)
+        pausar_programacion_tras_ejecucion(
+            cfg,
+            ultimo_resultado={
+                "ok": resultado["ok"],
+                "mensaje": resultado["mensaje"],
+                "carpeta": resultado["carpeta"],
+            },
+        )
         return resultado
 
     except CancelacionUsuarioError as exc:
@@ -474,9 +505,15 @@ def _loop_scheduler() -> None:
         try:
             cfg = cargar_config()
             if debe_ejecutar_ahora(cfg):
+                _LOG.info(
+                    "Disparando análisis programado (%s %02d:%02d)",
+                    DIAS_SEMANA[cfg.dia_semana][1],
+                    cfg.hora,
+                    cfg.minuto,
+                )
                 ejecutar_analisis_programado(cfg)
         except Exception:
-            pass
+            _LOG.exception("Error en el scheduler de análisis programado")
         try:
             espera = _segundos_espera_scheduler(cfg or cargar_config())
         except Exception:
@@ -484,6 +521,27 @@ def _loop_scheduler() -> None:
         time.sleep(espera)
 
 
+def scheduler_estado(cfg: ConfigAnalisisProgramado | None = None) -> dict[str, Any]:
+    """Diagnóstico del scheduler (útil en web)."""
+    cfg = cfg or cargar_config()
+    ahora = datetime.now()
+    dia_nombre = DIAS_SEMANA[cfg.dia_semana][1] if 0 <= cfg.dia_semana <= 6 else "?"
+    return {
+        "hilo_iniciado": _scheduler_iniciado,
+        "config_activa": cfg.activo,
+        "config_completa": _config_completa(cfg),
+        "debe_ejecutar_ahora": debe_ejecutar_ahora(cfg, ahora),
+        "ahora_servidor": ahora.isoformat(timespec="seconds"),
+        "programado": f"{dia_nombre} {cfg.hora:02d}:{cfg.minuto:02d}",
+        "ultima_ejecucion": cfg.ultima_ejecucion,
+    }
+
+
 def iniciar_scheduler() -> None:
+    global _scheduler_iniciado
+    if _scheduler_iniciado:
+        return
+    _scheduler_iniciado = True
     t = threading.Thread(target=_loop_scheduler, daemon=True, name="analisis-programado")
     t.start()
+    _LOG.info("Scheduler de análisis programado iniciado")

@@ -503,6 +503,19 @@
         background: #dc2626;
         color: #fff;
       }
+      .arca-progreso-log {
+        margin-top: 0.8rem;
+        max-height: 260px;
+        overflow: auto;
+        background: var(--bg-body);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 0.6rem 0.8rem;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        line-height: 1.4;
+      }
       @keyframes paso-girar {
         to {
           transform: rotate(360deg);
@@ -1100,6 +1113,8 @@
               <p id="arca-progreso-detalle" class="arca-progreso-detalle">{{ t('arca_lote_working') }}</p>
               <p id="arca-progreso-eta" class="arca-progreso-eta">{{ t('arca_lote_progress_eta_unknown') }}</p>
               <ul id="arca-progreso-pasos" class="arca-progreso-pasos"></ul>
+              <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('arca_lote_log_titulo') }}</h2>
+              <div class="arca-progreso-log" id="arca-progreso-log"></div>
             </div>
 
             <div id="arca-resultado"></div>
@@ -2013,6 +2028,11 @@
         var btn = document.getElementById("btn-arca-lote");
         var barra = progreso && progreso.querySelector(".arca-progreso-barra");
         var pasosUl = document.getElementById("arca-progreso-pasos");
+        var logBox = document.getElementById("arca-progreso-log");
+        var pollActivo = false;
+        function detenerPollArca() {
+          pollActivo = false;
+        }
         var carpetaApi = McElegirCarpeta.enlazar({
           inputId: "arca-carpeta-destino",
           labelId: "arca-carpeta-label",
@@ -2107,6 +2127,10 @@
             eta.textContent = plantilla.replace("{t}", fmtTiempo(st.eta_seg));
           }
           mostrarPasos(st.pasos);
+          if (logBox && st.log && st.log.length) {
+            logBox.textContent = st.log.join("\n");
+            logBox.scrollTop = logBox.scrollHeight;
+          }
         }
 
         function mostrarOk(st) {
@@ -2158,11 +2182,13 @@
         }
 
         function pollJob(jobId) {
+          if (!pollActivo) return;
           fetch("/arca-lote-estado/" + jobId, { credentials: "same-origin" })
             .then(function (r) {
               return r.json();
             })
             .then(function (st) {
+              if (!pollActivo) return;
               McCarpetaWebSync.syncDesdeEstado(st, jobId);
               if (st.estado === "ok") {
                 McCancelarDescarga.limpiar();
@@ -2182,12 +2208,12 @@
               McCancelarDescarga.registrar("lote", jobId);
               mostrarProgreso(st);
               setTimeout(function () {
-                pollJob(jobId);
+                if (pollActivo) pollJob(jobId);
               }, 1500);
             })
             .catch(function () {
               setTimeout(function () {
-                pollJob(jobId);
+                if (pollActivo) pollJob(jobId);
               }, 2500);
             });
         }
@@ -2195,6 +2221,7 @@
         form.addEventListener("submit", function (ev) {
           ev.preventDefault();
           if (resultado) resultado.innerHTML = "";
+          if (logBox) logBox.textContent = "";
 
           var fileInput = document.getElementById("planilla_arca");
           var hasFile = fileInput && fileInput.files && fileInput.files.length;
@@ -2290,6 +2317,8 @@
                 }
                 return;
               }
+              pollActivo = true;
+              McCancelarDescarga.setDetenerPoll(detenerPollArca);
               pollJob(res.data.job_id);
             })
             .catch(function (err) {
@@ -2304,17 +2333,25 @@
         }
 
         {% if arca_job_id %}
+        pollActivo = true;
+        McCancelarDescarga.setDetenerPoll(detenerPollArca);
         McCancelarDescarga.registrar("lote", "{{ arca_job_id }}");
         pollJob("{{ arca_job_id }}");
         {% endif %}
 
         McCancelarDescarga.enlazar(document.getElementById("arca-btn-cancelar"), {
           confirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+          submitBtn: btn,
+          progreso: progreso,
+          progresoModo: "class",
+          resultado: resultado,
+          mensajeCancelado: {{ t('msg_descarga_cancelada')|tojson }},
         });
 
         document.getElementById("arca-btn-limpiar-datos").addEventListener("click", function () {
           McLimpiarDatos({
             confirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+            mensajeCancelado: {{ t('msg_descarga_cancelada')|tojson }},
             formId: "form-arca-lote",
             fileNames: ["planilla_arca"],
             manualContainerId: "arca-filas-manual",
@@ -2322,6 +2359,8 @@
             carpetaInputId: "arca-carpeta-destino",
             carpetaLabelId: "arca-carpeta-label",
             onListo: function () {
+              if (btn) btn.disabled = false;
+              if (logBox) logBox.textContent = "";
               var res = document.getElementById("arca-resultado");
               if (res) res.innerHTML = "";
               var prog = document.getElementById("arca-progreso");

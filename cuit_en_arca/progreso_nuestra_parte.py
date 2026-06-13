@@ -165,6 +165,8 @@ def marcar_ok_np(job_id: str, *, carpeta: str) -> None:
         if not item:
             return
         st: EstadoJobNP = item["estado"]
+        if st.estado == "cancelado":
+            return
         st.estado = "ok"
         st.actual = st.total
         st.carpeta = carpeta
@@ -177,6 +179,8 @@ def marcar_error_np(job_id: str, error: str) -> None:
         if not item:
             return
         st: EstadoJobNP = item["estado"]
+        if st.estado == "cancelado":
+            return
         st.estado = "error"
         st.error = error
 

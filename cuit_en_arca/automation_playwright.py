@@ -59,6 +59,15 @@ def _paso(on_paso, clave: str, estado: str) -> None:
         pass
 
 
+def _log(on_log, msg: str) -> None:
+    if on_log is None:
+        return
+    try:
+        on_log(msg)
+    except Exception:
+        pass
+
+
 def _esperar_pagina(page, timeout: int = 42_000) -> None:
     """AFIP rara vez alcanza networkidle; domcontentloaded + pausa breve."""
     try:
@@ -1674,12 +1683,16 @@ def _descargar_tipo_en_sesion(
     elegir_perfil: bool,
     cuit_login: str | None = None,
     on_paso=None,
+    on_log=None,
 ) -> tuple[bytes, str]:
     if elegir_perfil:
         _paso(on_paso, "perfil", "en_curso")
+        _log(on_log, f"Seleccionando contribuyente {cuit_repr}…")
         _elegir_perfil_representado(mc, cuit_repr, cuit_login=cuit_login)
         _paso(on_paso, "perfil", "ok")
+        _log(on_log, f"Contribuyente activo: {cuit_repr}.")
     _paso(on_paso, tipo, "en_curso")
+    _log(on_log, f"Consultando {tipo} ({fd} – {fh})…")
     _ir_a_pantalla_tipo(mc, tipo)
 
     # Vía rápida (API JSON interna de MCMP). Si la tabla no expone todas las
@@ -1696,6 +1709,7 @@ def _descargar_tipo_en_sesion(
                 )
             data = _construir_xlsx_desde_json(cols, rows)
             if len(data) >= 800:
+                _log(on_log, f"{tipo.capitalize()}: {len(rows)} comprobante(s) vía consulta interna.")
                 return data, f"mis_comprobantes_{tipo}.xlsx"
     except SinComprobantesError:
         raise
@@ -1703,8 +1717,11 @@ def _descargar_tipo_en_sesion(
         pass
 
     # Respaldo: método UI (descarga oficial del botón Excel de DataTables).
+    _log(on_log, f"{tipo.capitalize()}: descarga vía pantalla (botón Excel)…")
     estado = _aplicar_filtro_fechas_y_buscar(mc, fd, fh)
-    return _descargar_excel_o_csv(mc, estado)
+    data, nom = _descargar_excel_o_csv(mc, estado)
+    _log(on_log, f"{tipo.capitalize()}: archivo obtenido ({len(data)} bytes).")
+    return data, nom
 
 
 def _flujo_post_login(
@@ -1715,6 +1732,7 @@ def _flujo_post_login(
     fh: str,
     tipo: TipoComprobantes,
     on_paso=None,
+    on_log=None,
 ) -> DescargaArcaResult:
     if tipo == "ambos":
         avisos: list[str] = []
@@ -1722,13 +1740,14 @@ def _flujo_post_login(
         try:
             data_e, nom_e = _descargar_tipo_en_sesion(
                 mc, cuit_repr, fd, fh, "emitidos",
-                elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso,
+                elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso, on_log=on_log,
             )
             emitidos = (data_e, nom_e)
             _paso(on_paso, "emitidos", "ok")
         except SinComprobantesError:
             emitidos = None
             avisos.append("Emitidos: sin comprobantes en el período")
+            _log(on_log, "Emitidos: sin comprobantes en el período.")
             _paso(on_paso, "emitidos", "ok")
         if not razon_social:
             try:
@@ -1739,17 +1758,19 @@ def _flujo_post_login(
         try:
             data_r, nom_r = _descargar_tipo_en_sesion(
                 mc, cuit_repr, fd, fh, "recibidos",
-                elegir_perfil=False, cuit_login=cuit_login, on_paso=on_paso,
+                elegir_perfil=False, cuit_login=cuit_login, on_paso=on_paso, on_log=on_log,
             )
             recibidos = (data_r, nom_r)
             _paso(on_paso, "recibidos", "ok")
         except SinComprobantesError:
             recibidos = None
             avisos.append("Recibidos: sin comprobantes en el período")
+            _log(on_log, "Recibidos: sin comprobantes en el período.")
             _paso(on_paso, "recibidos", "ok")
         except AutomatizacionArcaError as exc:
             recibidos = None
             avisos.append(f"falló Recibidos: {exc}")
+            _log(on_log, f"Recibidos: error — {exc}")
             _paso(on_paso, "recibidos", "error")
 
         if not razon_social:
@@ -1771,7 +1792,7 @@ def _flujo_post_login(
 
     data, nom = _descargar_tipo_en_sesion(
         mc, cuit_repr, fd, fh, tipo,
-        elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso,
+        elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso, on_log=on_log,
     )
     _paso(on_paso, tipo, "ok")
     try:
@@ -1797,6 +1818,7 @@ def ejecutar_descarga_mis_comprobantes(
     headless: bool = True,
     tipo: TipoComprobantes = "emitidos",
     on_paso=None,
+    on_log=None,
 ) -> DescargaArcaResult:
     if not _playwright_disponible():
         raise AutomatizacionNoDisponibleError(
@@ -1817,17 +1839,21 @@ def ejecutar_descarga_mis_comprobantes(
             page = context.new_page()
             page.set_default_timeout(60_000)
 
+            _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
             _paso(on_paso, "login", "en_curso")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
             pausa_humana(0.56, 1.26)
             _llenar_cuit_y_avanzar(page, cred.cuit_login)
             _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
             _paso(on_paso, "login", "ok")
+            _log(on_log, "Sesión iniciada.")
             _paso(on_paso, "mis_comprobantes", "en_curso")
+            _log(on_log, "Abriendo Mis Comprobantes…")
             mc = _abrir_mis_comprobantes(page)
             _paso(on_paso, "mis_comprobantes", "ok")
+            _log(on_log, f"Período: {fd} – {fh}.")
             return _flujo_post_login(
-                mc, cuit_repr, cuit_login, fd, fh, tipo, on_paso=on_paso
+                mc, cuit_repr, cuit_login, fd, fh, tipo, on_paso=on_paso, on_log=on_log
             )
 
     except LoginArcaError:

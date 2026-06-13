@@ -10,7 +10,7 @@ services:
     startCommand: >-
       export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers &&
       python -c "from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright; asegurar_chromium_playwright()" &&
-      gunicorn app:app
+      gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 7200
     envVars:
       - key: CUIT_EN_ARCA_PLAYWRIGHT
         value: "1"

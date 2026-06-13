@@ -126,7 +126,11 @@
       {% endwith %}
 
       <p class="intro">{{ t('ap_intro') }}</p>
+      {% if modo_escritorio %}
       <div class="nota">{{ t('ap_nota_conexion')|safe }}</div>
+      {% else %}
+      <div class="nota">{{ t('ap_nota_web')|safe }}</div>
+      {% endif %}
 
       {% if error %}<p class="error">{{ error }}</p>{% endif %}
       {% if ok %}<p class="ok">{{ ok }}</p>{% endif %}
@@ -258,10 +262,14 @@
         limpiarConfirm: {{ t('ap_limpiar_confirm')|tojson }},
         limpiarDatosConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
         cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+        msgCancelado: {{ t('msg_descarga_cancelada')|tojson }},
         okLimpiado: {{ t('ap_ok_limpiado')|tojson }},
         errLimpiar: {{ t('ap_err_limpiar')|tojson }},
         ultimaEjecucion: {{ t('ap_ultima_ejecucion')|tojson }},
         ultimoResultado: {{ t('ap_ultimo_resultado')|tojson }},
+        schedulerReloj: {{ t('ap_scheduler_reloj')|tojson }},
+        schedulerDisparo: {{ t('ap_scheduler_disparo')|tojson }},
+        schedulerSinHilo: {{ t('ap_scheduler_sin_hilo')|tojson }},
         okTitulo: {{ t('ap_ok_titulo')|tojson }},
         fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
         fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
@@ -302,6 +310,22 @@
         }
         if (cfg && cfg.ultimo_resultado && cfg.ultimo_resultado.mensaje) {
           html += "<p>" + I18N.ultimoResultado.replace("{msg}", cfg.ultimo_resultado.mensaje) + "</p>";
+        }
+        if (cfg && cfg.scheduler && cfg.activo) {
+          var sch = cfg.scheduler;
+          if (sch.hilo_iniciado) {
+            html +=
+              "<p>" +
+              (I18N.schedulerReloj || "Reloj: {ahora} · {prog}")
+                .replace("{ahora}", sch.ahora_servidor || "")
+                .replace("{prog}", sch.programado || "") +
+              "</p>";
+            if (sch.debe_ejecutar_ahora) {
+              html += "<p><strong>" + (I18N.schedulerDisparo || "") + "</strong></p>";
+            }
+          } else {
+            html += '<p class="error">' + (I18N.schedulerSinHilo || "") + "</p>";
+          }
         }
         el.innerHTML = html;
       }
@@ -521,13 +545,10 @@
         });
       })();
 
-      McCancelarDescarga.enlazar(document.getElementById("ap-btn-cancelar"), {
-        confirm: I18N.cancelarConfirm,
-      });
-
       document.getElementById("btn-limpiar-datos").addEventListener("click", function () {
         McLimpiarDatos({
           confirm: I18N.limpiarDatosConfirm,
+          mensajeCancelado: I18N.msgCancelado,
           formId: "form-ap",
           fileNames: ["ap_excel"],
           manualContainerId: "filas-manual",
@@ -549,6 +570,7 @@
         var okBox = document.getElementById("ap-resultado-ok");
         var errProg = document.getElementById("ap-error-progreso");
         var timer = null;
+        var cancelUiLocal = false;
         var ultimoEstadoAp = "idle";
         var ultimaCarpetaAp = "";
 
@@ -581,6 +603,10 @@
 
         function actualizar(st) {
           if (!st || st.estado === "idle") return;
+          if (st.estado === "cancelado" || st.estado === "ok" || st.estado === "error") {
+            cancelUiLocal = false;
+          }
+          if (cancelUiLocal) return;
           prog.style.display = "block";
           barra.style.width = (st.porcentaje || 0) + "%";
           msg.textContent = st.mensaje || "";
@@ -649,6 +675,17 @@
 
         poll();
         timer = setInterval(poll, 2500);
+
+        McCancelarDescarga.enlazar(document.getElementById("ap-btn-cancelar"), {
+          confirm: I18N.cancelarConfirm,
+          progreso: prog,
+          errProg: errProg,
+          okBox: okBox,
+          mensajeCancelado: I18N.msgCancelado,
+          onReset: function () {
+            cancelUiLocal = true;
+          },
+        });
       })();
     </script>
   </body>

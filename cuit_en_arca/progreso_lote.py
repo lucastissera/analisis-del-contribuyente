@@ -7,10 +7,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from cuit_en_arca.hora_log import hora_log_ar
 from cuit_en_arca.stealth import SEC_ESTIMADOS_POR_CUIT
 
 _lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
+
+_MAX_LOG = 400
 
 # Pasos que se muestran como checklist por cada CUIT del lote.
 PASOS_DESCARGA: tuple[tuple[str, str], ...] = (
@@ -40,6 +43,7 @@ class EstadoJobLote:
     fallos_detalle: list[str] = field(default_factory=list)
     archivos: list[dict[str, str]] = field(default_factory=list)
     pasos: list[dict[str, str]] = field(default_factory=list)
+    log: list[str] = field(default_factory=list)
     _inicio: float = field(default_factory=time.time)
     _duraciones: list[float] = field(default_factory=list)
     _ultima_fila: float = field(default_factory=time.time)
@@ -65,6 +69,7 @@ class EstadoJobLote:
             "archivos": list(self.archivos),
             "porcentaje": pct,
             "pasos": list(self.pasos),
+            "log": list(self.log),
         }
 
 
@@ -116,6 +121,22 @@ def reiniciar_pasos(job_id: str) -> None:
         ]
 
 
+def callback_log_lote(job_id: str) -> Callable[[str], None]:
+    def _cb(texto: str) -> None:
+        with _lock:
+            item = _jobs.get(job_id)
+            if not item:
+                return
+            st: EstadoJobLote = item["estado"]
+            ts = hora_log_ar()
+            st.log.append(f"[{ts}] {texto}")
+            if len(st.log) > _MAX_LOG:
+                st.log = st.log[-_MAX_LOG:]
+            st.mensaje = texto
+
+    return _cb
+
+
 def callback_paso(job_id: str) -> Callable[[str, str], None]:
     """on_paso(clave, estado) con estado en {en_curso, ok, error, omitido}."""
 
@@ -157,6 +178,8 @@ def marcar_ok(
         if not item:
             return
         st: EstadoJobLote = item["estado"]
+        if st.estado == "cancelado":
+            return
         st.estado = "ok"
         st.actual = st.total
         st.eta_seg = 0
@@ -175,6 +198,8 @@ def marcar_error(job_id: str, error: str) -> None:
         if not item:
             return
         st: EstadoJobLote = item["estado"]
+        if st.estado == "cancelado":
+            return
         st.estado = "error"
         st.error = error
         st.eta_seg = 0
