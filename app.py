@@ -194,7 +194,7 @@ def _fabricar_entrega(
     carpeta_form: str | None,
     agregar_estado,
 ):
-    from cuit_en_arca.entrega_web import EntregaWeb, carpeta_trabajo_web, envolver_log_con_entrega, make_registrar
+    from cuit_en_arca.entrega_web import EntregaWeb, carpeta_trabajo_web, make_registrar
 
     if _es_app_escritorio():
         p = (carpeta_form or "").strip()
@@ -1134,6 +1134,7 @@ def dfe_descargar():
         return tr(lg, "err_arca_unexpected", exc=exc)
 
     from cuit_en_arca.cancelacion import reset_cancelacion
+    from cuit_en_arca.entrega_web import envolver_log_con_entrega
 
     reset_cancelacion(job_id)
     crear_job_dfe(job_id, len(filas))
@@ -1296,6 +1297,7 @@ def np_descargar():
         return tr(lg, "err_arca_unexpected", exc=exc)
 
     from cuit_en_arca.cancelacion import reset_cancelacion
+    from cuit_en_arca.entrega_web import envolver_log_con_entrega
 
     reset_cancelacion(job_id)
     crear_job_np(job_id, len(filas))
