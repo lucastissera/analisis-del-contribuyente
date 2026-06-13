@@ -29,7 +29,7 @@
     if (esModoEscritorio()) {
       return !String(ruta || "").trim();
     }
-    return !_dirHandle;
+    return !(_parentHandle || _dirHandle);
   }
 
   function obtenerHandleWeb() {
@@ -119,15 +119,18 @@
 
   function restaurarDesdeIdb(sistema) {
     return leerDeIdb(sistema).then(function (row) {
-      if (!row || !row.dirHandle) return false;
-      return row.dirHandle
+      if (!row) return false;
+      var parent = row.parentHandle || row.dirHandle;
+      if (!parent) return false;
+      return parent
         .queryPermission({ mode: "readwrite" })
         .then(function (perm) {
           if (perm !== "granted") return false;
-          _dirHandle = row.dirHandle;
-          _subcarpetaSesion = row.subcarpetaSesion || null;
-          _parentNombre = row.parentNombre || row.dirHandle.name || "";
-          _dirNombre = row.dirNombre || row.dirHandle.name || "";
+          _parentHandle = parent;
+          _parentNombre = row.parentNombre || parent.name || "";
+          _dirHandle = null;
+          _subcarpetaSesion = null;
+          _dirNombre = _parentNombre;
           _sistemaActual = sistema;
           return true;
         });
@@ -209,11 +212,12 @@
   }
 
   function persistirEstado(sistema) {
-    if (!sistema || !_dirHandle) return Promise.resolve();
+    if (!sistema || (!_parentHandle && !_dirHandle)) return Promise.resolve();
     return guardarEnIdb(sistema, {
+      parentHandle: _parentHandle || _dirHandle,
+      parentNombre: _parentNombre,
       dirHandle: _dirHandle,
       subcarpetaSesion: _subcarpetaSesion,
-      parentNombre: _parentNombre,
       dirNombre: _dirNombre,
     });
   }
@@ -243,9 +247,9 @@
     if (!esSubcarpetaSistema(handle.name, sistema)) return null;
     _parentHandle = handle;
     _parentNombre = handle.name;
-    _dirHandle = handle;
-    _subcarpetaSesion = handle.name;
-    _dirNombre = handle.name;
+    _dirHandle = null;
+    _subcarpetaSesion = null;
+    _dirNombre = _parentNombre;
     _sistemaActual = sistema;
     actualizarCampoSesion(sesionInputId);
     return persistirEstado(sistema).then(function () {
@@ -253,13 +257,14 @@
     });
   }
 
-  function asegurarSubcarpetaSesion(sistema, sesionInputId) {
+  function asegurarSubcarpetaSesion(sistema, sesionInputId, opciones) {
+    opciones = opciones || {};
     if (!sistema || sistema === "analisis_programado") {
       _subcarpetaSesion = null;
       actualizarCampoSesion(sesionInputId);
       return Promise.resolve(_dirNombre);
     }
-    if (_subcarpetaSesion && _dirHandle) {
+    if (_subcarpetaSesion && _dirHandle && !opciones.nuevaEjecucion) {
       actualizarCampoSesion(sesionInputId);
       return Promise.resolve(_dirNombre);
     }
@@ -320,11 +325,13 @@
         return confirmarPermisoEscritura(parentHandle).then(function (handle) {
           _parentHandle = handle;
           _parentNombre = handle.name || "Carpeta";
-          _dirHandle = handle;
+          _dirHandle = null;
+          _subcarpetaSesion = null;
+          _dirNombre = _parentNombre;
+          _sistemaActual = sistema;
 
           if (sistema === "analisis_programado") {
-            _dirNombre = _parentNombre;
-            _subcarpetaSesion = null;
+            _dirHandle = handle;
             actualizarCampoSesion(sesionInputId);
             return persistirEstado(sistema).then(function () {
               return _dirNombre;
@@ -334,7 +341,10 @@
           var directo = usarSeleccionDirecta(handle, sistema, sesionInputId);
           if (directo) return directo;
 
-          return asegurarSubcarpetaSesion(sistema, sesionInputId);
+          actualizarCampoSesion(sesionInputId);
+          return persistirEstado(sistema).then(function () {
+            return _dirNombre;
+          });
         });
       })
       .catch(function (err) {
@@ -437,8 +447,26 @@
       if (!base) {
         return Promise.reject(new Error("picker_sin_carpeta"));
       }
+      if (global.McCarpetaWebSync && global.McCarpetaWebSync.reset) {
+        global.McCarpetaWebSync.reset();
+      }
       return confirmarPermisoEscritura(base).then(function () {
-        return asegurarSubcarpetaSesion(sistema, sesionInputId).then(function () {
+        if (sistema === "analisis_programado") {
+          _parentHandle = base;
+          _parentNombre = base.name || _parentNombre || "Carpeta";
+          _dirHandle = base;
+          _subcarpetaSesion = null;
+          _dirNombre = _parentNombre;
+          _sistemaActual = sistema;
+          actualizarCampoSesion(sesionInputId);
+          return persistirEstado(sistema).then(function () {
+            api.aplicar(_dirNombre);
+            return _dirNombre;
+          });
+        }
+        _dirHandle = null;
+        _subcarpetaSesion = null;
+        return asegurarSubcarpetaSesion(sistema, sesionInputId, { nuevaEjecucion: true }).then(function () {
           api.aplicar(_dirNombre);
           return _dirNombre;
         });
@@ -450,10 +478,38 @@
       if (actual) return Promise.resolve(actual);
       return api.elegir();
     }
-    if (_dirHandle) return finalizar();
+    if (_parentHandle || _dirHandle) return finalizar();
     return api.elegir().then(function (ruta) {
       if (!ruta) return null;
       return finalizar();
+    });
+  }
+
+  function postForm(url, formData) {
+    return fetch(url, {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+      headers: { "X-Requested-With": "fetch" },
+    }).then(function (r) {
+      return r.text().then(function (text) {
+        var data = {};
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            if (r.status === 401 || r.status === 403) {
+              throw new Error("Sesión expirada. Volvé a iniciar sesión.");
+            }
+            throw new Error(
+              r.status >= 500
+                ? "Error del servidor (" + r.status + "). Reintentá en unos minutos."
+                : "Error de red."
+            );
+          }
+        }
+        return { ok: r.ok, data: data };
+      });
     });
   }
 
@@ -482,10 +538,25 @@
     }
   }
 
+  function confirmarPermisoParaEjecucion() {
+    if (esModoEscritorio()) return Promise.resolve(true);
+    var h = _dirHandle || _parentHandle;
+    if (!h) return Promise.resolve(false);
+    return confirmarPermisoEscritura(h)
+      .then(function () {
+        return true;
+      })
+      .catch(function () {
+        return false;
+      });
+  }
+
   global.McElegirCarpeta = {
     elegir: elegirCarpeta,
     enlazar: enlazar,
     resolver: resolverCarpeta,
+    postForm: postForm,
+    confirmarPermisoParaEjecucion: confirmarPermisoParaEjecucion,
     requiereCarpeta: requiereCarpeta,
     esModoEscritorio: esModoEscritorio,
     soporteCarpetaWeb: soporteCarpetaWeb,

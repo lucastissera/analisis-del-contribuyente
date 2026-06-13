@@ -549,17 +549,7 @@
           errProg.style.display = "none";
           logBox.textContent = "";
           var fd = new FormData(form);
-          fetch(form.action, {
-            method: "POST",
-            body: fd,
-            credentials: "same-origin",
-            headers: { "X-Requested-With": "fetch" },
-          })
-            .then(function (r) {
-              return r.json().then(function (data) {
-                return { ok: r.ok, data: data };
-              });
-            })
+          McElegirCarpeta.postForm(form.action, fd)
             .then(function (res) {
               if (!res.ok || res.data.error) {
                 errBox.style.display = "block";
@@ -573,9 +563,9 @@
                 poll(res.data.job_id);
               }
             })
-            .catch(function () {
+            .catch(function (err) {
               errBox.style.display = "block";
-              errBox.textContent = I18N.errorRed || "Error de red.";
+              errBox.textContent = (err && err.message) || I18N.errorRed || "Error de red.";
               btn.disabled = false;
               btn.textContent = "{{ t('np_submit') }}";
             });

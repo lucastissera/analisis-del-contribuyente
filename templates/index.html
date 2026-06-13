@@ -2279,17 +2279,7 @@
           if (impSel && impSel.value) {
             fd.append("plantilla_imputacion_id", impSel.value);
           }
-          fetch("/arca-descarga-lote", {
-            method: "POST",
-            body: fd,
-            credentials: "same-origin",
-            headers: { "X-Requested-With": "fetch" },
-          })
-            .then(function (r) {
-              return r.json().then(function (data) {
-                return { ok: r.ok, data: data };
-              });
-            })
+          McElegirCarpeta.postForm("/arca-descarga-lote", fd)
             .then(function (res) {
               if (!res.ok) {
                 if (progreso) progreso.classList.remove("activo");

@@ -433,37 +433,26 @@
               }
               carpetaApi.aplicar(ruta);
               var fd = new FormData(form);
-              return fetch(form.action, {
-                method: "POST",
-                body: fd,
-                headers: { "X-Requested-With": "fetch" },
-                credentials: "same-origin",
-              }).then(function (r) {
-                return r.json().then(function (res) {
-                  return { ok: r.ok, res: res };
-                }).catch(function () {
-                  return { ok: false, res: { error: I18N.errorGuardar } };
-                });
-              });
+              return McElegirCarpeta.postForm(form.action, fd);
             })
             .then(function (payload) {
               if (!payload) return;
               btn.disabled = false;
-              if (!payload.ok || payload.res.error) {
-                errBox.textContent = payload.res.error || I18N.errorGuardar;
+              if (!payload.ok || payload.data.error) {
+                errBox.textContent = payload.data.error || I18N.errorGuardar;
                 errBox.style.display = "block";
                 return;
               }
-              if (payload.res.config) {
-                CONFIG = payload.res.config;
-                pintarEstado(payload.res.config);
-                cargarConfigEnForm(payload.res.config);
+              if (payload.data.config) {
+                CONFIG = payload.data.config;
+                pintarEstado(payload.data.config);
+                cargarConfigEnForm(payload.data.config);
               }
-              alert(payload.res.mensaje || I18N.okGuardado);
+              alert(payload.data.mensaje || I18N.okGuardado);
             })
-            .catch(function () {
+            .catch(function (err) {
               btn.disabled = false;
-              errBox.textContent = I18N.errorGuardar || I18N.carpetaCancelada;
+              errBox.textContent = (err && err.message) || I18N.errorGuardar || I18N.carpetaCancelada;
               errBox.style.display = "block";
             });
         });
@@ -500,25 +489,29 @@
             credentials: "same-origin",
           })
             .then(function (r) {
-              return r.json().then(function (res) {
-                return { ok: r.ok, res: res };
-              }).catch(function () {
-                return { ok: false, res: { error: I18N.errLimpiar } };
+              return r.text().then(function (text) {
+                var data = {};
+                try {
+                  data = text ? JSON.parse(text) : {};
+                } catch (e) {
+                  throw new Error(I18N.errLimpiar);
+                }
+                return { ok: r.ok, data: data };
               });
             })
             .then(function (payload) {
               btn.disabled = false;
-              if (!payload.ok || payload.res.error) {
-                errBox.textContent = payload.res.error || I18N.errLimpiar;
+              if (!payload.ok || payload.data.error) {
+                errBox.textContent = payload.data.error || I18N.errLimpiar;
                 errBox.style.display = "block";
                 return;
               }
-              CONFIG = payload.res.config || {};
+              CONFIG = payload.data.config || {};
               resetearFormulario();
               pintarEstado(CONFIG);
               var prog = document.getElementById("progreso-ap");
               if (prog) prog.style.display = "none";
-              alert(payload.res.mensaje || I18N.okLimpiado);
+              alert(payload.data.mensaje || I18N.okLimpiado);
             })
             .catch(function () {
               btn.disabled = false;
@@ -556,6 +549,8 @@
         var okBox = document.getElementById("ap-resultado-ok");
         var errProg = document.getElementById("ap-error-progreso");
         var timer = null;
+        var ultimoEstadoAp = "idle";
+        var ultimaCarpetaAp = "";
 
         function pintaPasos(pasos) {
           if (!pasos || !pasos.length) return;
@@ -632,6 +627,15 @@
           fetch("{{ url_for('analisis_programado_ejecucion') }}", { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
             .then(function (st) {
+              if (
+                st.estado === "en_progreso" &&
+                (ultimoEstadoAp !== "en_progreso" || (st.carpeta && st.carpeta !== ultimaCarpetaAp))
+              ) {
+                McCarpetaWebSync.reset("ap");
+                ultimaCarpetaAp = st.carpeta || "";
+                McElegirCarpeta.confirmarPermisoParaEjecucion();
+              }
+              ultimoEstadoAp = st.estado || "idle";
               McCarpetaWebSync.syncDesdeEstado(st, "ap");
               actualizar(st);
               if (st.estado === "en_progreso" && !timer) {

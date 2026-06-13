@@ -1160,6 +1160,7 @@ def dfe_descargar():
 
     def _worker() -> None:
         try:
+            progreso_cuit_dfe(job_id, 0, len(filas), "Iniciando…")
             carpeta = ejecutar_dfe_lote(
                 filas,
                 headless=headless,
