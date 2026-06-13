@@ -43,6 +43,8 @@
         --np-border: #2e9e6b;
         --ap-bg: #fff3e6;
         --ap-border: #e65100;
+        --admin-bg: #eef6ff;
+        --admin-border: #1565c0;
       }
       html.modo-oscuro {
         color-scheme: dark;
@@ -60,6 +62,8 @@
         --np-border: #3fae7a;
         --ap-bg: #2a1f14;
         --ap-border: #ff9800;
+        --admin-bg: #16243a;
+        --admin-border: #3d7dd9;
       }
       body {
         font-family: Arial, sans-serif;
@@ -128,6 +132,10 @@
         background: var(--ap-bg);
         border-color: var(--ap-border);
       }
+      .boton-admin {
+        background: var(--admin-bg);
+        border-color: var(--admin-border);
+      }
     </style>
   </head>
   <body>
@@ -159,6 +167,13 @@
           <span class="titulo">{{ t('inicio_btn_ap') }}</span>
           <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
         </a>
+        {% if es_administrador %}
+        <a class="boton-grande boton-admin" href="{{ url_for('admin_cursor') }}">
+          <span class="icono" aria-hidden="true">&#9881;</span>
+          <span class="titulo">{{ t('inicio_btn_admin_cursor') }}</span>
+          <span class="desc">{{ t('inicio_btn_admin_cursor_desc') }}</span>
+        </a>
+        {% endif %}
       </div>
 
       {% include 'partials/pie_legal.html' %}

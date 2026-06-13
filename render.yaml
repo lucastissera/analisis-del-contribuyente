@@ -28,3 +28,6 @@ services:
       # AUTH_USERS_JSON  — JSON completo de usuarios (no commitear)
       # AUTH_USERS_REMOTE_TOKEN — token Bearer para /api/auth-users (portables)
       # AUTH_ADMIN_USER  — opcional: Lucas
+      # CURSOR_API_KEY   — Secret: chat admin con Cloud Agents API
+      # CURSOR_REPO_URL  — ej. https://github.com/.../analisismiscomprobantes
+      # CURSOR_REPO_BRANCH — default main

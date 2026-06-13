@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('admin_cursor_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <script>
+      (function () {
+        try {
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --bg-body: #ffffff;
+        --bg-panel: #fafafa;
+        --text-primary: #1a1a1a;
+        --text-muted: #444;
+        --border: #bbb;
+        --color-link: #1565c0;
+        --admin-bg: #eef6ff;
+        --admin-border: #1565c0;
+        --chat-user-bg: #e3f2fd;
+        --chat-assist-bg: #f5f5f5;
+        --chat-tool-bg: #fff8e1;
+        --color-error: #c62828;
+        --color-ok: #2e7d32;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014;
+        --bg-panel: #1a1c22;
+        --text-primary: #eceef3;
+        --text-muted: #aeb4c0;
+        --border: #3d424d;
+        --color-link: #8ab4ff;
+        --admin-bg: #16243a;
+        --admin-border: #3d7dd9;
+        --chat-user-bg: #1e2a3d;
+        --chat-assist-bg: #22252d;
+        --chat-tool-bg: #2a2618;
+        --color-error: #ef5350;
+        --color-ok: #66bb6a;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      a { color: var(--color-link); }
+      .pagina { max-width: 920px; margin: 0 auto; }
+      .intro {
+        margin: 0 0 1rem;
+        color: var(--text-muted);
+        line-height: 1.45;
+      }
+      .aviso {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        margin-bottom: 1rem;
+        background: var(--bg-panel);
+      }
+      .aviso.error { border-color: var(--color-error); color: var(--color-error); }
+      .aviso.ok { border-color: var(--color-ok); }
+      .panel-chat {
+        border: 2px solid var(--admin-border);
+        border-radius: 14px;
+        background: var(--admin-bg);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 420px;
+      }
+      .barra-chat {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.65rem 0.9rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-panel);
+      }
+      .estado-run {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      .estado-run.activo { color: var(--color-link); font-weight: bold; }
+      .mensajes {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        max-height: 52vh;
+      }
+      .msg {
+        border-radius: 10px;
+        padding: 0.75rem 0.9rem;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .msg-usuario { background: var(--chat-user-bg); align-self: flex-end; max-width: 85%; }
+      .msg-asistente { background: var(--chat-assist-bg); align-self: flex-start; max-width: 92%; }
+      .msg-sistema {
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        text-align: center;
+        padding: 0.25rem;
+      }
+      .msg-tool {
+        background: var(--chat-tool-bg);
+        border: 1px dashed var(--border);
+        font-size: 0.85rem;
+        font-family: Consolas, monospace;
+      }
+      .msg-meta { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+      .form-chat {
+        border-top: 1px solid var(--border);
+        padding: 0.85rem;
+        background: var(--bg-panel);
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+      .form-chat textarea {
+        width: 100%;
+        min-height: 88px;
+        resize: vertical;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.65rem;
+        font: inherit;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        box-sizing: border-box;
+      }
+      .acciones {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      .btn {
+        border: 1px solid var(--border);
+        background: var(--bg-body);
+        color: var(--text-primary);
+        border-radius: 8px;
+        padding: 0.45rem 0.85rem;
+        cursor: pointer;
+        font: inherit;
+      }
+      .btn-principal {
+        background: var(--admin-border);
+        border-color: var(--admin-border);
+        color: #fff;
+      }
+      .btn:disabled { opacity: 0.55; cursor: default; }
+      .links-agente { font-size: 0.9rem; }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% include 'partials/barra_superior.html' %}
+
+      {% with titulo=t('admin_cursor_heading'), variante='centrada' %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
+
+      <p class="intro">{{ t('admin_cursor_intro') | safe }}</p>
+
+      <div id="aviso-config" class="aviso error" hidden></div>
+      <div id="aviso-repo" class="aviso ok" hidden></div>
+
+      <div class="panel-chat">
+        <div class="barra-chat">
+          <div>
+            <strong>{{ t('admin_cursor_panel') }}</strong>
+            <div id="estado-run" class="estado-run">{{ t('admin_cursor_estado_listo') }}</div>
+          </div>
+          <div class="acciones">
+            <button type="button" id="btn-nueva" class="btn">{{ t('admin_cursor_nueva') }}</button>
+            <button type="button" id="btn-cancelar" class="btn" hidden>{{ t('admin_cursor_cancelar') }}</button>
+            <a id="link-agente" class="links-agente" href="#" target="_blank" rel="noopener" hidden>{{ t('admin_cursor_abrir_cursor') }}</a>
+          </div>
+        </div>
+
+        <div id="mensajes" class="mensajes">
+          <div class="msg msg-sistema">{{ t('admin_cursor_hint') }}</div>
+        </div>
+
+        <form id="form-chat" class="form-chat">
+          <textarea
+            id="input-texto"
+            name="texto"
+            placeholder="{{ t('admin_cursor_placeholder') }}"
+            required
+          ></textarea>
+          <div class="acciones">
+            <button type="submit" id="btn-enviar" class="btn btn-principal">{{ t('admin_cursor_enviar') }}</button>
+          </div>
+        </form>
+      </div>
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+
+    <script type="application/json" id="admin-cursor-config">{{ cursor_config | tojson }}</script>
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    <script src="{{ url_for('static', filename='admin_cursor.js') }}"></script>
+  </body>
+</html>

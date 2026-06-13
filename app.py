@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 import threading
@@ -69,6 +70,15 @@ from auth import (
     verificar_acceso,
     verificar_token_remoto,
     whatsapp_new_user_url,
+)
+from cursor_cloud import (
+    CursorCloudError,
+    cancelar_run as cursor_cancelar_run,
+    config_publica as cursor_config_publica,
+    configurado as cursor_cloud_configurado,
+    crear_agente as cursor_crear_agente,
+    crear_run as cursor_crear_run,
+    stream_run as cursor_stream_run,
 )
 
 try:
@@ -242,6 +252,11 @@ def _safe_internal_path(target: str | None) -> str:
     if t.startswith("/") and not t.startswith("//"):
         return t
     return url_for("index")
+
+
+def _requiere_admin():
+    if not session.get("es_admin"):
+        abort(403)
 
 
 @app.before_request
@@ -1676,6 +1691,83 @@ def analisis_programado_limpiar():
         "mensaje": tr(lg, "ap_ok_limpiado"),
         "config": cfg.a_dict_publico(),
     })
+
+
+@app.get("/admin/cursor")
+def admin_cursor():
+    _requiere_admin()
+    return render_template(
+        "admin_cursor.html",
+        cursor_config=cursor_config_publica(),
+    )
+
+
+@app.get("/admin/cursor/estado")
+def admin_cursor_estado():
+    _requiere_admin()
+    return jsonify(cursor_config_publica())
+
+
+@app.post("/admin/cursor/mensaje")
+def admin_cursor_mensaje():
+    _requiere_admin()
+    lg = normalize_lang(session.get("lang"))
+    if not cursor_cloud_configurado():
+        return jsonify({"error": tr(lg, "admin_cursor_err_no_config")}), 503
+    data = request.get_json(silent=True) or {}
+    texto = (data.get("text") or "").strip()
+    agent_id = (data.get("agent_id") or "").strip()
+    if not texto:
+        return jsonify({"error": tr(lg, "admin_cursor_err_vacio")}), 400
+    try:
+        if agent_id:
+            out = cursor_crear_run(agent_id, texto)
+        else:
+            out = cursor_crear_agente(texto)
+        return jsonify(
+            {
+                "ok": True,
+                "agent_id": out.get("agent_id"),
+                "run_id": out.get("run_id"),
+                "agent_url": out.get("agent_url"),
+            }
+        )
+    except CursorCloudError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), exc.status
+
+
+@app.get("/admin/cursor/stream/<agent_id>/<run_id>")
+def admin_cursor_stream(agent_id: str, run_id: str):
+    _requiere_admin()
+    last_event = request.headers.get("Last-Event-ID")
+
+    def generate():
+        try:
+            for chunk in cursor_stream_run(agent_id, run_id, last_event):
+                yield chunk
+        except CursorCloudError as exc:
+            payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {payload}\n\n".encode("utf-8")
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/admin/cursor/cancelar/<agent_id>/<run_id>")
+def admin_cursor_cancelar(agent_id: str, run_id: str):
+    _requiere_admin()
+    lg = normalize_lang(session.get("lang"))
+    try:
+        cursor_cancelar_run(agent_id, run_id)
+        return jsonify({"ok": True})
+    except CursorCloudError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), exc.status
 
 
 @app.get("/elegir-carpeta")
