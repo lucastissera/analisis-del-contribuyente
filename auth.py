@@ -572,5 +572,5 @@ def verify_credentials(username: str, password: str) -> bool:
 
 
 def whatsapp_new_user_url() -> str:
-    msg = f"Buen día! Quiero generar mi usuario para el sistema {APP_NAME}"
+    msg = f"Buen día! Quisiera información acerca del sistema de {APP_NAME}"
     return f"https://wa.me/5493513132914?text={quote(msg)}"

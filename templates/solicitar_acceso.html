@@ -38,7 +38,7 @@
   </head>
   <body>
     <div class="pagina">
-      {% with mostrar_volver=false, mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
+      {% with mostrar_volver=true, volver_url=url_for('login'), volver_texto=t('alta_volver_atras'), mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
       <div class="card">
         {% with titulo=t('alta_solicitar_heading'), variante='login' %}{% include 'partials/cabecera_isologo.html' %}{% endwith %}
         <p class="help">{{ t('alta_solicitar_intro') }}</p>
