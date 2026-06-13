@@ -4,11 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ t('plantillas_imputaciones_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
     <script>
       (function () {
         try {
-          if (localStorage.getItem("tema") === "oscuro") {
-            document.documentElement.classList.add("modo-oscuro");
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
           }
         } catch (e) {}
       })();
@@ -71,10 +85,6 @@
         border-radius: 10px;
         padding: 1.15rem 1.25rem;
         background: var(--bg-panel);
-      }
-      .panel h1 {
-        margin: 0 0 0.5rem 0;
-        font-size: 1.4rem;
       }
       .intro {
         margin: 0 0 1rem 0;
@@ -170,14 +180,6 @@
         border-color: #c62828;
         color: #1a0505;
       }
-      .btn-sec {
-        display: inline-block;
-        text-decoration: none;
-        text-align: center;
-        background: var(--bg-body);
-        color: var(--text-primary);
-        border-color: var(--border);
-      }
       .volver {
         margin-top: 1.25rem;
       }
@@ -196,22 +198,13 @@
   </head>
   <body>
     <div class="pagina">
-      <div class="barra-superior">
-        <label for="select-idioma" class="sr-only">{{ t('lang_select_aria') }}</label>
-        <select
-          id="select-idioma"
-          class="select-idioma"
-          autocomplete="off"
-          onchange="location.href='/set-lang/'+encodeURIComponent(this.value)+'?next='+encodeURIComponent(window.location.pathname);"
-        >
-          {% for code in langs %}
-          <option value="{{ code }}" {% if code == current_lang %}selected{% endif %}>{{ lang_labels[code] }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      {% with volver_url=url_for('procesador'), volver_texto=t('plantillas_volver_inicio') %}{% include 'partials/barra_superior.html' %}{% endwith %}
+
+      {% with titulo=t('plantillas_imputaciones_title') %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
 
       <div class="panel">
-        <h1>{{ t('plantillas_imputaciones_title') }}</h1>
         <p class="intro">{{ t('plantillas_imputaciones_intro') }}</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -273,9 +266,12 @@
         {% else %}
         <p class="intro">{{ t('plantillas_lista_vacia') }}</p>
         {% endif %}
-
-        <p class="volver"><a class="btn-sec" href="{{ url_for('index') }}">{{ t('plantillas_volver_inicio') }}</a></p>
       </div>
+
+      {% include 'partials/pie_legal.html' %}
     </div>
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
   </body>
 </html>

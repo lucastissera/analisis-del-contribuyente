@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('inicio_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <script>
+      (function () {
+        try {
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --bg-body: #ffffff;
+        --bg-panel: #fafafa;
+        --text-primary: #1a1a1a;
+        --text-muted: #444;
+        --border: #bbb;
+        --color-link: #1565c0;
+        --proc-bg: #e3f2fd;
+        --proc-border: #1565c0;
+        --dfe-bg: #f3edff;
+        --dfe-border: #7e57c2;
+        --np-bg: #e6f5ec;
+        --np-border: #2e9e6b;
+        --ap-bg: #fff3e6;
+        --ap-border: #e65100;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014;
+        --bg-panel: #1a1c22;
+        --text-primary: #eceef3;
+        --text-muted: #aeb4c0;
+        --border: #3d424d;
+        --color-link: #8ab4ff;
+        --proc-bg: #16243a;
+        --proc-border: #3d7dd9;
+        --dfe-bg: #241a35;
+        --dfe-border: #9c72d6;
+        --np-bg: #15291f;
+        --np-border: #3fae7a;
+        --ap-bg: #2a1f14;
+        --ap-border: #ff9800;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      a {
+        color: var(--color-link);
+      }
+      .pagina {
+        max-width: 880px;
+        margin: 0 auto;
+      }
+      .botones {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.4rem;
+      }
+      .boton-grande {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 0.6rem;
+        padding: 2.2rem 1.4rem;
+        border-radius: 16px;
+        border: 2px solid var(--border);
+        background: var(--bg-panel);
+        color: var(--text-primary);
+        text-decoration: none;
+        transition: transform 0.08s ease, box-shadow 0.12s ease;
+        min-height: 200px;
+        justify-content: center;
+      }
+      .boton-grande:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+      }
+      .boton-grande .icono {
+        font-size: 2.8rem;
+        line-height: 1;
+      }
+      .boton-grande .titulo {
+        font-size: 1.35rem;
+        font-weight: bold;
+      }
+      .boton-grande .desc {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+        max-width: 26ch;
+      }
+      .boton-procesador {
+        background: var(--proc-bg);
+        border-color: var(--proc-border);
+      }
+      .boton-dfe {
+        background: var(--dfe-bg);
+        border-color: var(--dfe-border);
+      }
+      .boton-np {
+        background: var(--np-bg);
+        border-color: var(--np-border);
+      }
+      .boton-ap {
+        background: var(--ap-bg);
+        border-color: var(--ap-border);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% with mostrar_volver=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
+
+      {% with titulo=t('inicio_heading'), variante='centrada' %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
+
+      <div class="botones">
+        <a class="boton-grande boton-procesador" href="{{ url_for('procesador') }}">
+          <span class="icono" aria-hidden="true">&#128202;</span>
+          <span class="titulo">{{ t('inicio_btn_procesador') }}</span>
+          <span class="desc">{{ t('inicio_btn_procesador_desc') }}</span>
+        </a>
+        <a class="boton-grande boton-dfe" href="{{ url_for('domicilio_fiscal') }}">
+          <span class="icono" aria-hidden="true">&#9993;</span>
+          <span class="titulo">{{ t('inicio_btn_dfe') }}</span>
+          <span class="desc">{{ t('inicio_btn_dfe_desc') }}</span>
+        </a>
+        <a class="boton-grande boton-np" href="{{ url_for('nuestra_parte') }}">
+          <span class="icono" aria-hidden="true">&#128196;</span>
+          <span class="titulo">{{ t('inicio_btn_np') }}</span>
+          <span class="desc">{{ t('inicio_btn_np_desc') }}</span>
+        </a>
+        <a class="boton-grande boton-ap" href="{{ url_for('analisis_programado') }}">
+          <span class="icono" aria-hidden="true">&#128197;</span>
+          <span class="titulo">{{ t('inicio_btn_ap') }}</span>
+          <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
+        </a>
+      </div>
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

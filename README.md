@@ -1,6 +1,6 @@
-# analisismiscomprobantes
+# Análisis Integral del Contribuyente
 
-Analiza Mis Comprobantes ARCA y emite un `.xlsx` ajustado (notas de crédito en negativo, multiplicación por tipo de cambio) desde archivos `.xlsx` o `.csv`.
+Plataforma para análisis y automatización ARCA (Mis Comprobantes, DFE, Nuestra Parte): procesa `.xlsx`/`.csv`, emite informes ajustados y descarga desde AFIP.
 
 ## Uso local (desarrollo)
 
@@ -66,15 +66,15 @@ Después de compilar (ver más abajo), hay que entregar **toda la carpeta**, no 
 
 | Contenido | Ubicación |
 |-----------|-----------|
-| Ejecutable | `dist\MisComprobantesAnalisis\MisComprobantesAnalisis.exe` |
-| Librerías y recursos | `dist\MisComprobantesAnalisis\_internal\` |
+| Ejecutable | `dist\AnalisisIntegralContribuyente\AnalisisIntegralContribuyente.exe` |
+| Librerías y recursos | `dist\AnalisisIntegralContribuyente\_internal\` |
 
-Convéniente: comprimir en **ZIP** la carpeta `MisComprobantesAnalisis` completa y que el usuario la descomprima donde quiera (Escritorio, `C:\Programas\`, etc.).
+Convéniente: comprimir en **ZIP** la carpeta `AnalisisIntegralContribuyente` completa y que el usuario la descomprima donde quiera (Escritorio, `C:\Programas\`, etc.).
 
 ### Cómo usarla en otra PC
 
-1. Descomprimir la carpeta `MisComprobantesAnalisis`.
-2. Ejecutar `MisComprobantesAnalisis.exe` (no se abre la ventana negra de consola: solo Edge/Chrome en modo app o el navegador predeterminado).
+1. Descomprimir la carpeta `AnalisisIntegralContribuyente`.
+2. Ejecutar `AnalisisIntegralContribuyente.exe` (no se abre la ventana negra de consola: solo Edge/Chrome en modo app o el navegador predeterminado).
 3. Se abre la **ventana de la aplicación** (Edge o Chrome en modo app, si están instalados) en `http://127.0.0.1:8765` (puerto por defecto).
 4. Para **salir por completo**, usá el enlace del pie de página **«Cerrar aplicación de escritorio»** (cierra el proceso del servidor local).
 
@@ -82,18 +82,17 @@ Convéniente: comprimir en **ZIP** la carpeta `MisComprobantesAnalisis` completa
 
 ### Credenciales (login)
 
-El instalable portable **no incluye** tu `auth_users.json` del proyecto (para no subir claves al repo). Incluye solo `auth_users.example.json` con un usuario de ejemplo:
+Hay tres modos compatibles (portable y servidor web):
 
-- **Usuario:** `admin`  
-- **Contraseña:** `definir_clave_segura_aqui` (texto literal del archivo de ejemplo)
+1. **Nube (recomendado con varios usuarios):** un único `auth_users.json` en un hosting HTTPS. Cada app lo descarga, lo guarda en caché fuera del sistema y lo actualiza cada ~2 minutos. Configuración: ver **[docs/AUTH_USUARIOS_NUBE.md](docs/AUTH_USUARIOS_NUBE.md)**.
+   - Servidor: variables `AUTH_USERS_URL` y opcional `AUTH_USERS_REMOTE_TOKEN` en `.env`.
+   - Portable: copiá `auth_remote.example.txt` como `auth_remote.txt` junto al `.exe`, o un `.env` con las mismas variables.
 
-Para usar **tus** usuarios y claves:
+2. **Archivo local externo:** `AUTH_USERS_PATH` apunta a un JSON fuera del proyecto.
 
-1. **Recomendado:** mantené `auth_users.json` en la **raíz del repo**. Al ejecutar `build_windows.bat` o `python tools/portable_build.py` (o al guardar ese archivo con `watch_portable.bat` activo), se copia solo a `dist\MisComprobantesAnalisis\auth_users.json` junto al `.exe`.
+3. **Archivo junto al sistema (desarrollo / un solo equipo):** `auth_users.json` en la raíz del repo. El build portable puede copiarlo al `dist\` (no subir claves al repo).
 
-2. También podés copiar manualmente ese JSON junto al `.exe` en una máquina ya desplegada, o definir **`AUTH_USERS_PATH`** con la ruta absoluta a tu JSON.
-
-Si no hay ningún JSON válido y tampoco definiste `AUTH_ADMIN_USER` / `AUTH_ADMIN_PASSWORD` en el entorno, el login no aceptará credenciales.
+Si no hay URL remota, JSON válido ni `AUTH_ADMIN_USER` / `AUTH_ADMIN_PASSWORD`, el login no aceptará credenciales.
 
 ### Plantillas de imputación guardadas (solo en portable / local)
 
@@ -107,7 +106,7 @@ Ahí están el índice `plantillas.json` y los archivos `.xlsx` / `.csv` asociad
 
 **Build único (recompila y copia claves):**
 
-- **Doble clic o CMD:** `build_windows.bat` — instala dependencias, ejecuta PyInstaller y, si existe `auth_users.json` en la **raíz del repo**, lo copia automáticamente a `dist\MisComprobantesAnalisis\auth_users.json` (junto al `.exe`).
+- **Doble clic o CMD:** `build_windows.bat` — instala dependencias, ejecuta PyInstaller y, si existe `auth_users.json` en la **raíz del repo**, lo copia automáticamente a `dist\AnalisisIntegralContribuyente\auth_users.json` (junto al `.exe`).
 - **O a mano:** `python tools/portable_build.py` (desde la raíz del proyecto).
 
 **Vigilancia automática** (mientras `watch_portable.bat` o `python tools/portable_watch.py` esté en marcha, tras unos **3,5 s** sin nuevos guardados se **recompila** el portable y se copian las claves si hay `auth_users.json` en la raíz):
@@ -118,9 +117,9 @@ Ahí están el índice `plantillas.json` y los archivos `.xlsx` / `.csv` asociad
 
 Opciones: `python tools/portable_watch.py --no-initial` (no compila al arrancar), `--solo-claves` (solo vigila `auth_users.json`, sin el resto del repo).
 
-La salida del build queda en `dist\MisComprobantesAnalisis\`. El empaquetado se define en `MisComprobantesDesktop.spec`.
+La salida del build queda en `dist\AnalisisIntegralContribuyente\`. El empaquetado se define en `MisComprobantesDesktop.spec`.
 
-**Nota:** el portable incluye **Playwright + Chromium** en la subcarpeta `ms-playwright\` (se instala al compilar con `build_windows.bat`). Distribuí **toda** la carpeta `MisComprobantesAnalisis`, no solo el `.exe`. El ejecutable no muestra ventana de consola negra.
+**Nota:** el portable incluye **Playwright + Chromium** en la subcarpeta `ms-playwright\` (se instala al compilar con `build_windows.bat`). Distribuí **toda** la carpeta `AnalisisIntegralContribuyente`, no solo el `.exe`. El ejecutable no muestra ventana de consola negra.
 
 ---
 
@@ -157,10 +156,10 @@ Marcá cada ítem al publicar una versión nueva. El orden sugiere: código list
 - [ ] ¿Nuevos archivos en `templates/`, `static/`, JSON u otros datos? → actualizá `datas` en `MisComprobantesDesktop.spec` si hace falta.
 - [ ] Ejecutá `build_windows.bat` o `python tools/portable_build.py` (incluye PyInstaller + copia de `auth_users.json` si existe en la raíz).
 - [ ] (Opcional) Con `watch_portable.bat` activo, los guardados en el repo actualizan `dist\…` solos; si no, ejecutá `build_windows.bat` o `python tools/portable_build.py` antes de empaquetar el ZIP.
-- [ ] Smoke test en otra carpeta o otra PC: abrir `MisComprobantesAnalisis.exe`, login, procesar, plantillas si aplica.
+- [ ] Smoke test en otra carpeta o otra PC: abrir `AnalisisIntegralContribuyente.exe`, login, procesar, plantillas si aplica.
 - [ ] Si distribuís credenciales propias: asegurate de que el build haya copiado `auth_users.json` a `dist\…` (automático con `build_windows.bat` / `portable_build.py`) o documentá el uso de `AUTH_USERS_PATH`.
-- [ ] Generá el **ZIP** de toda la carpeta `dist\MisComprobantesAnalisis\` (no solo el `.exe`).
-- [ ] Nombrá el ZIP con versión o fecha (ej. `MisComprobantesAnalisis_2026-05-17.zip`) para saber qué build es.
+- [ ] Generá el **ZIP** de toda la carpeta `dist\AnalisisIntegralContribuyente\` (no solo el `.exe`).
+- [ ] Nombrá el ZIP con versión o fecha (ej. `AnalisisIntegralContribuyente_2026-05-17.zip`) para saber qué build es.
 
 #### Cierre
 

@@ -4,11 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ t('login_page_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
     <script>
       (function () {
         try {
-          if (localStorage.getItem("tema") === "oscuro") {
-            document.documentElement.classList.add("modo-oscuro");
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
           }
         } catch (e) {}
       })();
@@ -52,31 +66,11 @@
         max-width: 420px;
         margin: 0 auto;
       }
-      .barra-superior {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 0.5rem;
-        margin-bottom: 1.25rem;
-      }
-      .select-idioma {
-        font-size: 0.85rem;
-        padding: 0.38rem 0.55rem;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--bg-panel);
-        color: var(--text-primary);
-        cursor: pointer;
-      }
       .login-card {
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 1.25rem 1.35rem;
         background: var(--bg-panel);
-      }
-      .login-card h1 {
-        margin: 0 0 1rem 0;
-        font-size: 1.35rem;
       }
       .login-field {
         margin-bottom: 0.9rem;
@@ -141,23 +135,17 @@
   </head>
   <body>
     <div class="pagina">
-      <div class="barra-superior">
-        <label for="select-idioma-login" class="sr-only">{{ t('lang_select_aria') }}</label>
-        <select
-          id="select-idioma-login"
-          class="select-idioma"
-          autocomplete="off"
-          onchange="location.href='/set-lang/'+encodeURIComponent(this.value)+'?next='+encodeURIComponent('/login'+window.location.search);"
-        >
-          {% for code in langs %}
-          <option value="{{ code }}" {% if code == current_lang %}selected{% endif %}>{{ lang_labels[code] }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      {% with mostrar_volver=false, mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
 
       <div class="login-card">
-        <h1>{{ t('login_heading') }}</h1>
-        {% if login_error %}
+        {% with titulo=t('login_heading'), variante='login' %}
+        {% include 'partials/cabecera_isologo.html' %}
+        {% endwith %}
+        {% if login_error_msg %}
+        <p class="error" role="alert">{{ login_error_msg }}</p>
+        {% elif login_error_expired %}
+        <p class="error" role="alert">{{ t('login_error_expired') }}</p>
+        {% elif login_error %}
         <p class="error" role="alert">{{ t('login_error_bad') }}</p>
         {% endif %}
         <form method="post" action="{{ url_for('login') }}" autocomplete="on">
@@ -183,6 +171,11 @@
           >
         </p>
       </div>
+
+      {% include 'partials/pie_legal.html' %}
     </div>
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
   </body>
 </html>

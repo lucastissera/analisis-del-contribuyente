@@ -1,6 +1,9 @@
-# Variables locales (SECRET_KEY, rutas, etc.)
+# Variables locales (SECRET_KEY, rutas, credenciales, etc.)
 .env
 .env.local
+
+# Credenciales reales (usar auth_users.example.json como plantilla)
+auth_users.json
 
 # Python
 __pycache__/
@@ -15,4 +18,5 @@ env/
 dist/
 build/
 data_local_imputaciones/
+data_local_auth/
 .playwright-browsers/

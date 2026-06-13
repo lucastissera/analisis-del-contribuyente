@@ -12,6 +12,16 @@ from cuit_en_arca.stealth import SEC_ESTIMADOS_POR_CUIT
 _lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
 
+# Pasos que se muestran como checklist por cada CUIT del lote.
+PASOS_DESCARGA: tuple[tuple[str, str], ...] = (
+    ("login", "Iniciar sesión en ARCA"),
+    ("mis_comprobantes", "Abrir Mis Comprobantes"),
+    ("perfil", "Seleccionar contribuyente"),
+    ("emitidos", "Descargar Emitidos"),
+    ("recibidos", "Descargar Recibidos"),
+    ("procesamiento", "Procesamiento de archivos"),
+)
+
 
 @dataclass
 class EstadoJobLote:
@@ -24,8 +34,11 @@ class EstadoJobLote:
     error: str | None = None
     download_id: str | None = None
     nombre_archivo: str | None = None
+    carpeta: str | None = None
     descargas_ok: int = 0
     ingresos_fallidos: int = 0
+    fallos_detalle: list[str] = field(default_factory=list)
+    pasos: list[dict[str, str]] = field(default_factory=list)
     _inicio: float = field(default_factory=time.time)
     _duraciones: list[float] = field(default_factory=list)
     _ultima_fila: float = field(default_factory=time.time)
@@ -44,9 +57,12 @@ class EstadoJobLote:
             "error": self.error,
             "download_id": self.download_id,
             "nombre_archivo": self.nombre_archivo,
+            "carpeta": self.carpeta,
             "descargas_ok": self.descargas_ok,
             "ingresos_fallidos": self.ingresos_fallidos,
+            "fallos_detalle": list(self.fallos_detalle),
             "porcentaje": pct,
+            "pasos": list(self.pasos),
         }
 
 
@@ -85,13 +101,45 @@ def callback_progreso(job_id: str) -> Callable[[int, int, str, bool], None]:
     return _cb
 
 
+def reiniciar_pasos(job_id: str) -> None:
+    """Deja la checklist del CUIT actual en estado 'pendiente'."""
+    with _lock:
+        item = _jobs.get(job_id)
+        if not item:
+            return
+        st: EstadoJobLote = item["estado"]
+        st.pasos = [
+            {"clave": clave, "etiqueta": etiqueta, "estado": "pendiente"}
+            for clave, etiqueta in PASOS_DESCARGA
+        ]
+
+
+def callback_paso(job_id: str) -> Callable[[str, str], None]:
+    """on_paso(clave, estado) con estado en {en_curso, ok, error, omitido}."""
+
+    def _cb(clave: str, estado: str) -> None:
+        with _lock:
+            item = _jobs.get(job_id)
+            if not item:
+                return
+            st: EstadoJobLote = item["estado"]
+            for paso in st.pasos:
+                if paso["clave"] == clave:
+                    paso["estado"] = estado
+                    break
+
+    return _cb
+
+
 def marcar_ok(
     job_id: str,
     *,
-    download_id: str,
+    download_id: str | None = None,
     nombre_archivo: str,
     descargas_ok: int,
     ingresos_fallidos: int,
+    carpeta: str | None = None,
+    fallos_detalle: list[str] | None = None,
 ) -> None:
     with _lock:
         item = _jobs.get(job_id)
@@ -104,8 +152,10 @@ def marcar_ok(
         st.mensaje = "Completado"
         st.download_id = download_id
         st.nombre_archivo = nombre_archivo
+        st.carpeta = carpeta
         st.descargas_ok = descargas_ok
         st.ingresos_fallidos = ingresos_fallidos
+        st.fallos_detalle = list(fallos_detalle or [])
 
 
 def marcar_error(job_id: str, error: str) -> None:
@@ -116,6 +166,18 @@ def marcar_error(job_id: str, error: str) -> None:
         st: EstadoJobLote = item["estado"]
         st.estado = "error"
         st.error = error
+        st.eta_seg = 0
+
+
+def marcar_cancelado(job_id: str, mensaje: str = "Descarga cancelada.") -> None:
+    with _lock:
+        item = _jobs.get(job_id)
+        if not item:
+            return
+        st: EstadoJobLote = item["estado"]
+        st.estado = "cancelado"
+        st.error = mensaje
+        st.mensaje = mensaje
         st.eta_seg = 0
 
 

@@ -173,11 +173,88 @@ def _parsear_fila(
     )
 
 
-def leer_planilla_lote(buf: io.BytesIO) -> list[FilaPlanillaArca]:
+def parsear_entrada_manual(
+    *,
+    cuit_login: str,
+    clave_fiscal: str,
+    cuit_representado: str = "",
+    rango_fechas: str = "",
+) -> tuple[list[FilaPlanillaArca], list[str]]:
+    """Convierte campos tipeados a mano en una fila de lote (sin planilla Excel)."""
+    cols = {
+        "login": 0,
+        "clave": 1,
+        "repr": 2,
+        "rango": 3,
+        "desde": None,
+        "hasta": None,
+    }
+    row = (cuit_login, clave_fiscal, cuit_representado, rango_fechas)
+    try:
+        parsed = _parsear_fila(1, row, cols)
+    except CredencialesArchivoError as exc:
+        msg = str(exc).replace("Fila 1:", "Entrada manual:")
+        return [], [msg]
+    except Exception as exc:
+        return [], [f"Entrada manual: {exc}"]
+    if parsed is None:
+        return [], [
+            "Entrada manual: faltan CUIT ingreso, clave fiscal o período."
+        ]
+    return [parsed], []
+
+
+def parsear_entradas_manuales(
+    cuits_login: list[str],
+    claves: list[str],
+    cuits_repr: list[str],
+    rangos: list[str],
+) -> tuple[list[FilaPlanillaArca], list[str]]:
+    """Convierte varias filas tipeadas a mano en filas de lote (sin Excel).
+
+    Tolerante: una fila inválida se reporta en ``errores`` y no frena el resto.
+    Las filas totalmente vacías se ignoran.
     """
-    Planilla .xlsx:
-    - Fila 1: encabezados (CUIT ingreso, Clave fiscal, CUIT representado, Rango Fechas)
-    - Desde fila 2: una fila por contribuyente.
+    cols = {"login": 0, "clave": 1, "repr": 2, "rango": 3, "desde": None, "hasta": None}
+    n = max(len(cuits_login), len(claves), len(cuits_repr), len(rangos), 0)
+
+    def _at(lst: list[str], i: int) -> str:
+        return (lst[i] if i < len(lst) else "").strip()
+
+    filas: list[FilaPlanillaArca] = []
+    errores: list[str] = []
+    fila_visible = 0
+    for i in range(n):
+        login = _at(cuits_login, i)
+        clave = _at(claves, i)
+        repr_ = _at(cuits_repr, i)
+        rango = _at(rangos, i)
+        if not login and not clave and not repr_ and not rango:
+            continue
+        fila_visible += 1
+        row = (login, clave, repr_, rango)
+        try:
+            parsed = _parsear_fila(fila_visible, row, cols)
+        except CredencialesArchivoError as exc:
+            errores.append(str(exc).replace(f"Fila {fila_visible}:", f"Carga manual {fila_visible}:"))
+            continue
+        except Exception as exc:
+            errores.append(f"Carga manual {fila_visible}: {exc}")
+            continue
+        if parsed is not None:
+            filas.append(parsed)
+    return filas, errores
+
+
+def leer_planilla_lote_con_errores(
+    buf: io.BytesIO,
+) -> tuple[list[FilaPlanillaArca], list[str]]:
+    """Lee la planilla en forma tolerante.
+
+    Devuelve ``(filas_validas, errores_por_fila)``. Una fila con CUIT o clave
+    inválidos NO aborta la lectura: se reporta en ``errores_por_fila`` y se
+    continúa con las siguientes. Solo se eleva excepción ante problemas del
+    archivo completo (no se puede abrir o no hay ninguna fila utilizable).
     """
     try:
         buf.seek(0)
@@ -201,13 +278,31 @@ def leer_planilla_lote(buf: io.BytesIO) -> list[FilaPlanillaArca]:
     start = 2 if titulos else 1
 
     filas: list[FilaPlanillaArca] = []
+    errores: list[str] = []
     for n, row in enumerate(rows[start - 1 :], start=start):
-        parsed = _parsear_fila(n, row, cols)
+        try:
+            parsed = _parsear_fila(n, row, cols)
+        except CredencialesArchivoError as exc:
+            errores.append(str(exc))
+            continue
+        except Exception as exc:  # fila corrupta: no frenar el resto
+            errores.append(f"Fila {n}: {exc}")
+            continue
         if parsed is not None:
             filas.append(parsed)
 
-    if not filas:
+    if not filas and not errores:
         raise CredencialesArchivoError(
             "No hay filas de datos en la planilla (revisá fila 2 en adelante)."
+        )
+    return filas, errores
+
+
+def leer_planilla_lote(buf: io.BytesIO) -> list[FilaPlanillaArca]:
+    """Compatibilidad: devuelve solo las filas válidas (tolerante a filas malas)."""
+    filas, _errores = leer_planilla_lote_con_errores(buf)
+    if not filas:
+        raise CredencialesArchivoError(
+            "No hay filas válidas en la planilla (revisá CUIT, clave y fechas)."
         )
     return filas

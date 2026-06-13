@@ -1,0 +1,259 @@
+/* Barra superior (tema + navegación) y pie legal — compartido entre pantallas */
+.barra-superior {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.barra-volver {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.barra-volver a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+.barra-volver a:hover {
+  text-decoration: underline;
+}
+.barra-derecha {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.barra-tema {
+  display: flex;
+  justify-content: flex-end;
+}
+.btn-tema {
+  margin-top: 0;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.btn-tema:hover {
+  filter: brightness(1.06);
+}
+.btn-tema-iconos {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.btn-tema svg {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: middle;
+}
+.btn-tema .icono-sol {
+  display: none;
+}
+html.modo-oscuro .btn-tema .icono-luna {
+  display: none;
+}
+html.modo-oscuro .btn-tema .icono-sol {
+  display: block;
+}
+.barra-logout {
+  font-size: 0.9rem;
+}
+.barra-logout a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+.barra-logout a:hover {
+  text-decoration: underline;
+}
+.pie-legal {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-divider, var(--border));
+  text-align: right;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-muted-2, var(--text-muted));
+}
+.pie-legal p {
+  margin: 0 0 0.65rem 0;
+  margin-left: auto;
+  max-width: 38rem;
+}
+.pie-legal p:last-child {
+  margin-bottom: 0;
+}
+.pie-desktop-quit {
+  margin: 0 0 0.75rem 0;
+  margin-left: auto;
+  max-width: 38rem;
+}
+.pie-desktop-quit a {
+  font-weight: 600;
+  color: var(--color-link);
+}
+.dev-link-invisible {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dev-link-invisible:hover,
+.dev-link-invisible:focus,
+.dev-link-invisible:active,
+.dev-link-invisible:visited {
+  color: inherit;
+  text-decoration: none;
+}
+.pie-dev-activo {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.pie-dev-activo a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+.carpeta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+.btn-peligro {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--color-error, #b00020);
+  background: transparent;
+  color: var(--color-error, #b00020);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.btn-peligro:hover {
+  background: rgba(176, 0, 32, 0.08);
+}
+.btn-cancelar-descarga {
+  border-color: var(--color-error, #b00020);
+  color: var(--color-error, #b00020);
+}
+.acciones-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.btn-sec {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+.btn-sec:hover {
+  filter: brightness(1.05);
+}
+
+/* Isologo y cabecera de página */
+.cabecera {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 0.9rem;
+  margin-bottom: 1.2rem;
+}
+.cabecera h1 {
+  font-size: 1.6rem;
+  margin: 0;
+  line-height: 1.25;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.logo-sistema {
+  height: 48px;
+  width: auto;
+  max-width: min(100%, 240px);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.logo-sistema.logo-claro {
+  display: block;
+}
+.logo-sistema.logo-oscuro {
+  display: none;
+}
+html.modo-oscuro .logo-sistema.logo-claro {
+  display: none;
+}
+html.modo-oscuro .logo-sistema.logo-oscuro {
+  display: block;
+}
+.cabecera .isologo-wrap {
+  line-height: 0;
+  flex-shrink: 0;
+}
+.cabecera:not(.cabecera--login):not(.cabecera--centrada) .isologo-wrap .logo-sistema {
+  height: 48px;
+  width: auto;
+  max-width: min(240px, 100%);
+}
+.cabecera--centrada {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 1rem 0 2rem;
+  --titulo-fs: clamp(1.5rem, 3.4vw, 2.1rem);
+}
+.cabecera--centrada h1 {
+  flex: none;
+  width: 100%;
+  font-size: var(--titulo-fs);
+  line-height: 1.25;
+}
+.cabecera--centrada .isologo-wrap {
+  width: min(100%, calc(var(--titulo-fs) * 2 * 4.05));
+  line-height: 0;
+  margin-bottom: 0.65rem;
+}
+.cabecera--centrada .isologo-wrap .logo-sistema {
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}
+.cabecera--login {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 0.75rem;
+  --titulo-fs: 1.35rem;
+}
+.cabecera--login h1 {
+  flex: none;
+  width: 100%;
+  font-size: var(--titulo-fs);
+  line-height: 1.25;
+  margin-bottom: 1rem;
+}
+.cabecera--login .isologo-wrap {
+  /* Isologo horizontal: ancho ≈ 2× la tipografía «Iniciar sesión», escalado al aspecto real */
+  width: min(100%, calc(var(--titulo-fs) * 2 * 5.4));
+  line-height: 0;
+  margin-bottom: 0.65rem;
+}
+.cabecera--login .isologo-wrap .logo-sistema {
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}

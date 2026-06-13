@@ -1,0 +1,17 @@
+<div class="cabecera{% if variante %} cabecera--{{ variante }}{% endif %}">
+  <div class="isologo-wrap" aria-hidden="true">
+    <img
+      src="{{ url_for('static', filename='logo.png') }}"
+      alt=""
+      class="logo-sistema logo-claro"
+    />
+    <img
+      src="{{ url_for('static', filename='logo-oscuro.png') }}"
+      alt=""
+      class="logo-sistema logo-oscuro"
+    />
+  </div>
+  {% if titulo %}
+  <h1{% if h1_id %} id="{{ h1_id }}"{% endif %}>{{ titulo }}</h1>
+  {% endif %}
+</div>

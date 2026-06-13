@@ -4,11 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ t('page_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
     <script>
       (function () {
         try {
-          if (localStorage.getItem("tema") === "oscuro") {
-            document.documentElement.classList.add("modo-oscuro");
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
           }
         } catch (e) {}
       })();
@@ -181,13 +195,14 @@
       .recuadro h1 {
         font-size: 1.5rem;
       }
-      #titulo-procesador {
-        text-align: center;
-        font-size: clamp(1.65rem, 2.6vw, 2.1rem);
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        margin-bottom: 0.75rem;
-        width: 100%;
+      .secciones-top {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .seccion-top > .resultado-acordeon-cuerpo {
+        padding-bottom: 1.1rem;
       }
       button {
         margin-top: 0.75rem;
@@ -291,6 +306,116 @@
         display: inline-block;
         margin-right: 0.75rem;
       }
+      .arca-manual-help {
+        margin: 0 0 0.65rem;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        line-height: 1.45;
+      }
+      .arca-campos-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+        gap: 0.75rem 1rem;
+      }
+      .arca-campos-grid label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin: 0;
+        font-size: 0.92rem;
+      }
+      .arca-campos-grid input {
+        width: 100%;
+        padding: 0.45rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        font-size: 1rem;
+        box-sizing: border-box;
+      }
+      .clave-wrap {
+        display: flex;
+        align-items: stretch;
+        gap: 0.3rem;
+      }
+      .clave-wrap .clave-input {
+        flex: 1;
+        min-width: 0;
+      }
+      .clave-toggle {
+        flex-shrink: 0;
+        padding: 0.35rem 0.55rem;
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .arca-filas-manual {
+        margin: 0.75rem 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+      .arca-fila-manual {
+        position: relative;
+        padding: 0.65rem 2.2rem 0.65rem 0.75rem;
+        background: var(--bg-panel);
+        border-radius: 8px;
+        border: 1px solid var(--border-soft);
+      }
+      .arca-fila-quitar {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 1.6rem;
+        height: 1.6rem;
+        line-height: 1;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        background: var(--bg-body);
+        color: var(--text-muted);
+        font-size: 1.1rem;
+        cursor: pointer;
+      }
+      .arca-fila-quitar:hover {
+        color: #c0392b;
+        border-color: #c0392b;
+      }
+      .arca-agregar-fila {
+        margin-top: 0.25rem;
+        padding: 0.4rem 0.9rem;
+        border: 1px dashed var(--border);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      .arca-agregar-fila:hover {
+        border-style: solid;
+        background: var(--bg-panel);
+      }
+      .carpeta-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 0.75rem 0;
+      }
+      .btn-carpeta {
+        padding: 0.45rem 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-panel);
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
       .arca-progreso {
         display: none;
         margin: 1rem 0 0;
@@ -325,6 +450,63 @@
         font-size: 0.82rem;
         color: var(--text-secondary);
         margin: 0.35rem 0 0;
+      }
+      .arca-progreso-pasos {
+        list-style: none;
+        margin: 0.6rem 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+      .arca-progreso-pasos li {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+      .arca-progreso-pasos .paso-icono {
+        flex: 0 0 auto;
+        width: 1.15rem;
+        height: 1.15rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border: 1.5px solid var(--border-soft);
+        color: var(--text-muted-2);
+        background: transparent;
+      }
+      .arca-progreso-pasos li.paso-pendiente .paso-icono {
+        border-color: var(--border-soft);
+        color: var(--text-muted-2);
+      }
+      .arca-progreso-pasos li.paso-en_curso {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .arca-progreso-pasos li.paso-en_curso .paso-icono {
+        border-color: var(--color-accent, #2563eb);
+        color: var(--color-accent, #2563eb);
+        animation: paso-girar 0.9s linear infinite;
+      }
+      .arca-progreso-pasos li.paso-ok .paso-icono {
+        border-color: #16a34a;
+        background: #16a34a;
+        color: #fff;
+      }
+      .arca-progreso-pasos li.paso-error .paso-icono {
+        border-color: #dc2626;
+        background: #dc2626;
+        color: #fff;
+      }
+      @keyframes paso-girar {
+        to {
+          transform: rotate(360deg);
+        }
       }
       .nota-tecnica {
         font-size: 0.82rem;
@@ -585,86 +767,6 @@
           1.25rem
         );
       }
-      .pie-legal {
-        margin-top: 3rem;
-        padding-top: 1.25rem;
-        border-top: 1px solid var(--border-divider);
-        text-align: right;
-        font-size: 0.8rem;
-        line-height: 1.5;
-        color: var(--text-muted-2);
-      }
-      .pie-legal p {
-        margin: 0 0 0.65rem 0;
-        margin-left: auto;
-        max-width: 38rem;
-      }
-      .pie-legal p:last-child {
-        margin-bottom: 0;
-      }
-      .pie-desktop-quit {
-        margin: 0 0 0.75rem 0;
-        margin-left: auto;
-        max-width: 38rem;
-      }
-      .pie-desktop-quit a {
-        font-weight: 600;
-      }
-      .barra-tema {
-        display: flex;
-        justify-content: flex-end;
-      }
-      .btn-tema {
-        margin-top: 0;
-        padding: 0.45rem 0.85rem;
-        font-size: 0.85rem;
-        border: 1px solid var(--border);
-        background: var(--bg-panel);
-        color: var(--text-primary);
-        border-radius: 6px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-      .btn-tema:hover {
-        filter: brightness(1.06);
-      }
-      .btn-tema-iconos {
-        display: inline-flex;
-        align-items: center;
-        flex-shrink: 0;
-      }
-      .btn-tema svg {
-        width: 1.15em;
-        height: 1.15em;
-        vertical-align: middle;
-      }
-      .btn-tema .icono-sol {
-        display: none;
-      }
-      html.modo-oscuro .btn-tema .icono-luna {
-        display: none;
-      }
-      html.modo-oscuro .btn-tema .icono-sol {
-        display: block;
-      }
-      .barra-superior {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-      }
-      .barra-logout {
-        font-size: 0.9rem;
-      }
-      .barra-logout a {
-        text-decoration: none;
-      }
-      .barra-logout a:hover {
-        text-decoration: underline;
-      }
       .selector-idioma-wrap {
         display: inline-flex;
         align-items: center;
@@ -766,76 +868,7 @@
   </head>
   <body>
     <div class="pagina">
-      <div class="barra-superior">
-        <div class="selector-idioma-wrap">
-          <span class="selector-idioma-icono" aria-hidden="true">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </svg>
-          </span>
-          <label for="select-idioma" class="sr-only">{{ t('lang_select_aria') }}</label>
-          <select
-            id="select-idioma"
-            class="select-idioma"
-            autocomplete="off"
-            onchange="location.href='/set-lang/'+encodeURIComponent(this.value)+'?next='+encodeURIComponent(window.location.pathname+window.location.search);"
-          >
-            {% for code in langs %}
-            <option value="{{ code }}" {% if code == current_lang %}selected{% endif %}>{{ lang_labels[code] }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="barra-tema">
-        <button
-          type="button"
-          id="btn-tema"
-          class="btn-tema"
-          aria-pressed="false"
-          aria-label="{{ t('aria_theme_dark') }}"
-        >
-          <span class="btn-tema-iconos" aria-hidden="true">
-            <svg
-              class="icono-luna"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
-            <svg
-              class="icono-sol"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <circle cx="12" cy="12" r="5" />
-              <line x1="12" y1="1" x2="12" y2="3" />
-              <line x1="12" y1="21" x2="12" y2="23" />
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-              <line x1="1" y1="12" x2="3" y2="12" />
-              <line x1="21" y1="12" x2="23" y2="12" />
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-            </svg>
-          </span>
-          <span class="btn-tema-texto">{{ t('theme_dark') }}</span>
-        </button>
-        </div>
-        <div class="barra-logout">
-          <a href="{{ url_for('logout') }}">{{ t('logout_link') }}</a>
-        </div>
-      </div>
+      {% include 'partials/barra_superior.html' %}
 
       {% if error %}
       <div class="error">{{ error }}</div>
@@ -851,49 +884,14 @@
       {% endif %}
       {% endwith %}
 
-      <div class="paneles-superiores">
-        {% if mostrar_cuit_arca_ui %}
-        <section class="recuadro recuadro-izq" aria-labelledby="titulo-arca">
-          <h2 id="titulo-arca">{{ t('arca_lote_title') }}</h2>
-          <p class="subtitulo-detalle" style="margin-top: 0">{{ t('arca_lote_intro')|safe }}</p>
-          <ul class="lista-plantilla">
-            <li>{{ t('arca_lote_li1')|safe }}</li>
-            <li>{{ t('arca_lote_li2')|safe }}</li>
-            <li>{{ t('arca_lote_li3')|safe }}</li>
-          </ul>
-          <p class="nota-tecnica">{{ t('arca_lote_nota')|safe }}</p>
+      {% with titulo=t('processor_title'), h1_id='titulo-procesador' %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
 
-          <form id="form-arca-lote" method="post" action="/arca-descarga-lote" enctype="multipart/form-data">
-            <label for="planilla_arca"><strong>{{ t('arca_lote_label_file') }}</strong></label><br />
-            <input id="planilla_arca" name="planilla_arca" type="file" accept=".xlsx" required />
-            <br /><br />
-            <button type="submit" id="btn-arca-lote">{{ t('arca_lote_submit') }}</button>
-          </form>
-
-          <div id="arca-progreso" class="arca-progreso" aria-live="polite">
-            <strong id="arca-progreso-titulo">{{ t('arca_lote_progress_label') }}</strong>
-            <div class="arca-progreso-barra" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-              <span id="arca-progreso-fill"></span>
-            </div>
-            <p id="arca-progreso-detalle" class="arca-progreso-detalle">{{ t('arca_lote_working') }}</p>
-            <p id="arca-progreso-eta" class="arca-progreso-eta">{{ t('arca_lote_progress_eta_unknown') }}</p>
-          </div>
-
-          <div id="arca-resultado"></div>
-        </section>
-        {% endif %}
-
-        <section class="recuadro recuadro-der" aria-labelledby="titulo-procesador">
-          <h1 id="titulo-procesador">{{ t('processor_title') }}</h1>
-          <p class="subtitulo-detalle" style="margin-top: 0">{{ t('processor_intro_1')|safe }}</p>
-          <p class="subtitulo-detalle">{{ t('processor_intro_2')|safe }}</p>
-
-          <form
-            method="post"
-            action="/procesar"
-            enctype="multipart/form-data"
-            id="form-procesar-comprobantes"
-          >
+      <div class="secciones-top">
+        <details class="resultado-acordeon seccion-top" id="seccion-imputacion">
+          <summary class="resultado-acordeon-cabecera">{{ t('seccion_imputacion_titulo') }}</summary>
+          <div class="resultado-acordeon-cuerpo">
             <div class="importacion-ref-imputacion" id="bloque-imputaciones">
               <h3>{{ t('processor_section_imputaciones') }}</h3>
               <p class="subtitulo-detalle">{{ t('processor_section_imputaciones_help')|safe }}</p>
@@ -910,6 +908,7 @@
                     type="file"
                     accept=".xlsx,.csv"
                     class="input-archivo-oculto"
+                    form="form-procesar-comprobantes"
                   />
                   <p class="zona-soltar-texto" id="ayuda-soltar-imputaciones">
                     {{ t('drop_text_1')|safe }}
@@ -936,6 +935,7 @@
                   id="select-plantilla-imputacion"
                   class="select-plantilla-imputacion"
                   autocomplete="off"
+                  form="form-procesar-comprobantes"
                 >
                   <option value="">{{ t('plantilla_select_none') }}</option>
                   {% for pl in plantillas_imputacion_lista %}
@@ -953,6 +953,7 @@
                     maxlength="120"
                     placeholder="{{ t('plantilla_nombre_guardar_placeholder') }}"
                     autocomplete="off"
+                    form="form-procesar-comprobantes"
                     style="
                       max-width: 22rem;
                       width: 100%;
@@ -971,70 +972,215 @@
               </div>
               {% endif %}
             </div>
-            <div class="importacion-dual">
-              <div class="importacion-bloque" id="bloque-recibidos">
-                <h3>{{ t('processor_section_recibidos') }}</h3>
-                <p class="subtitulo-detalle">{{ t('processor_section_recibidos_help')|safe }}</p>
-                <div class="zona-soltar-wrap">
-                  <div
-                    class="zona-soltar-archivo"
-                    id="zona-soltar-recibidos"
-                    role="group"
-                    aria-label="{{ t('drop_zone_aria') }} — {{ t('processor_section_recibidos') }}"
-                  >
-                    <input
-                      id="excel-recibidos"
-                      name="excel_recibidos"
-                      type="file"
-                      accept=".xlsx,.csv"
-                      class="input-archivo-oculto"
-                    />
-                    <p class="zona-soltar-texto" id="ayuda-soltar-recibidos">
-                      {{ t('drop_text_1')|safe }}
-                      <button type="button" class="btn-elegir-archivo" id="btn-elegir-recibidos">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
-                    </p>
-                    <p
-                      class="zona-soltar-nombre archivo-seleccionado-vacio"
-                      id="nombre-archivo-recibidos"
-                      aria-live="polite"
-                    ></p>
+          </div>
+        </details>
+
+        {% if mostrar_cuit_arca_ui %}
+        <details class="resultado-acordeon seccion-top" id="seccion-arca">
+          <summary class="resultado-acordeon-cabecera">{{ t('seccion_arca_titulo') }}</summary>
+          <div class="resultado-acordeon-cuerpo">
+            <p class="subtitulo-detalle" style="margin-top: 0.85rem">{{ t('seccion_arca_texto')|safe }}</p>
+
+            <form id="form-arca-lote" method="post" action="/arca-descarga-lote" enctype="multipart/form-data">
+              <input type="hidden" id="arca-carpeta-destino" name="carpeta_destino" value="" />
+              <p><a href="{{ url_for('arca_plantilla') }}" download="Formato Analisis Comprobantes.xlsx">{{ t('arca_import_descargar') }}</a></p>
+              <label for="planilla_arca"><strong>{{ t('arca_lote_label_file') }}</strong></label><br />
+              <input id="planilla_arca" name="planilla_arca" type="file" accept=".xlsx" />
+
+              <div class="arca-metodo">
+                <h3>{{ t('arca_manual_titulo') }}</h3>
+                <p class="arca-manual-help">{{ t('arca_manual_help')|safe }}</p>
+                <div id="arca-filas-manual" class="arca-filas-manual">
+                  <div class="arca-fila-manual">
+                    <div class="arca-campos-grid">
+                      <label>
+                        <strong>{{ t('arca_manual_cuit_login') }}</strong>
+                        <input
+                          name="arca_cuit_login"
+                          type="text"
+                          inputmode="numeric"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                          spellcheck="false"
+                          data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-form-type="other"
+                          data-arca-manual="login"
+                          placeholder="{{ t('arca_manual_cuit_ph') }}"
+                          maxlength="13"
+                        />
+                      </label>
+                      <label>
+                        <strong>{{ t('arca_manual_clave') }}</strong>
+                        <div class="clave-wrap">
+                          <input
+                            class="clave-input"
+                            name="arca_clave_fiscal"
+                            type="password"
+                            autocomplete="new-password"
+                            autocorrect="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            data-lpignore="true"
+                            data-1p-ignore="true"
+                            data-form-type="other"
+                            data-arca-manual="clave"
+                          />
+                          <button
+                            type="button"
+                            class="clave-toggle"
+                            data-label-mostrar="{{ t('clave_mostrar') }}"
+                            data-label-ocultar="{{ t('clave_ocultar') }}"
+                            aria-label="{{ t('clave_mostrar') }}"
+                          >{{ t('clave_mostrar') }}</button>
+                        </div>
+                      </label>
+                      <label>
+                        <strong>{{ t('arca_manual_cuit_repr') }}</strong>
+                        <input
+                          name="arca_cuit_representado"
+                          type="text"
+                          inputmode="numeric"
+                          autocomplete="off"
+                          data-arca-manual="repr"
+                          placeholder="{{ t('arca_manual_cuit_ph') }}"
+                          maxlength="13"
+                        />
+                      </label>
+                      <label>
+                        <strong>{{ t('arca_manual_rango') }}</strong>
+                        <input
+                          name="arca_rango_fechas"
+                          type="text"
+                          autocomplete="off"
+                          data-arca-manual="rango"
+                          placeholder="{{ t('arca_manual_rango_ph') }}"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      class="arca-fila-quitar"
+                      aria-label="{{ t('arca_manual_quitar') }}"
+                      title="{{ t('arca_manual_quitar') }}"
+                    >
+                      &times;
+                    </button>
                   </div>
                 </div>
+                <button type="button" id="arca-agregar-fila" class="arca-agregar-fila">
+                  + {{ t('arca_manual_agregar') }}
+                </button>
               </div>
-              <div class="importacion-bloque" id="bloque-emitidos">
-                <h3>{{ t('processor_section_emitidos') }}</h3>
-                <p class="subtitulo-detalle">{{ t('processor_section_emitidos_help')|safe }}</p>
-                <div class="zona-soltar-wrap">
-                  <div
-                    class="zona-soltar-archivo"
-                    id="zona-soltar-emitidos"
-                    role="group"
-                    aria-label="{{ t('drop_zone_aria') }} — {{ t('processor_section_emitidos') }}"
-                  >
-                    <input
-                      id="excel-emitidos"
-                      name="excel_emitidos"
-                      type="file"
-                      accept=".xlsx,.csv"
-                      class="input-archivo-oculto"
-                    />
-                    <p class="zona-soltar-texto" id="ayuda-soltar-emitidos">
-                      {{ t('drop_text_1')|safe }}
-                      <button type="button" class="btn-elegir-archivo" id="btn-elegir-emitidos">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
-                    </p>
-                    <p
-                      class="zona-soltar-nombre archivo-seleccionado-vacio"
-                      id="nombre-archivo-emitidos"
-                      aria-live="polite"
-                    ></p>
-                  </div>
-                </div>
+              <div class="carpeta-row">
+                <p class="arca-manual-help" style="margin:0">
+                  {{ t('carpeta_destino_label') }}:
+                  <code id="arca-carpeta-label" class="ruta" style="word-break:break-all">—</code>
+                </p>
+                <button type="button" class="btn-carpeta" id="arca-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
+                <button type="button" class="btn-sec btn-cancelar-descarga" id="arca-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
               </div>
+              <div class="acciones-form">
+                <button type="submit" id="btn-arca-lote">{{ t('arca_lote_submit') }}</button>
+                <button type="button" class="btn-peligro" id="arca-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
+              </div>
+            </form>
+
+            <div id="arca-progreso" class="arca-progreso" aria-live="polite">
+              <strong id="arca-progreso-titulo">{{ t('arca_lote_progress_label') }}</strong>
+              <div class="arca-progreso-barra" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                <span id="arca-progreso-fill"></span>
+              </div>
+              <p id="arca-progreso-detalle" class="arca-progreso-detalle">{{ t('arca_lote_working') }}</p>
+              <p id="arca-progreso-eta" class="arca-progreso-eta">{{ t('arca_lote_progress_eta_unknown') }}</p>
+              <ul id="arca-progreso-pasos" class="arca-progreso-pasos"></ul>
             </div>
-            <br />
-            <button type="submit">{{ t('submit_analyze') }}</button>
-          </form>
-        </section>
+
+            <div id="arca-resultado"></div>
+          </div>
+        </details>
+        {% endif %}
+
+        <details class="resultado-acordeon seccion-top" id="seccion-procesador-manual" open>
+          <summary class="resultado-acordeon-cabecera">{{ t('seccion_procesador_manual_titulo') }}</summary>
+          <div class="resultado-acordeon-cuerpo">
+            <p class="subtitulo-detalle" style="margin-top: 0.85rem">{{ t('processor_intro_1')|safe }}</p>
+            <p class="subtitulo-detalle">{{ t('processor_intro_2')|safe }}</p>
+
+            <form
+              method="post"
+              action="/procesar"
+              enctype="multipart/form-data"
+              id="form-procesar-comprobantes"
+            >
+              <div class="importacion-dual">
+                <div class="importacion-bloque" id="bloque-recibidos">
+                  <h3>{{ t('processor_section_recibidos') }}</h3>
+                  <p class="subtitulo-detalle">{{ t('processor_section_recibidos_help')|safe }}</p>
+                  <div class="zona-soltar-wrap">
+                    <div
+                      class="zona-soltar-archivo"
+                      id="zona-soltar-recibidos"
+                      role="group"
+                      aria-label="{{ t('drop_zone_aria') }} — {{ t('processor_section_recibidos') }}"
+                    >
+                      <input
+                        id="excel-recibidos"
+                        name="excel_recibidos"
+                        type="file"
+                        accept=".xlsx,.csv"
+                        class="input-archivo-oculto"
+                      />
+                      <p class="zona-soltar-texto" id="ayuda-soltar-recibidos">
+                        {{ t('drop_text_1')|safe }}
+                        <button type="button" class="btn-elegir-archivo" id="btn-elegir-recibidos">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
+                      </p>
+                      <p
+                        class="zona-soltar-nombre archivo-seleccionado-vacio"
+                        id="nombre-archivo-recibidos"
+                        aria-live="polite"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+                <div class="importacion-bloque" id="bloque-emitidos">
+                  <h3>{{ t('processor_section_emitidos') }}</h3>
+                  <p class="subtitulo-detalle">{{ t('processor_section_emitidos_help')|safe }}</p>
+                  <div class="zona-soltar-wrap">
+                    <div
+                      class="zona-soltar-archivo"
+                      id="zona-soltar-emitidos"
+                      role="group"
+                      aria-label="{{ t('drop_zone_aria') }} — {{ t('processor_section_emitidos') }}"
+                    >
+                      <input
+                        id="excel-emitidos"
+                        name="excel_emitidos"
+                        type="file"
+                        accept=".xlsx,.csv"
+                        class="input-archivo-oculto"
+                      />
+                      <p class="zona-soltar-texto" id="ayuda-soltar-emitidos">
+                        {{ t('drop_text_1')|safe }}
+                        <button type="button" class="btn-elegir-archivo" id="btn-elegir-emitidos">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
+                      </p>
+                      <p
+                        class="zona-soltar-nombre archivo-seleccionado-vacio"
+                        id="nombre-archivo-emitidos"
+                        aria-live="polite"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="acciones-form">
+                <button type="submit">{{ t('submit_analyze') }}</button>
+                <button type="button" class="btn-peligro" id="proc-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
+              </div>
+            </form>
+          </div>
+        </details>
       </div>
 
       {% if mostrar_resultado %}
@@ -1637,57 +1783,14 @@
       </div>
       {% endif %}
 
-      <footer class="pie-legal" role="contentinfo">
-        {% if ejecutable_escritorio_frozen %}
-        <p class="pie-desktop-quit">
-          <a href="{{ url_for('desktop_quit') }}">{{ t('desktop_quit_link') }}</a>
-        </p>
-        {% endif %}
-        <p>{{ t('footer_copyright') }}</p>
-        <p>{{ t('footer_disclaimer') }}</p>
-      </footer>
+      {% include 'partials/pie_legal.html' %}
     </div>
     <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
-    <script>
-      (function () {
-        var I18N = {};
-        try {
-          var el = document.getElementById("i18n-js");
-          if (el && el.textContent) I18N = JSON.parse(el.textContent);
-        } catch (e) {}
-        var root = document.documentElement;
-        var btn = document.getElementById("btn-tema");
-        if (!btn) return;
-        var KEY = "tema";
-        var textoBtn = btn.querySelector(".btn-tema-texto");
-
-        function sincronizarBoton(oscuro) {
-          btn.setAttribute("aria-pressed", oscuro ? "true" : "false");
-          if (textoBtn) {
-            textoBtn.textContent = oscuro ? I18N.theme_light : I18N.theme_dark;
-          }
-          btn.setAttribute(
-            "aria-label",
-            oscuro ? I18N.aria_theme_light : I18N.aria_theme_dark
-          );
-        }
-
-        function aplicar(oscuro) {
-          if (oscuro) root.classList.add("modo-oscuro");
-          else root.classList.remove("modo-oscuro");
-          try {
-            localStorage.setItem(KEY, oscuro ? "oscuro" : "claro");
-          } catch (e) {}
-          sincronizarBoton(oscuro);
-        }
-
-        sincronizarBoton(root.classList.contains("modo-oscuro"));
-
-        btn.addEventListener("click", function () {
-          aplicar(!root.classList.contains("modo-oscuro"));
-        });
-      })();
-    </script>
+    <script src="{{ url_for('static', filename='elegir_carpeta.js') }}"></script>
+    <script src="{{ url_for('static', filename='cancelar_descarga.js') }}"></script>
+    <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
     <script>
       (function () {
         var inputR = document.getElementById("excel-recibidos");
@@ -1818,6 +1921,75 @@
       })();
 
       (function () {
+        // Carga manual de CUIT en ARCA: filas dinámicas (botón +) y limpieza de
+        // autocompletado del navegador (que mete el usuario/clave del sistema).
+        var cont = document.getElementById("arca-filas-manual");
+        var btnAdd = document.getElementById("arca-agregar-fila");
+        if (!cont) return;
+
+        function marcarEventos(fila) {
+          var inputs = fila.querySelectorAll("input[data-arca-manual]");
+          for (var i = 0; i < inputs.length; i++) {
+            (function (el) {
+              el.addEventListener("input", function () {
+                el.dataset.tocado = "1";
+              });
+            })(inputs[i]);
+          }
+          var quitar = fila.querySelector(".arca-fila-quitar");
+          if (quitar) {
+            quitar.addEventListener("click", function () {
+              var filas = cont.querySelectorAll(".arca-fila-manual");
+              if (filas.length > 1) {
+                fila.parentNode.removeChild(fila);
+              } else {
+                // Si es la única fila, sólo se vacían sus campos.
+                var ins = fila.querySelectorAll("input[data-arca-manual]");
+                for (var k = 0; k < ins.length; k++) {
+                  ins[k].value = "";
+                  delete ins[k].dataset.tocado;
+                }
+              }
+            });
+          }
+        }
+
+        function limpiarAutocompletado() {
+          var inputs = cont.querySelectorAll(
+            'input[data-arca-manual="login"], input[data-arca-manual="clave"], input[data-arca-manual="repr"]'
+          );
+          for (var i = 0; i < inputs.length; i++) {
+            if (!inputs[i].dataset.tocado) inputs[i].value = "";
+          }
+        }
+
+        if (btnAdd) {
+          btnAdd.addEventListener("click", function () {
+            var primera = cont.querySelector(".arca-fila-manual");
+            var nueva = primera.cloneNode(true);
+            var inputs = nueva.querySelectorAll("input[data-arca-manual]");
+            for (var i = 0; i < inputs.length; i++) {
+              inputs[i].value = "";
+              delete inputs[i].dataset.tocado;
+            }
+            cont.appendChild(nueva);
+            if (window.resetClaveFields) window.resetClaveFields(nueva);
+            marcarEventos(nueva);
+            var primerInput = nueva.querySelector("input[data-arca-manual]");
+            if (primerInput) primerInput.focus();
+          });
+        }
+
+        var filasIniciales = cont.querySelectorAll(".arca-fila-manual");
+        for (var i = 0; i < filasIniciales.length; i++) {
+          marcarEventos(filasIniciales[i]);
+        }
+        limpiarAutocompletado();
+        // Algunos navegadores autocompletan tras el load; reintentar una vez.
+        setTimeout(limpiarAutocompletado, 250);
+      })();
+
+      (function () {
         var form = document.getElementById("form-arca-lote");
         if (!form) return;
 
@@ -1834,6 +2006,58 @@
         var resultado = document.getElementById("arca-resultado");
         var btn = document.getElementById("btn-arca-lote");
         var barra = progreso && progreso.querySelector(".arca-progreso-barra");
+        var pasosUl = document.getElementById("arca-progreso-pasos");
+        var carpetaApi = McElegirCarpeta.enlazar({
+          inputId: "arca-carpeta-destino",
+          labelId: "arca-carpeta-label",
+          btnId: "arca-btn-elegir-carpeta",
+          titulo: I18N.carpeta_elegir_titulo || "Elegir carpeta de descarga",
+          onCancel: function () {
+            if (resultado) {
+              resultado.innerHTML =
+                '<p class="mensaje-error">' +
+                (I18N.carpeta_cancelada || "No se eligió carpeta.") +
+                "</p>";
+            }
+          },
+          onError: function () {
+            if (resultado) {
+              resultado.innerHTML =
+                '<p class="mensaje-error">' +
+                (I18N.carpeta_cancelada || "No se eligió carpeta.") +
+                "</p>";
+            }
+          },
+        });
+
+        function iconoPaso(estado) {
+          if (estado === "ok") return "\u2713";
+          if (estado === "error") return "\u2715";
+          if (estado === "en_curso") return "\u21bb";
+          return "";
+        }
+
+        function mostrarPasos(pasos) {
+          if (!pasosUl) return;
+          if (!pasos || !pasos.length) {
+            pasosUl.innerHTML = "";
+            return;
+          }
+          var html = "";
+          for (var i = 0; i < pasos.length; i++) {
+            var p = pasos[i];
+            var est = p.estado || "pendiente";
+            html +=
+              '<li class="paso-' +
+              est +
+              '"><span class="paso-icono">' +
+              iconoPaso(est) +
+              "</span><span>" +
+              (p.etiqueta || p.clave || "") +
+              "</span></li>";
+          }
+          pasosUl.innerHTML = html;
+        }
 
         function fmtTiempo(seg) {
           if (seg == null || seg < 0) return I18N.arca_lote_progress_eta_unknown || "";
@@ -1861,6 +2085,7 @@
             var plantilla = I18N.arca_lote_progress_eta || "Tiempo estimado restante: {t}";
             eta.textContent = plantilla.replace("{t}", fmtTiempo(st.eta_seg));
           }
+          mostrarPasos(st.pasos);
         }
 
         function mostrarOk(st) {
@@ -1875,16 +2100,39 @@
             var fallos = (I18N.msg_arca_lote_fallos || "").replace("{n}", st.ingresos_fallidos);
             html += '<p class="subtitulo-detalle">' + fallos + "</p>";
           }
-          var dl = (I18N.download_link || "Descargar {name}").replace(
-            "{name}",
-            st.nombre_archivo || "archivo"
-          );
-          html +=
-            '<p><a href="/descargar/' +
-            st.download_id +
-            '">' +
-            dl +
-            "</a></p>";
+          if (st.fallos_detalle && st.fallos_detalle.length) {
+            html +=
+              '<p class="subtitulo-detalle">' +
+              (I18N.fallos_detalle_titulo || "Detalle:") +
+              "</p><ul class=\"lista-fallos\">";
+            st.fallos_detalle.forEach(function (line) {
+              html += "<li>" + line + "</li>";
+            });
+            html += "</ul>";
+            if (st.carpeta && I18N.fallos_ver_archivo) {
+              html += '<p class="subtitulo-detalle">' + I18N.fallos_ver_archivo + "</p>";
+            }
+          }
+          if (st.carpeta) {
+            var msgC = I18N.carpeta_ok_guardado || "Archivos guardados en la carpeta:";
+            html +=
+              '<p class="subtitulo-detalle">' +
+              msgC +
+              '</p><p><code>' +
+              st.carpeta +
+              "</code></p>";
+          } else if (st.download_id) {
+            var dl = (I18N.download_link || "Descargar {name}").replace(
+              "{name}",
+              st.nombre_archivo || "archivo"
+            );
+            html +=
+              '<p><a href="/descargar/' +
+              st.download_id +
+              '">' +
+              dl +
+              "</a></p>";
+          }
           resultado.innerHTML = html;
         }
 
@@ -1895,18 +2143,21 @@
             })
             .then(function (st) {
               if (st.estado === "ok") {
+                McCancelarDescarga.limpiar();
                 mostrarOk(st);
                 return;
               }
-              if (st.estado === "error") {
+              if (st.estado === "error" || st.estado === "cancelado") {
+                McCancelarDescarga.limpiar();
                 if (progreso) progreso.classList.remove("activo");
                 if (btn) btn.disabled = false;
                 if (resultado) {
                   resultado.innerHTML =
-                    '<p class="mensaje-error">' + (st.error || "Error") + "</p>";
+                    '<p class="mensaje-error">' + (st.error || st.mensaje || "Error") + "</p>";
                 }
                 return;
               }
+              McCancelarDescarga.registrar("lote", jobId);
               mostrarProgreso(st);
               setTimeout(function () {
                 pollJob(jobId);
@@ -1922,10 +2173,86 @@
         form.addEventListener("submit", function (ev) {
           ev.preventDefault();
           if (resultado) resultado.innerHTML = "";
+
+          var fileInput = document.getElementById("planilla_arca");
+          var hasFile = fileInput && fileInput.files && fileInput.files.length;
+          if (!hasFile) {
+            // Validar que al menos una fila manual tenga CUIT + clave + período.
+            var filas = document.querySelectorAll("#arca-filas-manual .arca-fila-manual");
+            var algunaValida = false;
+            for (var fi = 0; fi < filas.length; fi++) {
+              var f = filas[fi];
+              var cuit = (
+                (f.querySelector('input[data-arca-manual="login"]') || {}).value || ""
+              ).trim();
+              var clave = (
+                (f.querySelector('input[data-arca-manual="clave"]') || {}).value || ""
+              ).trim();
+              var rango = (
+                (f.querySelector('input[data-arca-manual="rango"]') || {}).value || ""
+              ).trim();
+              if (cuit && clave && rango) {
+                algunaValida = true;
+                break;
+              }
+            }
+            if (!algunaValida) {
+              if (resultado) {
+                resultado.innerHTML =
+                  '<p class="mensaje-error">' +
+                  (I18N.err_arca_manual_incompleto ||
+                    I18N.err_arca_sin_datos ||
+                    "Completá CUIT ingreso, clave fiscal y período, o subí una planilla Excel.") +
+                  "</p>";
+              }
+              return;
+            }
+          }
+
+          var carpetaInput = document.getElementById("arca-carpeta-destino");
+          if (btn) btn.disabled = true;
+          McElegirCarpeta.resolver({ api: carpetaApi })
+            .then(function (ruta) {
+              if (!ruta) {
+                if (btn) btn.disabled = false;
+                if (resultado) {
+                  resultado.innerHTML =
+                    '<p class="mensaje-error">' +
+                    (I18N.carpeta_cancelada || "No se eligió carpeta.") +
+                    "</p>";
+                }
+                return;
+              }
+              carpetaApi.aplicar(ruta);
+              if (carpetaInput) carpetaInput.value = ruta;
+              lanzarLote();
+            })
+            .catch(function () {
+              if (btn) btn.disabled = false;
+              if (resultado) {
+                resultado.innerHTML =
+                  '<p class="mensaje-error">' +
+                  (I18N.carpeta_cancelada || "No se eligió carpeta.") +
+                  "</p>";
+              }
+            });
+        });
+
+        function lanzarLote() {
           if (btn) btn.disabled = true;
           mostrarProgreso({ porcentaje: 0, mensaje: I18N.arca_lote_working, eta_seg: null });
 
           var fd = new FormData(form);
+          // Adjuntar imputación contable (opcional) tomada de la solapa de
+          // imputación: si hay archivo y/o plantilla, se aplica al lote.
+          var impFile = document.getElementById("excel-imputaciones");
+          if (impFile && impFile.files && impFile.files.length) {
+            fd.append("excel_imputaciones", impFile.files[0]);
+          }
+          var impSel = document.getElementById("select-plantilla-imputacion");
+          if (impSel && impSel.value) {
+            fd.append("plantilla_imputacion_id", impSel.value);
+          }
           fetch("/arca-descarga-lote", {
             method: "POST",
             body: fd,
@@ -1950,6 +2277,7 @@
               pollJob(res.data.job_id);
             })
             .catch(function (err) {
+              McCancelarDescarga.limpiar();
               if (progreso) progreso.classList.remove("activo");
               if (btn) btn.disabled = false;
               if (resultado) {
@@ -1957,11 +2285,51 @@
                   '<p class="mensaje-error">' + String(err) + "</p>";
               }
             });
-        });
+        }
 
         {% if arca_job_id %}
+        McCancelarDescarga.registrar("lote", "{{ arca_job_id }}");
         pollJob("{{ arca_job_id }}");
         {% endif %}
+
+        McCancelarDescarga.enlazar(document.getElementById("arca-btn-cancelar"), {
+          confirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+        });
+
+        document.getElementById("arca-btn-limpiar-datos").addEventListener("click", function () {
+          McLimpiarDatos({
+            confirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+            formId: "form-arca-lote",
+            fileNames: ["planilla_arca"],
+            manualContainerId: "arca-filas-manual",
+            manualRowSelector: ".arca-fila-manual",
+            carpetaInputId: "arca-carpeta-destino",
+            carpetaLabelId: "arca-carpeta-label",
+            onListo: function () {
+              var res = document.getElementById("arca-resultado");
+              if (res) res.innerHTML = "";
+              var prog = document.getElementById("arca-progreso");
+              if (prog) prog.classList.remove("activo");
+            },
+          });
+        });
+
+        document.getElementById("proc-btn-limpiar-datos").addEventListener("click", function () {
+          McLimpiarDatos({
+            confirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+            formId: "form-procesar-comprobantes",
+            fileIds: ["excel-recibidos", "excel-emitidos"],
+            onListo: function () {
+              ["nombre-archivo-recibidos", "nombre-archivo-emitidos"].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) {
+                  el.textContent = "";
+                  el.classList.add("archivo-seleccionado-vacio");
+                }
+              });
+            },
+          });
+        });
       })();
     </script>
   </body>

@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('ap_page_title') }}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <script>
+      (function () {
+        try {
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --bg-body: #fff; --bg-panel: #fafafa; --text-primary: #1a1a1a; --text-muted: #444;
+        --border: #bbb; --color-link: #1565c0; --color-error: #b00020; --color-success: #1b5e20;
+        --btn-bg: #e65100; --btn-text: #fff; --btn-border: #bf360c; --ap-border: #e65100;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014; --bg-panel: #1a1c22; --text-primary: #eceef3; --text-muted: #aeb4c0;
+        --border: #3d424d; --color-link: #8ab4ff; --color-error: #ff8a95; --color-success: #81c995;
+        --btn-bg: #ff9800; --btn-text: #0c1118; --btn-border: #ffb74d; --ap-border: #ff9800;
+      }
+      body { font-family: Arial, sans-serif; margin: clamp(0.75rem, 2vw, 1.5rem); background: var(--bg-body); color: var(--text-primary); }
+      a { color: var(--color-link); }
+      .pagina { max-width: 100%; width: min(100%, 1420px); margin: 0 auto; }
+      .intro { color: var(--text-muted); line-height: 1.5; margin-bottom: 1rem; }
+      .nota { border-left: 4px solid var(--ap-border); padding: 0.7rem 1rem; background: rgba(230, 81, 0, 0.08); margin-bottom: 1.2rem; font-size: 0.92rem; line-height: 1.45; }
+      .panel { border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; background: var(--bg-panel); margin-bottom: 1.2rem; }
+      .panel h2 { font-size: 1.12rem; margin: 0 0 0.5rem; }
+      .help { color: var(--text-muted); font-size: 0.92rem; margin: 0 0 0.8rem; line-height: 1.45; }
+      input[type="text"], input[type="password"], input[type="file"], input[type="number"], input[type="time"], select {
+        width: 100%; padding: 0.45rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+        box-sizing: border-box; background: var(--bg-body); color: var(--text-primary); font-size: 0.95rem;
+      }
+      .checks { display: flex; flex-direction: column; gap: 0.5rem; }
+      .checks label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+      .horario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.8rem; align-items: end; }
+      .horario-grid label strong { display: block; margin-bottom: 0.25rem; font-size: 0.82rem; }
+      .filas-manual { display: flex; flex-direction: column; gap: 0.7rem; }
+      .fila-manual {
+        position: relative;
+        padding: 0.7rem 2.4rem 0.7rem 0.8rem;
+        background: var(--bg-body);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow-x: auto;
+      }
+      .campos-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 0.45rem;
+        min-width: 0;
+      }
+      .campos-grid label { min-width: 0; }
+      .campos-grid label strong {
+        display: block;
+        margin-bottom: 0.2rem;
+        font-size: 0.72rem;
+        line-height: 1.25;
+        word-wrap: break-word;
+      }
+      .campos-grid input { font-size: 0.88rem; min-width: 0; }
+      .clave-wrap {
+        display: flex;
+        align-items: stretch;
+        gap: 0.25rem;
+      }
+      .clave-wrap .clave-input {
+        flex: 1;
+        min-width: 0;
+      }
+      .clave-toggle {
+        flex-shrink: 0;
+        padding: 0.3rem 0.45rem;
+        font-size: 0.72rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .carpeta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.6rem 0; }
+      .fila-quitar { position: absolute; top: 0.5rem; right: 0.5rem; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-panel); cursor: pointer; }
+      .btn-agregar { margin-top: 0.8rem; padding: 0.45rem 0.8rem; border: 1px dashed var(--ap-border); background: transparent; border-radius: 8px; cursor: pointer; }
+      .btn-principal { padding: 0.65rem 1.3rem; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); border-radius: 8px; cursor: pointer; font-size: 1.02rem; }
+      .btn-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-top: 0.5rem; }
+      .btn-peligro { padding: 0.65rem 1.3rem; border: 1px solid var(--color-error); background: transparent; color: var(--color-error); border-radius: 8px; cursor: pointer; font-size: 1.02rem; }
+      .btn-peligro:hover { background: rgba(176, 0, 32, 0.08); }
+      .error { color: var(--color-error); margin: 0.6rem 0; }
+      .ok { color: var(--color-success); margin: 0.6rem 0; }
+      .estado-box { font-size: 0.92rem; line-height: 1.5; }
+      .ruta { font-family: Consolas, monospace; word-break: break-all; }
+      .progreso { margin-top: 0; display: none; }
+      .barra { height: 12px; border-radius: 6px; background: var(--border); overflow: hidden; margin: 0.6rem 0; }
+      .barra-fill { height: 100%; width: 0%; background: var(--ap-border); transition: width 0.3s ease; }
+      .pasos { list-style: none; padding: 0; margin: 0.6rem 0; }
+      .pasos li { padding: 0.2rem 0; font-size: 0.95rem; }
+      .pasos .ico { display: inline-block; width: 1.4rem; }
+      .paso-ok .ico { color: var(--color-success); }
+      .paso-error .ico { color: var(--color-error); }
+      .log { margin-top: 0.8rem; max-height: 260px; overflow: auto; background: var(--bg-body); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; font-family: Consolas, monospace; font-size: 0.82rem; white-space: pre-wrap; line-height: 1.4; }
+      .resultado-ok { margin-top: 1rem; padding: 0.9rem 1rem; border: 1px solid var(--color-success); border-radius: 10px; background: rgba(46, 125, 50, 0.08); }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% include 'partials/barra_superior.html' %}
+
+      {% with titulo=t('ap_heading') %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
+
+      <p class="intro">{{ t('ap_intro') }}</p>
+      <div class="nota">{{ t('ap_nota_conexion')|safe }}</div>
+
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      {% if ok %}<p class="ok">{{ ok }}</p>{% endif %}
+
+      <div class="panel estado-box" id="estado-panel">
+        <h2>{{ t('ap_estado_titulo') }}</h2>
+        <div id="estado-contenido"></div>
+      </div>
+
+      <form id="form-ap" method="post" action="{{ url_for('analisis_programado_guardar') }}" enctype="multipart/form-data" autocomplete="off">
+        <input type="hidden" id="ap-carpeta-destino" name="carpeta_destino" value="" />
+
+        <div class="panel">
+          <h2>{{ t('ap_sistemas_titulo') }}</h2>
+          <div class="checks">
+            <label><input type="checkbox" name="ap_sistemas" value="mis_comprobantes" /> {{ t('ap_sistema_mc') }}</label>
+            <label><input type="checkbox" name="ap_sistemas" value="dfe" /> {{ t('ap_sistema_dfe') }}</label>
+            <label><input type="checkbox" name="ap_sistemas" value="nuestra_parte" /> {{ t('ap_sistema_np') }}</label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>{{ t('ap_horario_titulo') }}</h2>
+          <p class="help" style="margin-top:0">{{ t('ap_horario_help') }}</p>
+          <div class="horario-grid">
+            <label><strong>{{ t('ap_dia_semana') }}</strong>
+              <select name="ap_dia_semana" id="ap-dia">
+                {% for i in range(7) %}
+                <option value="{{ i }}">{{ t('ap_dia_' ~ i) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label><strong>{{ t('ap_hora') }}</strong>
+              <input type="time" name="ap_hora_input" id="ap-hora-input" value="09:00" />
+              <input type="hidden" name="ap_hora" id="ap-hora" value="9" />
+              <input type="hidden" name="ap_minuto" id="ap-minuto" value="0" />
+            </label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>{{ t('ap_import_titulo') }}</h2>
+          <p class="help">{{ t('ap_import_help')|safe }}</p>
+          <p><a href="{{ url_for('analisis_programado_plantilla') }}" download="Formato Analisis Programado.xlsx">{{ t('ap_import_descargar') }}</a></p>
+          <label><strong>{{ t('ap_import_label_file') }}</strong>
+            <input type="file" name="ap_excel" accept=".xlsx" />
+          </label>
+        </div>
+
+        <div class="panel">
+          <h2>{{ t('ap_manual_titulo') }}</h2>
+          <p class="help">{{ t('ap_manual_help') }}</p>
+          <div id="filas-manual" class="filas-manual">
+            <div class="fila-manual">
+              <div class="campos-grid">
+                <label><strong>{{ t('ap_col_cuit') }}</strong><input name="ap_cuit" type="text" autocomplete="off" inputmode="numeric" /></label>
+                <label><strong>{{ t('ap_col_clave') }}</strong>
+                  <div class="clave-wrap">
+                    <input class="clave-input" name="ap_clave" type="password" autocomplete="new-password" />
+                    <button type="button" class="clave-toggle" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}">{{ t('clave_mostrar') }}</button>
+                  </div>
+                </label>
+                <label><strong>{{ t('ap_col_repr') }}</strong><input name="ap_repr" type="text" autocomplete="off" inputmode="numeric" /></label>
+                <label><strong>{{ t('ap_col_fechas_mc') }}</strong><input name="ap_fechas_mc" type="text" placeholder="dd/mm/aaaa - dd/mm/aaaa" /></label>
+                <label><strong>{{ t('ap_col_dfe_desde') }}</strong><input name="ap_dfe_desde" type="text" placeholder="dd/mm/aaaa" /></label>
+                <label><strong>{{ t('ap_col_dfe_hasta') }}</strong><input name="ap_dfe_hasta" type="text" placeholder="dd/mm/aaaa" /></label>
+                <label><strong>{{ t('ap_col_ejercicio') }}</strong><input name="ap_ejercicio" type="text" placeholder="2025" /></label>
+              </div>
+              <button type="button" class="fila-quitar" title="{{ t('ap_manual_quitar') }}">&times;</button>
+            </div>
+          </div>
+          <button type="button" id="agregar-fila" class="btn-agregar">+ {{ t('ap_manual_agregar') }}</button>
+        </div>
+
+        <div class="carpeta-row">
+          <p class="help" style="margin:0">{{ t('ap_carpeta_destino') }}: <code id="carpeta-label" class="ruta">—</code></p>
+          <button type="button" class="btn-sec" id="btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
+          <button type="button" class="btn-sec btn-cancelar-descarga" id="ap-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
+        </div>
+        <p class="error" id="form-error" style="display:none"></p>
+        <div class="btn-row">
+          <button type="submit" class="btn-principal" id="btn-guardar">{{ t('ap_submit') }}</button>
+          <button type="button" class="btn-peligro" id="btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
+          <button type="button" class="btn-peligro" id="btn-limpiar">{{ t('ap_limpiar') }}</button>
+        </div>
+      </form>
+
+      <div class="progreso panel" id="progreso-ap">
+        <h2>{{ t('ap_progress_label') }}</h2>
+        <div class="barra"><div class="barra-fill" id="ap-barra-fill"></div></div>
+        <div id="ap-mensaje-progreso" class="help"></div>
+        <ul class="pasos" id="ap-pasos"></ul>
+        <div class="resultado-ok" id="ap-resultado-ok" style="display:none"></div>
+        <p class="error" id="ap-error-progreso" style="display:none"></p>
+        <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('ap_log_titulo') }}</h2>
+        <div class="log" id="ap-log"></div>
+      </div>
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='elegir_carpeta.js') }}"></script>
+    <script src="{{ url_for('static', filename='cancelar_descarga.js') }}"></script>
+    <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    <script>
+      var CONFIG = {{ (config or {})|tojson }};
+      var I18N = {
+        carpetaTitulo: {{ t('carpeta_elegir_titulo')|tojson }},
+        carpetaCancelada: {{ t('carpeta_cancelada')|tojson }},
+        errorGuardar: {{ t('ap_err_guardar')|tojson }},
+        sinSistema: {{ t('ap_err_sin_sistema')|tojson }},
+        sinDatos: {{ t('ap_err_sin_datos')|tojson }},
+        okGuardado: {{ t('ap_ok_guardado')|tojson }},
+        estadoInactivo: {{ t('ap_estado_inactivo')|tojson }},
+        estadoActivo: {{ t('ap_estado_activo')|tojson }},
+        estadoPausado: {{ t('ap_estado_pausado')|tojson }},
+        limpiarConfirm: {{ t('ap_limpiar_confirm')|tojson }},
+        limpiarDatosConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
+        cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+        okLimpiado: {{ t('ap_ok_limpiado')|tojson }},
+        errLimpiar: {{ t('ap_err_limpiar')|tojson }},
+        ultimaEjecucion: {{ t('ap_ultima_ejecucion')|tojson }},
+        ultimoResultado: {{ t('ap_ultimo_resultado')|tojson }},
+        okTitulo: {{ t('ap_ok_titulo')|tojson }},
+        fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
+        fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
+        dias: [
+          {{ t('ap_dia_0')|tojson }}, {{ t('ap_dia_1')|tojson }}, {{ t('ap_dia_2')|tojson }},
+          {{ t('ap_dia_3')|tojson }}, {{ t('ap_dia_4')|tojson }}, {{ t('ap_dia_5')|tojson }},
+          {{ t('ap_dia_6')|tojson }}
+        ],
+        nombresSistema: {
+          mis_comprobantes: {{ t('ap_sistema_mc')|tojson }},
+          dfe: {{ t('ap_sistema_dfe')|tojson }},
+          nuestra_parte: {{ t('ap_sistema_np')|tojson }}
+        }
+      };
+
+      function pintarEstado(cfg) {
+        var el = document.getElementById("estado-contenido");
+        if (!el) return;
+        var html = "";
+        if (!cfg || !cfg.programacion_lista) {
+          html = "<p>" + I18N.estadoInactivo + "</p>";
+        } else if (cfg.activo === false) {
+          html = "<p>" + I18N.estadoPausado + "</p>";
+          var sisP = (cfg.sistemas || []).map(function (s) { return I18N.nombresSistema[s] || s; }).join(", ");
+          var horaP = String(cfg.hora || 0).padStart(2, "0") + ":" + String(cfg.minuto || 0).padStart(2, "0");
+          html += "<p>" + I18N.estadoActivo.replace("{dia}", I18N.dias[cfg.dia_semana] || "?")
+            .replace("{hora}", horaP).replace("{sistemas}", sisP) + "</p>";
+          if (cfg.carpeta_destino) html += "<p class=\"ruta\">" + cfg.carpeta_destino + "</p>";
+        } else {
+          var sis = (cfg.sistemas || []).map(function (s) { return I18N.nombresSistema[s] || s; }).join(", ");
+          var hora = String(cfg.hora || 0).padStart(2, "0") + ":" + String(cfg.minuto || 0).padStart(2, "0");
+          html = "<p>" + I18N.estadoActivo.replace("{dia}", I18N.dias[cfg.dia_semana] || "?")
+            .replace("{hora}", hora).replace("{sistemas}", sis) + "</p>";
+          if (cfg.carpeta_destino) html += "<p class=\"ruta\">" + cfg.carpeta_destino + "</p>";
+        }
+        if (cfg && cfg.ultima_ejecucion) {
+          html += "<p>" + I18N.ultimaEjecucion.replace("{fecha}", cfg.ultima_ejecucion) + "</p>";
+        }
+        if (cfg && cfg.ultimo_resultado && cfg.ultimo_resultado.mensaje) {
+          html += "<p>" + I18N.ultimoResultado.replace("{msg}", cfg.ultimo_resultado.mensaje) + "</p>";
+        }
+        el.innerHTML = html;
+      }
+
+      function cargarConfigEnForm(cfg) {
+        if (!cfg) return;
+        document.querySelectorAll('input[name="ap_sistemas"]').forEach(function (cb) {
+          cb.checked = (cfg.sistemas || []).indexOf(cb.value) >= 0;
+        });
+        document.getElementById("ap-dia").value = String(cfg.dia_semana || 0);
+        var h = cfg.hora != null ? cfg.hora : 9;
+        var m = cfg.minuto != null ? cfg.minuto : 0;
+        document.getElementById("ap-hora-input").value =
+          String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        document.getElementById("ap-hora").value = h;
+        document.getElementById("ap-minuto").value = m;
+        if (cfg.carpeta_destino) {
+          document.getElementById("ap-carpeta-destino").value = cfg.carpeta_destino;
+          document.getElementById("carpeta-label").textContent = cfg.carpeta_destino;
+        }
+      }
+
+      pintarEstado(CONFIG);
+      cargarConfigEnForm(CONFIG);
+
+      function sincronizarHoraOculta() {
+        var input = document.getElementById("ap-hora-input");
+        var p = (input.value || "09:00").split(":");
+        document.getElementById("ap-hora").value = parseInt(p[0], 10) || 0;
+        document.getElementById("ap-minuto").value = parseInt(p[1], 10) || 0;
+      }
+
+      document.getElementById("ap-hora-input").addEventListener("change", sincronizarHoraOculta);
+      document.getElementById("ap-hora-input").addEventListener("input", sincronizarHoraOculta);
+
+      (function filas() {
+        var cont = document.getElementById("filas-manual");
+        document.getElementById("agregar-fila").addEventListener("click", function () {
+          var n = cont.querySelector(".fila-manual").cloneNode(true);
+          n.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+          if (window.resetClaveFields) window.resetClaveFields(n);
+          cont.appendChild(n);
+        });
+        cont.addEventListener("click", function (e) {
+          if (!e.target.classList.contains("fila-quitar")) return;
+          var filas = cont.querySelectorAll(".fila-manual");
+          if (filas.length <= 1) {
+            filas[0].querySelectorAll("input").forEach(function (i) { i.value = ""; });
+            return;
+          }
+          e.target.closest(".fila-manual").remove();
+        });
+      })();
+
+      (function envio() {
+        var form = document.getElementById("form-ap");
+        var errBox = document.getElementById("form-error");
+        var btn = document.getElementById("btn-guardar");
+        var carpetaApi = McElegirCarpeta.enlazar({
+          inputId: "ap-carpeta-destino",
+          labelId: "carpeta-label",
+          btnId: "btn-elegir-carpeta",
+          titulo: I18N.carpetaTitulo,
+          onCancel: function () {
+            errBox.textContent = I18N.carpetaCancelada;
+            errBox.style.display = "block";
+          },
+          onError: function () {
+            errBox.textContent = I18N.carpetaCancelada;
+            errBox.style.display = "block";
+          },
+        });
+
+        function haySistema() {
+          return form.querySelectorAll('input[name="ap_sistemas"]:checked').length > 0;
+        }
+        function hayDatos() {
+          var file = form.querySelector('input[name="ap_excel"]');
+          if (file && file.files && file.files.length) return true;
+          var inputs = form.querySelectorAll("#filas-manual input[name='ap_cuit']");
+          for (var i = 0; i < inputs.length; i++) {
+            var f = inputs[i].closest(".fila-manual");
+            var cuit = (f.querySelector('[name="ap_cuit"]').value || "").trim();
+            var clave = (f.querySelector('[name="ap_clave"]').value || "").trim();
+            if (cuit && clave) return true;
+          }
+          return false;
+        }
+
+        form.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          sincronizarHoraOculta();
+          errBox.style.display = "none";
+          if (!haySistema()) {
+            errBox.textContent = I18N.sinSistema;
+            errBox.style.display = "block";
+            return;
+          }
+          if (!hayDatos()) {
+            errBox.textContent = I18N.sinDatos;
+            errBox.style.display = "block";
+            return;
+          }
+          btn.disabled = true;
+          McElegirCarpeta.resolver({ api: carpetaApi })
+            .then(function (ruta) {
+              if (!ruta) {
+                btn.disabled = false;
+                errBox.textContent = I18N.carpetaCancelada;
+                errBox.style.display = "block";
+                return;
+              }
+              carpetaApi.aplicar(ruta);
+              var fd = new FormData(form);
+              return fetch(form.action, {
+                method: "POST",
+                body: fd,
+                headers: { "X-Requested-With": "fetch" },
+                credentials: "same-origin",
+              }).then(function (r) {
+                return r.json().then(function (res) {
+                  return { ok: r.ok, res: res };
+                }).catch(function () {
+                  return { ok: false, res: { error: I18N.errorGuardar } };
+                });
+              });
+            })
+            .then(function (payload) {
+              if (!payload) return;
+              btn.disabled = false;
+              if (!payload.ok || payload.res.error) {
+                errBox.textContent = payload.res.error || I18N.errorGuardar;
+                errBox.style.display = "block";
+                return;
+              }
+              if (payload.res.config) {
+                CONFIG = payload.res.config;
+                pintarEstado(payload.res.config);
+                cargarConfigEnForm(payload.res.config);
+              }
+              alert(payload.res.mensaje || I18N.okGuardado);
+            })
+            .catch(function () {
+              btn.disabled = false;
+              errBox.textContent = I18N.errorGuardar || I18N.carpetaCancelada;
+              errBox.style.display = "block";
+            });
+        });
+      })();
+
+      (function limpiarAp() {
+        var btn = document.getElementById("btn-limpiar");
+        var errBox = document.getElementById("form-error");
+        if (!btn) return;
+
+        function resetearFormulario() {
+          document.querySelectorAll('input[name="ap_sistemas"]').forEach(function (cb) { cb.checked = false; });
+          document.getElementById("ap-dia").value = "0";
+          document.getElementById("ap-hora-input").value = "09:00";
+          sincronizarHoraOculta();
+          document.getElementById("ap-carpeta-destino").value = "";
+          document.getElementById("carpeta-label").textContent = "—";
+          var file = document.querySelector('input[name="ap_excel"]');
+          if (file) file.value = "";
+          var cont = document.getElementById("filas-manual");
+          var filas = cont.querySelectorAll(".fila-manual");
+          for (var i = filas.length - 1; i > 0; i--) filas[i].remove();
+          filas[0].querySelectorAll("input").forEach(function (i) { i.value = ""; });
+          if (window.resetClaveFields) window.resetClaveFields(filas[0]);
+        }
+
+        btn.addEventListener("click", function () {
+          if (!confirm(I18N.limpiarConfirm)) return;
+          btn.disabled = true;
+          errBox.style.display = "none";
+          fetch("{{ url_for('analisis_programado_limpiar') }}", {
+            method: "POST",
+            headers: { "X-Requested-With": "fetch" },
+            credentials: "same-origin",
+          })
+            .then(function (r) {
+              return r.json().then(function (res) {
+                return { ok: r.ok, res: res };
+              }).catch(function () {
+                return { ok: false, res: { error: I18N.errLimpiar } };
+              });
+            })
+            .then(function (payload) {
+              btn.disabled = false;
+              if (!payload.ok || payload.res.error) {
+                errBox.textContent = payload.res.error || I18N.errLimpiar;
+                errBox.style.display = "block";
+                return;
+              }
+              CONFIG = payload.res.config || {};
+              resetearFormulario();
+              pintarEstado(CONFIG);
+              var prog = document.getElementById("progreso-ap");
+              if (prog) prog.style.display = "none";
+              alert(payload.res.mensaje || I18N.okLimpiado);
+            })
+            .catch(function () {
+              btn.disabled = false;
+              errBox.textContent = I18N.errLimpiar;
+              errBox.style.display = "block";
+            });
+        });
+      })();
+
+      McCancelarDescarga.enlazar(document.getElementById("ap-btn-cancelar"), {
+        confirm: I18N.cancelarConfirm,
+      });
+
+      document.getElementById("btn-limpiar-datos").addEventListener("click", function () {
+        McLimpiarDatos({
+          confirm: I18N.limpiarDatosConfirm,
+          formId: "form-ap",
+          fileNames: ["ap_excel"],
+          manualContainerId: "filas-manual",
+          carpetaInputId: "ap-carpeta-destino",
+          carpetaLabelId: "carpeta-label",
+          onListo: function () {
+            var prog = document.getElementById("progreso-ap");
+            if (prog) prog.style.display = "none";
+          },
+        });
+      });
+
+      (function progresoAp() {
+        var prog = document.getElementById("progreso-ap");
+        var barra = document.getElementById("ap-barra-fill");
+        var msg = document.getElementById("ap-mensaje-progreso");
+        var pasosUl = document.getElementById("ap-pasos");
+        var logBox = document.getElementById("ap-log");
+        var okBox = document.getElementById("ap-resultado-ok");
+        var errProg = document.getElementById("ap-error-progreso");
+        var timer = null;
+
+        function pintaPasos(pasos) {
+          if (!pasos || !pasos.length) return;
+          pasosUl.innerHTML = "";
+          pasos.forEach(function (p) {
+            var li = document.createElement("li");
+            var ico = "○";
+            if (p.estado === "ok") { li.className = "paso-ok"; ico = "✓"; }
+            else if (p.estado === "en_curso") { ico = "⏳"; }
+            else if (p.estado === "error") { li.className = "paso-error"; ico = "✗"; }
+            li.innerHTML = '<span class="ico">' + ico + "</span>" + p.etiqueta;
+            pasosUl.appendChild(li);
+          });
+        }
+
+        function htmlFallos(fallos, carpeta) {
+          if (!fallos || !fallos.length) return "";
+          var h = "<p><strong>" + (I18N.fallosTitulo || "Fallos:") + "</strong></p><ul>";
+          fallos.slice(0, 20).forEach(function (f) {
+            h += "<li>" + f + "</li>";
+          });
+          h += "</ul>";
+          if (carpeta && I18N.fallosArchivo) {
+            h += "<p>" + I18N.fallosArchivo + "</p>";
+          }
+          return h;
+        }
+
+        function actualizar(st) {
+          if (!st || st.estado === "idle") return;
+          prog.style.display = "block";
+          barra.style.width = (st.porcentaje || 0) + "%";
+          msg.textContent = st.mensaje || "";
+          pintaPasos(st.pasos);
+          if (st.log && st.log.length) {
+            logBox.textContent = st.log.join("\n");
+            logBox.scrollTop = logBox.scrollHeight;
+          }
+          function refrescarEstadoProgramacion() {
+            fetch("{{ url_for('analisis_programado_estado') }}")
+              .then(function (r) { return r.json(); })
+              .then(function (cfg) {
+                CONFIG = cfg;
+                pintarEstado(cfg);
+              })
+              .catch(function () {});
+          }
+
+          if (st.estado === "ok") {
+            okBox.style.display = "block";
+            errProg.style.display = "none";
+            okBox.innerHTML =
+              "<strong>" + I18N.okTitulo + "</strong><br>" +
+              (st.mensaje || "") +
+              (st.carpeta ? '<br><span class="ruta">' + st.carpeta + "</span>" : "") +
+              htmlFallos(st.fallos, st.carpeta);
+            McCancelarDescarga.limpiar();
+            refrescarEstadoProgramacion();
+          } else if (st.estado === "error" || st.estado === "cancelado") {
+            errProg.style.display = "block";
+            errProg.textContent = st.error || st.mensaje || "Error";
+            okBox.style.display = "none";
+            McCancelarDescarga.limpiar();
+            refrescarEstadoProgramacion();
+          } else if (st.estado === "en_progreso") {
+            McCancelarDescarga.registrar("ap", null);
+          } else {
+            okBox.style.display = "none";
+            errProg.style.display = "none";
+          }
+        }
+
+        function poll() {
+          fetch("{{ url_for('analisis_programado_ejecucion') }}", { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (st) {
+              actualizar(st);
+              if (st.estado === "en_progreso" && !timer) {
+                timer = setInterval(poll, 1500);
+              } else if (st.estado === "ok" || st.estado === "error" || st.estado === "cancelado") {
+                if (timer) { clearInterval(timer); timer = null; }
+              }
+            })
+            .catch(function () {});
+        }
+
+        poll();
+        timer = setInterval(poll, 2500);
+      })();
+    </script>
+  </body>
+</html>

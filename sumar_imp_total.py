@@ -2155,6 +2155,121 @@ def escribir_excel_ajustado_con_formato(
         wb.save(destino)
 
 
+def _razon_social_propia(df: pd.DataFrame, emitidos: bool) -> str:
+    """Razón social del CUIT procesado (emisor en emitidos, receptor en recibidos)."""
+    col = "Denominación Emisor" if emitidos else "Denominación Receptor"
+    if col not in df.columns:
+        return ""
+    try:
+        vals = df[col].dropna().astype(str).str.strip()
+        vals = vals[vals != ""]
+        if vals.empty:
+            return ""
+        return str(vals.mode().iloc[0])
+    except Exception:
+        return ""
+
+
+def _resumen_por_mes(
+    totales_por_periodo: dict[str, dict[str, float]],
+) -> dict[str, dict[str, float]]:
+    """Extrae Neto Gravado Total, Total IVA e Imp. Total por período (YYYY-MM)."""
+    out: dict[str, dict[str, float]] = {}
+    for periodo, cols in totales_por_periodo.items():
+        out[str(periodo)] = {
+            "neto": float(cols.get("Neto Gravado Total", 0.0) or 0.0),
+            "iva": float(cols.get("Total IVA", 0.0) or 0.0),
+            "total": float(cols.get("Imp. Total", 0.0) or 0.0),
+        }
+    return out
+
+
+def procesar_comprobantes_a_excel(
+    data: bytes,
+    nombre_archivo: str,
+    *,
+    emitidos: bool,
+    ui_lang: str = "es",
+    mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+) -> bytes:
+    """Procesa un export de Mis Comprobantes y devuelve el Excel de informe completo."""
+    excel_bytes, _resumen = procesar_comprobantes_a_excel_y_resumen(
+        data,
+        nombre_archivo,
+        emitidos=emitidos,
+        ui_lang=ui_lang,
+        mapa_imputaciones=mapa_imputaciones,
+    )
+    return excel_bytes
+
+
+def procesar_comprobantes_a_excel_y_resumen(
+    data: bytes,
+    nombre_archivo: str,
+    *,
+    emitidos: bool,
+    ui_lang: str = "es",
+    mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+) -> tuple[bytes, dict]:
+    """Igual que ``procesar_comprobantes_a_excel`` pero devuelve también un
+    resumen ``{"razon_social", "por_mes": {YYYY-MM: {neto, iva, total}}}`` para
+    el Excel consolidado por CUIT (tabla dinámica).
+    """
+    buffer = io.BytesIO(data)
+    (
+        df_ajustado,
+        totales,
+        totales_por_periodo,
+        notas_credito_extras,
+        tabla_contrapartes,
+    ) = procesar_archivo(
+        buffer,
+        0,
+        nombre_archivo=nombre_archivo,
+        ui_lang=ui_lang,
+        emitidos=emitidos,
+    )
+
+    con_cols_imp = mapa_imputaciones is not None
+    resumen_imputacion = None
+    if con_cols_imp:
+        tabla_contrapartes = enriquecer_contrapartes_con_imputacion(
+            tabla_contrapartes, mapa_imputaciones
+        )
+        resumen_imputacion = resumen_totales_por_imputacion(tabla_contrapartes)
+
+    salida = io.BytesIO()
+    periodos_orden = periodos_orden_crono(
+        totales_por_periodo,
+        notas_credito_extras.get("neto_nc_por_periodo", {}),
+        notas_credito_extras.get("iva_nc_por_periodo", {}),
+    )
+    totales_resumen = {c: totales[c] for c in COLUMNAS_TOTAL_RESUMEN}
+    totales_detalle = {c: totales[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
+    escribir_excel_informe_completo(
+        df_ajustado,
+        salida,
+        emitidos=emitidos,
+        totales=totales,
+        totales_por_periodo=totales_por_periodo,
+        periodos_orden=periodos_orden,
+        notas_credito_extras=notas_credito_extras,
+        totales_resumen=totales_resumen,
+        totales_detalle=totales_detalle,
+        suma_total=round(total_resumen_pantalla(totales), 2),
+        columnas_orden=COLUMNAS_A_AJUSTAR,
+        tabla_contrapartes=tabla_contrapartes,
+        resumen_imputacion=resumen_imputacion,
+        con_columnas_imputacion_en_contrapartes=con_cols_imp,
+        mapa_imputaciones=mapa_imputaciones,
+    )
+    resumen = {
+        "razon_social": _razon_social_propia(df_ajustado, emitidos),
+        "por_mes": _resumen_por_mes(totales_por_periodo),
+    }
+    return salida.getvalue(), resumen
+
+
 def construir_ruta_salida(ruta_excel: str, salida_arg: str | None) -> Path:
     """Devuelve la ruta de salida para el excel ajustado."""
     if salida_arg:

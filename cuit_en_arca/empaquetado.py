@@ -36,11 +36,21 @@ def _buscar_7z_exe() -> Path | None:
     return None
 
 
+SUBCARPETA_PROCESADOS = "Procesados"
+
+
 def empaquetar_descargas(
     archivos: dict[str, bytes],
     errores_txt: str,
+    procesados: dict[str, bytes] | None = None,
+    extra: dict[str, bytes] | None = None,
 ) -> tuple[bytes, str, str]:
-    """Devuelve (contenido, nombre_archivo, mimetype)."""
+    """Devuelve (contenido, nombre_archivo, mimetype).
+
+    ``archivos`` van en la raíz del comprimido (tal como salen de ARCA),
+    ``procesados`` (si se pasan) en la subcarpeta ``Procesados/`` y ``extra``
+    (p. ej. el resumen por CUIT) también en la raíz.
+    """
     tmp = Path(tempfile.mkdtemp(prefix="arca_lote_"))
     paquete = tmp / "contenido"
     paquete.mkdir()
@@ -49,14 +59,26 @@ def empaquetar_descargas(
             (paquete / nombre).write_bytes(data)
         (paquete / NOMBRE_ERRORES).write_text(errores_txt, encoding="utf-8")
 
+        if extra:
+            for nombre, data in extra.items():
+                (paquete / nombre).write_bytes(data)
+
+        if procesados:
+            dir_proc = paquete / SUBCARPETA_PROCESADOS
+            dir_proc.mkdir(exist_ok=True)
+            for nombre, data in procesados.items():
+                (dir_proc / nombre).write_bytes(data)
+
         rar = _buscar_rar_exe()
         if rar:
             out = tmp / "mis_comprobantes_arca.rar"
-            files = [str(f) for f in paquete.iterdir() if f.is_file()]
+            # -r recursivo (incluye subcarpetas); cwd en el paquete para guardar
+            # rutas relativas (archivo.xlsx y Procesados\archivo.xlsx).
             subprocess.run(
-                [str(rar), "a", "-ep1", "-y", str(out), *files],
+                [str(rar), "a", "-r", "-y", str(out), "*"],
                 check=True,
                 capture_output=True,
+                cwd=str(paquete),
             )
             return out.read_bytes(), "mis_comprobantes_arca.rar", "application/x-rar-compressed"
 
@@ -64,17 +86,18 @@ def empaquetar_descargas(
         if seven:
             out = tmp / "mis_comprobantes_arca.7z"
             subprocess.run(
-                [str(seven), "a", "-y", str(out), str(paquete / "*")],
+                [str(seven), "a", "-r", "-y", str(out), "*"],
                 check=True,
                 capture_output=True,
+                cwd=str(paquete),
             )
             return out.read_bytes(), "mis_comprobantes_arca.7z", "application/x-7z-compressed"
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in paquete.iterdir():
+            for f in sorted(paquete.rglob("*")):
                 if f.is_file():
-                    zf.write(f, f.name)
+                    zf.write(f, str(f.relative_to(paquete)))
         return buf.getvalue(), "mis_comprobantes_arca.zip", "application/zip"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

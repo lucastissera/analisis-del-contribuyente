@@ -12,6 +12,8 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv(_APP_ROOT / ".env")
+    if getattr(sys, "frozen", False):
+        load_dotenv(Path(sys.executable).resolve().parent / ".env")
 except ImportError:
     pass
 
@@ -50,19 +52,72 @@ from flask import (
 if getattr(sys, "frozen", False):
     _bundle = Path(getattr(sys, "_MEIPASS", _APP_ROOT))
     _tpl = _bundle / "templates"
-    app = Flask(__name__, root_path=str(_bundle), template_folder=str(_tpl))
+    _static = _bundle / "static"
+    app = Flask(
+        __name__,
+        root_path=str(_bundle),
+        template_folder=str(_tpl),
+        static_folder=str(_static),
+    )
 else:
     app = Flask(__name__)
 
-from auth import verify_credentials, whatsapp_new_user_url
-from cuit_en_arca import ArcaProcesoError, ejecutar_lote_planilla_arca
-from cuit_en_arca.planilla_lote import leer_planilla_lote
+from auth import (
+    es_administrador,
+    export_users_payload,
+    iniciar_sincronizacion_usuarios,
+    verificar_acceso,
+    verificar_token_remoto,
+    whatsapp_new_user_url,
+)
+
+try:
+    iniciar_sincronizacion_usuarios()
+except Exception:
+    pass
+from cuit_en_arca import ArcaProcesoError, CancelacionUsuarioError, ejecutar_lote_arca
+from cuit_en_arca.planilla_lote import (
+    leer_planilla_lote_con_errores,
+    parsear_entrada_manual,
+    parsear_entradas_manuales,
+)
 from cuit_en_arca.progreso_lote import (
+    callback_paso,
     callback_progreso,
     crear_job,
     marcar_error,
+    marcar_cancelado,
     marcar_ok,
     obtener_job,
+    reiniciar_pasos,
+)
+from cuit_en_arca.progreso_dfe import (
+    agregar_resumen_cuit_dfe,
+    callback_log_dfe,
+    callback_paso_dfe,
+    crear_job_dfe,
+    marcar_error_dfe,
+    marcar_cancelado_dfe,
+    marcar_ok_dfe,
+    obtener_job_dfe,
+    progreso_cuit_dfe,
+    reiniciar_pasos_dfe,
+)
+from cuit_en_arca.planilla_nuestra_parte import (
+    leer_planilla_np_con_errores,
+    parsear_entradas_manuales_np,
+)
+from cuit_en_arca.progreso_nuestra_parte import (
+    agregar_resumen_cuit_np,
+    callback_log_np,
+    callback_paso_np,
+    crear_job_np,
+    marcar_error_np,
+    marcar_cancelado_np,
+    marcar_ok_np,
+    obtener_job_np,
+    progreso_cuit_np,
+    reiniciar_pasos_np,
 )
 from i18n import (
     LANG_LABELS,
@@ -139,7 +194,7 @@ def _session_idle_and_login():
             session["last_activity"] = now
             session.modified = True
 
-    if request.endpoint in ("login", "set_lang", "desktop_quit", None):
+    if request.endpoint in ("login", "set_lang", "desktop_quit", "logout", "api_auth_users", None):
         return None
     if session.get("user"):
         return None
@@ -198,6 +253,7 @@ def _inject_i18n():
         "t": t,
         "current_lang": lg,
         "current_user": session.get("user"),
+        "es_administrador": bool(session.get("es_admin")),
         "nombres_meses": MESES[lg],
         "langs": SUPPORTED_LANGS,
         "lang_labels": LANG_LABELS,
@@ -283,15 +339,24 @@ def login():
         next_val = (request.form.get("next") or "").strip()
         user = (request.form.get("usuario") or "").strip()
         pwd = request.form.get("password") or ""
-        if verify_credentials(user, pwd):
+        motivo = verificar_acceso(user, pwd)
+        if motivo is None:
             session["user"] = user
+            session["es_admin"] = es_administrador(user)
             session["last_activity"] = time.time()
             session.permanent = True
             session.modified = True
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
+        lg = normalize_lang(session.get("lang"))
         return render_template(
             "login.html",
-            login_error=True,
+            login_error=motivo == "invalid",
+            login_error_expired=motivo in ("expired", "not_yet"),
+            login_error_msg=(
+                tr(lg, "login_error_expired")
+                if motivo in ("expired", "not_yet")
+                else tr(lg, "login_error_bad")
+            ),
             next=next_val,
             whatsapp_url=whatsapp_new_user_url(),
         )
@@ -303,11 +368,59 @@ def login():
     )
 
 
+def _limpiar_sesion_flask() -> None:
+    """Cierra sesión Flask conservando solo el idioma elegido."""
+    lang = session.get("lang")
+    session.clear()
+    if lang:
+        session["lang"] = lang
+    session.modified = True
+
+
+def _aplicar_borrado_cookie_sesion(resp: Response) -> Response:
+    resp.delete_cookie(
+        app.config.get("SESSION_COOKIE_NAME", "session"),
+        path=app.config.get("SESSION_COOKIE_PATH") or "/",
+    )
+    return resp
+
+
+def _iniciar_cierre_proceso_desktop() -> None:
+    """Cierra navegador (modo app), borra cookies locales y termina el .exe."""
+
+    def _salir() -> None:
+        time.sleep(0.6)
+        try:
+            from cuit_en_arca.browser_desktop import (
+                cerrar_navegador_desktop,
+                limpiar_cookies_localhost,
+            )
+
+            cerrar_navegador_desktop()
+            limpiar_cookies_localhost()
+        except Exception:
+            pass
+        os._exit(0)
+
+    threading.Thread(target=_salir, daemon=True).start()
+
+
+def _respuesta_cierre_desktop() -> Response:
+    """Cierra el proceso; la ventana del navegador se termina por PID/perfil."""
+    _limpiar_sesion_flask()
+    resp = Response("", mimetype="text/html; charset=utf-8")
+    _aplicar_borrado_cookie_sesion(resp)
+    _iniciar_cierre_proceso_desktop()
+    return resp
+
+
 @app.get("/logout")
 def logout():
-    session.pop("user", None)
-    session.pop("last_activity", None)
-    return redirect(url_for("login"))
+    _limpiar_sesion_flask()
+    if getattr(sys, "frozen", False):
+        return _respuesta_cierre_desktop()
+    resp = redirect(url_for("login"))
+    return _aplicar_borrado_cookie_sesion(resp)
 
 
 @app.route("/desktop-quit", methods=["GET", "POST"])
@@ -318,17 +431,8 @@ def desktop_quit():
     ra = (request.remote_addr or "").replace("::ffff:", "")
     if ra not in ("127.0.0.1", "::1"):
         abort(403)
-    lg = normalize_lang(session.get("lang"))
-
-    def _salir() -> None:
-        time.sleep(0.2)
-        os._exit(0)
-
-    threading.Thread(target=_salir, daemon=True).start()
-    return Response(
-        tr(lg, "desktop_quit_cerrando") + "\n",
-        mimetype="text/plain; charset=utf-8",
-    )
+    _limpiar_sesion_flask()
+    return _respuesta_cierre_desktop()
 
 
 MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -336,6 +440,11 @@ MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 @app.get("/")
 def index():
+    return render_template("inicio.html")
+
+
+@app.get("/procesador")
+def procesador():
     return render_template("index.html")
 
 
@@ -673,6 +782,66 @@ def plantillas_imputaciones():
     )
 
 
+def _filas_arca_desde_peticion(
+    lg: str,
+) -> tuple[list, list[str], str | None]:
+    """Devuelve (filas, errores_parciales, mensaje_error | None)."""
+    planilla = request.files.get("planilla_arca")
+    has_file = bool(
+        planilla and getattr(planilla, "filename", None) and str(planilla.filename).strip()
+    )
+
+    if has_file:
+        if not Path(planilla.filename).name.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_arca_xlsx")
+        try:
+            filas, errores = leer_planilla_lote_con_errores(
+                io.BytesIO(planilla.read())
+            )
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            msg = "; ".join(errores) or tr(lg, "err_arca_xlsx")
+            return [], errores, msg
+        return filas, errores, None
+
+    cuits_login = request.form.getlist("arca_cuit_login")
+    claves = request.form.getlist("arca_clave_fiscal")
+    cuits_repr = request.form.getlist("arca_cuit_representado")
+    rangos = request.form.getlist("arca_rango_fechas")
+
+    hay_algo = any(
+        (v or "").strip()
+        for lista in (cuits_login, claves, cuits_repr, rangos)
+        for v in lista
+    )
+    if not hay_algo:
+        return [], [], tr(lg, "err_arca_sin_datos")
+
+    filas, errores = parsear_entradas_manuales(
+        cuits_login, claves, cuits_repr, rangos
+    )
+    if not filas:
+        msg = "; ".join(errores) or tr(lg, "err_arca_manual_incompleto")
+        return [], errores, msg
+    return filas, errores, None
+
+
+@app.get("/arca-descarga-lote/plantilla")
+def arca_plantilla():
+    from cuit_en_arca.plantillas_importacion import ruta_plantilla_arca_excel
+
+    ruta = ruta_plantilla_arca_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato Analisis Comprobantes.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.post("/arca-descarga-lote")
 def arca_descarga_lote():
     lg = normalize_lang(session.get("lang"))
@@ -687,36 +856,60 @@ def arca_descarga_lote():
             403,
         )
 
-    planilla = request.files.get("planilla_arca")
-    if not planilla or not (planilla.filename or "").strip():
-        msg = tr(lg, "err_arca_planilla_missing")
+    filas, _errores_planilla, err_msg = _filas_arca_desde_peticion(lg)
+    if err_msg:
         if request.headers.get("X-Requested-With") == "fetch":
-            return jsonify({"error": msg}), 400
-        return render_template("index.html", error=msg)
-    if not Path(planilla.filename).name.lower().endswith(".xlsx"):
-        msg = tr(lg, "err_arca_xlsx")
-        if request.headers.get("X-Requested-With") == "fetch":
-            return jsonify({"error": msg}), 400
-        return render_template("index.html", error=msg)
+            return jsonify({"error": err_msg}), 400
+        return render_template("index.html", error=err_msg)
 
-    planilla_bytes = planilla.read()
-    try:
-        filas = leer_planilla_lote(io.BytesIO(planilla_bytes))
-    except ArcaProcesoError as exc:
+    # Imputación contable opcional: si se adjuntó un Excel en la solapa de
+    # imputación o se eligió una plantilla guardada, se aplica al lote
+    # (solo a comprobantes recibidos). Si no, el lote se procesa sin imputar.
+    mapa_imputaciones, err_imp, _datos_imp, _imp_nom = (
+        _mapa_imputaciones_desde_peticion(lg)
+    )
+    if err_imp:
         if request.headers.get("X-Requested-With") == "fetch":
-            return jsonify({"error": str(exc)}), 400
-        return render_template("index.html", error=str(exc))
+            return jsonify({"error": err_imp}), 400
+        return render_template("index.html", error=err_imp)
+
+    carpeta_destino = (request.form.get("carpeta_destino") or "").strip() or None
 
     job_id = uuid4().hex
+    from cuit_en_arca.cancelacion import reset_cancelacion
+
+    reset_cancelacion(job_id)
     crear_job(job_id, len(filas))
     on_prog = callback_progreso(job_id)
+    on_paso = callback_paso(job_id)
+
+    def _on_reiniciar() -> None:
+        reiniciar_pasos(job_id)
 
     def _worker() -> None:
         try:
-            resultado = ejecutar_lote_planilla_arca(
-                io.BytesIO(planilla_bytes),
+            resultado = ejecutar_lote_arca(
+                filas,
+                errores_planilla=_errores_planilla,
                 on_progreso=on_prog,
+                on_paso=on_paso,
+                on_reiniciar_pasos=_on_reiniciar,
+                mapa_imputaciones=mapa_imputaciones,
+                carpeta_destino=carpeta_destino,
+                job_id=job_id,
             )
+            if resultado.carpeta:
+                # Modo carpeta: los archivos ya están en disco, sin descarga.
+                fallos = list(resultado.ingresos_fallidos) + list(resultado.advertencias)
+                marcar_ok(
+                    job_id,
+                    nombre_archivo=resultado.nombre_archivo,
+                    carpeta=resultado.carpeta,
+                    descargas_ok=resultado.descargas_ok,
+                    ingresos_fallidos=len(resultado.ingresos_fallidos),
+                    fallos_detalle=fallos,
+                )
+                return
             did = uuid4().hex
             DESCARGAS[did] = (
                 resultado.contenido,
@@ -729,7 +922,10 @@ def arca_descarga_lote():
                 nombre_archivo=resultado.nombre_archivo,
                 descargas_ok=resultado.descargas_ok,
                 ingresos_fallidos=len(resultado.ingresos_fallidos),
+                fallos_detalle=list(resultado.ingresos_fallidos) + list(resultado.advertencias),
             )
+        except CancelacionUsuarioError as exc:
+            marcar_cancelado(job_id, str(exc))
         except ArcaProcesoError as exc:
             marcar_error(job_id, str(exc))
         except Exception as exc:
@@ -755,9 +951,563 @@ def arca_lote_estado(job_id: str):
     return jsonify(estado)
 
 
+# --------------------------------------------------------------------------- #
+# Domicilio Fiscal Electrónico (Ventanilla Electrónica)
+# --------------------------------------------------------------------------- #
+def _filas_dfe_desde_peticion(lg: str):
+    """Devuelve (filas, errores_planilla, mensaje_error)."""
+    f = request.files.get("dfe_excel")
+    has_file = bool(f and getattr(f, "filename", None) and str(f.filename).strip())
+    if has_file:
+        nombre = Path(f.filename).name
+        if not nombre.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_only_xlsx_csv")
+        try:
+            filas, errores = leer_planilla_lote_con_errores(io.BytesIO(f.read()))
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            return [], errores, "; ".join(errores) or tr(lg, "dfe_err_sin_datos")
+        return filas, errores, None
+
+    cuits = request.form.getlist("dfe_cuit_login")
+    claves = request.form.getlist("dfe_clave_fiscal")
+    reprs = request.form.getlist("dfe_cuit_representado")
+    desdes = request.form.getlist("dfe_fecha_desde")
+    hastas = request.form.getlist("dfe_fecha_hasta")
+
+    hay_algo = any(
+        (v or "").strip()
+        for lista in (cuits, claves, reprs, desdes, hastas)
+        for v in lista
+    )
+    if not hay_algo:
+        return [], [], tr(lg, "dfe_err_sin_datos")
+
+    def _at(lista, i):
+        return (lista[i] if i < len(lista) else "").strip()
+
+    n = max(len(cuits), len(claves), len(reprs), len(desdes), len(hastas))
+    rangos = []
+    for i in range(n):
+        d = _at(desdes, i)
+        h = _at(hastas, i)
+        rangos.append(f"{d} - {h}" if (d or h) else "")
+
+    filas, errores = parsear_entradas_manuales(cuits, claves, reprs, rangos)
+    if not filas:
+        return [], errores, "; ".join(errores) or tr(lg, "dfe_err_manual_incompleto")
+    return filas, errores, None
+
+
+@app.get("/domicilio-fiscal")
+def domicilio_fiscal():
+    return render_template("dfe.html")
+
+
+@app.get("/domicilio-fiscal/plantilla")
+def dfe_plantilla():
+    from cuit_en_arca.dfe_automation import ruta_plantilla_dfe_excel
+
+    ruta = ruta_plantilla_dfe_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato DFE.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/dfe-descargar")
+def dfe_descargar():
+    lg = normalize_lang(session.get("lang"))
+    es_fetch = request.headers.get("X-Requested-With") == "fetch"
+
+    if not _mostrar_ui_cuit_arca():
+        if es_fetch:
+            return jsonify({"error": tr(lg, "err_arca_disabled")}), 403
+        return render_template("dfe.html", error=tr(lg, "err_arca_disabled")), 403
+
+    filas, _errores, err_msg = _filas_dfe_desde_peticion(lg)
+    if err_msg:
+        if es_fetch:
+            return jsonify({"error": err_msg}), 400
+        return render_template("dfe.html", error=err_msg)
+
+    from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
+
+    # DFE siempre visible para que el usuario siga el proceso en pantalla.
+    headless = False
+
+    carpeta_destino = (request.form.get("carpeta_destino") or "").strip() or None
+
+    job_id = uuid4().hex
+    from cuit_en_arca.cancelacion import reset_cancelacion
+
+    reset_cancelacion(job_id)
+    crear_job_dfe(job_id, len(filas))
+    reiniciar_pasos_dfe(job_id)
+    on_log = callback_log_dfe(job_id)
+    on_paso = callback_paso_dfe(job_id)
+
+    def _reinit() -> None:
+        reiniciar_pasos_dfe(job_id)
+
+    def _prog(actual: int, total: int, msg: str) -> None:
+        progreso_cuit_dfe(job_id, actual, total, msg)
+
+    def _cuit_fin(cuit, razon_social, total_archivos, error) -> None:
+        agregar_resumen_cuit_dfe(
+            job_id,
+            cuit=cuit,
+            razon_social=razon_social,
+            total_archivos=total_archivos,
+            error=error,
+        )
+
+    def _worker() -> None:
+        try:
+            carpeta = ejecutar_dfe_lote(
+                filas,
+                headless=headless,
+                on_log=on_log,
+                on_paso=on_paso,
+                on_reiniciar_pasos=_reinit,
+                on_progreso=_prog,
+                on_cuit_fin=_cuit_fin,
+                carpeta_base=carpeta_destino,
+                job_id=job_id,
+            )
+            marcar_ok_dfe(job_id, carpeta=str(carpeta))
+        except CancelacionUsuarioError as exc:
+            marcar_cancelado_dfe(job_id, str(exc))
+        except ArcaProcesoError as exc:
+            marcar_error_dfe(job_id, str(exc))
+        except Exception as exc:
+            marcar_error_dfe(job_id, tr(lg, "err_arca_unexpected", exc=exc))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    if es_fetch:
+        return jsonify({"job_id": job_id, "total": len(filas)})
+    return render_template("dfe.html", dfe_job_id=job_id)
+
+
+@app.get("/dfe-estado/<job_id>")
+def dfe_estado(job_id: str):
+    estado = obtener_job_dfe(job_id)
+    if estado is None:
+        return jsonify({"error": "job_not_found"}), 404
+    return jsonify(estado)
+
+
+# --------------------------------------------------------------------------- #
+# Nuestra Parte
+# --------------------------------------------------------------------------- #
+def _filas_np_desde_peticion(lg: str):
+    """Devuelve (filas, errores_planilla, mensaje_error) para Nuestra Parte."""
+    f = request.files.get("np_excel")
+    has_file = bool(f and getattr(f, "filename", None) and str(f.filename).strip())
+    if has_file:
+        nombre = Path(f.filename).name
+        if not nombre.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_only_xlsx_csv")
+        try:
+            filas, errores = leer_planilla_np_con_errores(io.BytesIO(f.read()))
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            return [], errores, "; ".join(errores) or tr(lg, "np_err_sin_datos")
+        return filas, errores, None
+
+    cuits = request.form.getlist("np_cuit_login")
+    claves = request.form.getlist("np_clave_fiscal")
+    reprs = request.form.getlist("np_cuit_representado")
+    ejercicios = request.form.getlist("np_ejercicio")
+
+    hay_algo = any(
+        (v or "").strip()
+        for lista in (cuits, claves, reprs, ejercicios)
+        for v in lista
+    )
+    if not hay_algo:
+        return [], [], tr(lg, "np_err_sin_datos")
+
+    filas, errores = parsear_entradas_manuales_np(cuits, claves, reprs, ejercicios)
+    if not filas:
+        return [], errores, "; ".join(errores) or tr(lg, "np_err_manual_incompleto")
+    return filas, errores, None
+
+
+@app.get("/nuestra-parte/plantilla")
+def np_plantilla():
+    from cuit_en_arca.plantillas_importacion import ruta_plantilla_np_excel
+
+    ruta = ruta_plantilla_np_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato Nuestra Parte.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/nuestra-parte")
+def nuestra_parte():
+    return render_template("nuestra_parte.html")
+
+
+@app.post("/np-descargar")
+def np_descargar():
+    lg = normalize_lang(session.get("lang"))
+    es_fetch = request.headers.get("X-Requested-With") == "fetch"
+
+    if not _mostrar_ui_cuit_arca():
+        if es_fetch:
+            return jsonify({"error": tr(lg, "err_arca_disabled")}), 403
+        return render_template("nuestra_parte.html", error=tr(lg, "err_arca_disabled")), 403
+
+    filas, _errores, err_msg = _filas_np_desde_peticion(lg)
+    if err_msg:
+        if es_fetch:
+            return jsonify({"error": err_msg}), 400
+        return render_template("nuestra_parte.html", error=err_msg)
+
+    from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
+
+    headless = os.environ.get("NP_HEADLESS", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    carpeta_destino = (request.form.get("carpeta_destino") or "").strip() or None
+
+    job_id = uuid4().hex
+    from cuit_en_arca.cancelacion import reset_cancelacion
+
+    reset_cancelacion(job_id)
+    crear_job_np(job_id, len(filas))
+    reiniciar_pasos_np(job_id)
+    on_log = callback_log_np(job_id)
+    on_paso = callback_paso_np(job_id)
+
+    def _reinit() -> None:
+        reiniciar_pasos_np(job_id)
+
+    def _prog(actual: int, total: int, msg: str) -> None:
+        progreso_cuit_np(job_id, actual, total, msg)
+
+    def _cuit_fin(cuit, razon_social, total_archivos, error) -> None:
+        agregar_resumen_cuit_np(
+            job_id,
+            cuit=cuit,
+            razon_social=razon_social,
+            total_archivos=total_archivos,
+            error=error,
+        )
+
+    def _worker() -> None:
+        try:
+            carpeta = ejecutar_nuestra_parte_lote(
+                filas,
+                headless=headless,
+                on_log=on_log,
+                on_paso=on_paso,
+                on_reiniciar_pasos=_reinit,
+                on_progreso=_prog,
+                on_cuit_fin=_cuit_fin,
+                carpeta_base=carpeta_destino,
+                job_id=job_id,
+            )
+            marcar_ok_np(job_id, carpeta=str(carpeta))
+        except CancelacionUsuarioError as exc:
+            marcar_cancelado_np(job_id, str(exc))
+        except ArcaProcesoError as exc:
+            marcar_error_np(job_id, str(exc))
+        except Exception as exc:
+            marcar_error_np(job_id, tr(lg, "err_arca_unexpected", exc=exc))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    if es_fetch:
+        return jsonify({"job_id": job_id, "total": len(filas)})
+    return render_template("nuestra_parte.html", np_job_id=job_id)
+
+
+@app.get("/np-estado/<job_id>")
+def np_estado(job_id: str):
+    estado = obtener_job_np(job_id)
+    if estado is None:
+        return jsonify({"error": "job_not_found"}), 404
+    return jsonify(estado)
+
+
+# --------------------------------------------------------------------------- #
+# Análisis Programado
+# --------------------------------------------------------------------------- #
+def _filas_ap_desde_peticion(lg: str):
+    from cuit_en_arca.planilla_analisis_programado import leer_planilla_analisis_programado
+
+    f = request.files.get("ap_excel")
+    has_file = bool(f and getattr(f, "filename", None) and str(f.filename).strip())
+    if has_file:
+        nombre = Path(f.filename).name
+        if not nombre.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_only_xlsx_csv")
+        try:
+            filas, errores = leer_planilla_analisis_programado(io.BytesIO(f.read()))
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            return [], errores, "; ".join(errores) or tr(lg, "ap_err_sin_datos")
+        return filas, errores, None
+
+    return _filas_ap_desde_manual(lg)
+
+
+def _filas_ap_desde_manual(lg: str):
+    from cuit_en_arca.planilla_analisis_programado import parsear_entradas_manuales_ap
+
+    cuits = request.form.getlist("ap_cuit")
+    claves = request.form.getlist("ap_clave")
+    reprs = request.form.getlist("ap_repr")
+    fechas_mc = request.form.getlist("ap_fechas_mc")
+    dfe_desde = request.form.getlist("ap_dfe_desde")
+    dfe_hasta = request.form.getlist("ap_dfe_hasta")
+    ejercicios = request.form.getlist("ap_ejercicio")
+
+    hay = any(
+        (v or "").strip()
+        for lst in (cuits, claves, reprs, fechas_mc, dfe_desde, dfe_hasta, ejercicios)
+        for v in lst
+    )
+    if not hay:
+        return [], [], tr(lg, "ap_err_sin_datos")
+
+    filas, errores = parsear_entradas_manuales_ap(
+        cuits, claves, reprs, fechas_mc, dfe_desde, dfe_hasta, ejercicios
+    )
+    if not filas:
+        return [], errores, "; ".join(errores) or tr(lg, "ap_err_sin_datos")
+    return filas, errores, None
+
+
+def _filas_ap_a_dict(filas) -> list[dict]:
+    from dataclasses import asdict
+
+    return [asdict(f) for f in filas]
+
+
+@app.get("/analisis-programado")
+def analisis_programado():
+    from cuit_en_arca.analisis_programado import cargar_config
+
+    cfg = cargar_config()
+    return render_template(
+        "analisis_programado.html",
+        config=cfg.a_dict_publico(),
+    )
+
+
+@app.get("/analisis-programado/plantilla")
+def analisis_programado_plantilla():
+    from cuit_en_arca.analisis_programado import ruta_plantilla_excel
+
+    ruta = ruta_plantilla_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato Analisis Programado.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/analisis-programado/estado")
+def analisis_programado_estado():
+    from cuit_en_arca.analisis_programado import cargar_config
+
+    return jsonify(cargar_config().a_dict_publico())
+
+
+@app.get("/analisis-programado/ejecucion")
+def analisis_programado_ejecucion():
+    from cuit_en_arca.progreso_analisis_programado import obtener_ejecucion_ap
+
+    return jsonify(obtener_ejecucion_ap())
+
+
+@app.post("/analisis-programado/guardar")
+def analisis_programado_guardar():
+    from cuit_en_arca.analisis_programado import (
+        ConfigAnalisisProgramado,
+        cargar_config,
+        guardar_config,
+    )
+
+    lg = normalize_lang(session.get("lang"))
+    es_fetch = request.headers.get("X-Requested-With") == "fetch"
+
+    sistemas = [
+        s
+        for s in request.form.getlist("ap_sistemas")
+        if s in ("mis_comprobantes", "dfe", "nuestra_parte")
+    ]
+    if not sistemas:
+        msg = tr(lg, "ap_err_sin_sistema")
+        if es_fetch:
+            return jsonify({"error": msg}), 400
+        return render_template(
+            "analisis_programado.html",
+            error=msg,
+            config=cargar_config().a_dict_publico(),
+        )
+
+    carpeta = (request.form.get("carpeta_destino") or "").strip()
+    if not carpeta:
+        msg = tr(lg, "ap_err_sin_carpeta")
+        if es_fetch:
+            return jsonify({"error": msg}), 400
+        return render_template(
+            "analisis_programado.html",
+            error=msg,
+            config=cargar_config().a_dict_publico(),
+        )
+
+    filas, _errores, err_msg = _filas_ap_desde_peticion(lg)
+    if err_msg:
+        if es_fetch:
+            return jsonify({"error": err_msg}), 400
+        return render_template(
+            "analisis_programado.html",
+            error=err_msg,
+            config=cargar_config().a_dict_publico(),
+        )
+
+    try:
+        dia = int(request.form.get("ap_dia_semana", "0"))
+        hora = int(request.form.get("ap_hora", "9"))
+        minuto = int(request.form.get("ap_minuto", "0"))
+    except ValueError:
+        dia, hora, minuto = 0, 9, 0
+
+    cfg = ConfigAnalisisProgramado(
+        activo=True,
+        dia_semana=max(0, min(6, dia)),
+        hora=max(0, min(23, hora)),
+        minuto=max(0, min(59, minuto)),
+        sistemas=sistemas,
+        carpeta_destino=carpeta,
+        filas=_filas_ap_a_dict(filas),
+        ultima_ejecucion=None,
+        ultimo_resultado=None,
+    )
+    try:
+        guardar_config(cfg)
+    except OSError as exc:
+        msg = tr(lg, "ap_err_guardar") + f" ({exc})"
+        if es_fetch:
+            return jsonify({"error": msg}), 500
+        return render_template(
+            "analisis_programado.html",
+            error=msg,
+            config=cargar_config().a_dict_publico(),
+        )
+
+    if es_fetch:
+        return jsonify({"ok": True, "mensaje": tr(lg, "ap_ok_guardado"), "config": cfg.a_dict_publico()})
+    return render_template(
+        "analisis_programado.html",
+        ok=tr(lg, "ap_ok_guardado"),
+        config=cfg.a_dict_publico(),
+    )
+
+
+@app.post("/api/cancelar-descarga")
+def cancelar_descarga():
+    from cuit_en_arca.browser_desktop import cerrar_navegador_desktop
+    from cuit_en_arca.cancelacion import solicitar_cancelacion, solicitar_cancelacion_ap
+
+    payload = request.get_json(silent=True) or {}
+    tipo = (payload.get("tipo") or request.form.get("tipo") or "").strip()
+    job_id = (payload.get("job_id") or request.form.get("job_id") or "").strip()
+
+    if tipo == "ap":
+        solicitar_cancelacion_ap()
+    elif job_id:
+        solicitar_cancelacion(job_id)
+    else:
+        lg = normalize_lang(session.get("lang"))
+        return jsonify({"error": tr(lg, "err_arca_unexpected", exc="sin job")}), 400
+
+    try:
+        cerrar_navegador_desktop()
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+
+@app.get("/api/auth-users")
+def api_auth_users():
+    """Listado de usuarios para sync de portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
+    if not verificar_token_remoto(request.headers.get("Authorization")):
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(export_users_payload())
+
+
+@app.post("/analisis-programado/limpiar")
+def analisis_programado_limpiar():
+    from cuit_en_arca.analisis_programado import limpiar_configuracion_completa
+    from cuit_en_arca.progreso_analisis_programado import resetear_ejecucion_ap
+
+    lg = normalize_lang(session.get("lang"))
+    cfg = limpiar_configuracion_completa()
+    resetear_ejecucion_ap()
+    return jsonify({
+        "ok": True,
+        "mensaje": tr(lg, "ap_ok_limpiado"),
+        "config": cfg.a_dict_publico(),
+    })
+
+
+@app.get("/elegir-carpeta")
+def elegir_carpeta():
+    """Abre un diálogo nativo del sistema para elegir la carpeta de descarga.
+
+    Solo tiene sentido en el escritorio (servidor = PC del usuario), por eso se
+    restringe a peticiones locales.
+    """
+    ra = (request.remote_addr or "").replace("::ffff:", "")
+    if ra not in ("127.0.0.1", "::1"):
+        return jsonify({"error": "solo_local"}), 403
+
+    from urllib.parse import unquote
+
+    titulo = unquote(request.args.get("titulo") or "Elegir carpeta de descarga").strip()
+    from cuit_en_arca.elegir_carpeta import elegir_carpeta_dialogo
+
+    ruta = elegir_carpeta_dialogo(titulo)
+    if not ruta:
+        return jsonify({"cancelado": True})
+    return jsonify({"carpeta": ruta})
+
+
 if __name__ == "__main__":
     import threading
     import webbrowser
+
+    try:
+        from cuit_en_arca.analisis_programado import iniciar_scheduler
+
+        iniciar_scheduler()
+    except Exception:
+        pass
 
     puerto = int(os.environ.get("PORT", 5000))
     url = f"http://127.0.0.1:{puerto}/"

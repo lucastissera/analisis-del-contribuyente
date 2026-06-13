@@ -11,6 +11,8 @@ class DescargaArcaResult:
 
     emitidos: tuple[bytes, str] | None = None
     recibidos: tuple[bytes, str] | None = None
+    aviso_parcial: str | None = None
+    razon_social: str | None = None
 
     @classmethod
     def simple(cls, data: bytes, nombre: str, *, emitidos: bool) -> DescargaArcaResult:

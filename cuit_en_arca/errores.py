@@ -29,5 +29,13 @@ class AutomatizacionNoDisponibleError(ArcaProcesoError):
     """Playwright/Chromium no instalado o deshabilitado en este entorno."""
 
 
+class SinComprobantesError(ArcaProcesoError):
+    """La consulta se realizó correctamente pero no hay comprobantes en el período."""
+
+
 class LoginArcaError(ArcaProcesoError):
     """CUIT o clave fiscal incorrectos; no reintentar en lote."""
+
+
+class CancelacionUsuarioError(ArcaProcesoError):
+    """El usuario detuvo el proceso en curso desde la interfaz."""

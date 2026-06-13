@@ -9,9 +9,9 @@ python tools\portable_build.py
 if errorlevel 1 exit /b 1
 echo.
 echo Listo. Ejecutable y archivos en:
-echo   %~dp0dist\MisComprobantesAnalisis\
+echo   %~dp0dist\AnalisisIntegralContribuyente\
 echo Ejecutable principal:
-echo   %~dp0dist\MisComprobantesAnalisis\MisComprobantesAnalisis.exe
+echo   %~dp0dist\AnalisisIntegralContribuyente\AnalisisIntegralContribuyente.exe
 if exist "%~dp0auth_users.json" (
   echo auth_users.json copiado junto al .exe.
 ) else (

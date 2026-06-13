@@ -10,8 +10,9 @@ from cuit_en_arca.errores import (
     CuitRepresentadoNoEncontradoError,
     FechaRangoInvalidaError,
     LoginArcaError,
+    CancelacionUsuarioError,
 )
-from cuit_en_arca.lote import ResultadoLoteArca, ejecutar_lote_planilla_arca
+from cuit_en_arca.lote import ResultadoLoteArca, ejecutar_lote_arca, ejecutar_lote_planilla_arca
 from cuit_en_arca.service import automatizacion_cuit_arca_habilitada
 
 __all__ = [
@@ -22,7 +23,9 @@ __all__ = [
     "CuitRepresentadoNoEncontradoError",
     "FechaRangoInvalidaError",
     "LoginArcaError",
+    "CancelacionUsuarioError",
     "ResultadoLoteArca",
     "automatizacion_cuit_arca_habilitada",
+    "ejecutar_lote_arca",
     "ejecutar_lote_planilla_arca",
 ]

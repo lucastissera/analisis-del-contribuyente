@@ -1,0 +1,6 @@
+# Copiá este archivo como auth_remote.txt junto al .exe (misma carpeta).
+# Primera línea: URL HTTPS del listado de usuarios (JSON).
+# Segunda línea (opcional): token Bearer para proteger la descarga.
+#
+# https://tu-servidor.com/privado/auth_users.json
+# tu-token-secreto-largo

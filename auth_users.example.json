@@ -1,5 +1,18 @@
 {
+  "version": 1,
+  "updated_at": "2026-01-01T00:00:00+00:00",
   "users": {
-    "admin": "definir_clave_segura_aqui"
+    "Lucas": {
+      "password": "definir_clave_segura_aqui",
+      "rol": "admin",
+      "valido_hasta": "2027-06-08"
+    },
+    "ejemplo": {
+      "password": "otra_clave_segura",
+      "email": "usuario@gmail.com",
+      "valido_desde": "2026-01-01",
+      "valido_hasta": "2027-06-08",
+      "activo": true
+    }
   }
 }

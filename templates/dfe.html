@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('dfe_page_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <script>
+      (function () {
+        try {
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --bg-body: #ffffff;
+        --bg-panel: #fafafa;
+        --text-primary: #1a1a1a;
+        --text-muted: #444;
+        --border: #bbb;
+        --border-soft: #ccc;
+        --color-link: #1565c0;
+        --color-error: #b00020;
+        --color-success: #1b5e20;
+        --btn-bg: #111;
+        --btn-text: #fff;
+        --btn-border: #333;
+        --dfe-bg: #f3edff;
+        --dfe-border: #7e57c2;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014;
+        --bg-panel: #1a1c22;
+        --text-primary: #eceef3;
+        --text-muted: #aeb4c0;
+        --border: #3d424d;
+        --border-soft: #4a505c;
+        --color-link: #8ab4ff;
+        --color-error: #ff8a95;
+        --color-success: #81c995;
+        --btn-bg: #3d7dd9;
+        --btn-text: #0c1118;
+        --btn-border: #5b93e8;
+        --dfe-bg: #241a35;
+        --dfe-border: #9c72d6;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      a {
+        color: var(--color-link);
+      }
+      .pagina {
+        max-width: 920px;
+        margin: 0 auto;
+      }
+      .intro {
+        color: var(--text-muted);
+        margin: 0 0 1.4rem;
+        line-height: 1.5;
+      }
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.1rem 1.2rem;
+        background: var(--bg-panel);
+        margin-bottom: 1.2rem;
+      }
+      .panel h2 {
+        font-size: 1.15rem;
+        margin: 0 0 0.5rem;
+      }
+      .panel .help {
+        color: var(--text-muted);
+        font-size: 0.92rem;
+        margin: 0 0 0.9rem;
+        line-height: 1.45;
+      }
+      input[type="text"],
+      input[type="password"],
+      input[type="file"] {
+        width: 100%;
+        padding: 0.45rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.95rem;
+        box-sizing: border-box;
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      .clave-wrap {
+        display: flex;
+        align-items: stretch;
+        gap: 0.3rem;
+      }
+      .clave-wrap .clave-input {
+        flex: 1;
+        min-width: 0;
+      }
+      .clave-toggle {
+        flex-shrink: 0;
+        padding: 0.35rem 0.55rem;
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .carpeta-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem;
+        margin: 0.8rem 0;
+      }
+      .filas-manual {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+      .fila-manual {
+        position: relative;
+        padding: 0.7rem 2.4rem 0.7rem 0.8rem;
+        background: var(--bg-body);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+      }
+      .campos-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.6rem;
+      }
+      .campos-grid label {
+        display: block;
+        font-size: 0.82rem;
+      }
+      .campos-grid label strong {
+        display: block;
+        margin-bottom: 0.2rem;
+        font-size: 0.82rem;
+      }
+      .fila-quitar {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 1.7rem;
+        height: 1.7rem;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--bg-panel);
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+      }
+      .btn-agregar {
+        margin-top: 0.8rem;
+        padding: 0.45rem 0.8rem;
+        border: 1px dashed var(--dfe-border);
+        background: transparent;
+        color: var(--text-primary);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .acciones {
+        margin-top: 0.4rem;
+      }
+      .btn-principal {
+        padding: 0.65rem 1.3rem;
+        border: 1px solid var(--btn-border);
+        background: var(--btn-bg);
+        color: var(--btn-text);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 1.02rem;
+      }
+      .btn-principal:hover {
+        filter: brightness(1.08);
+      }
+      .btn-principal:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      .error {
+        color: var(--color-error);
+        font-size: 0.95rem;
+        margin: 0.6rem 0;
+      }
+      .progreso {
+        margin-top: 1rem;
+        display: none;
+      }
+      .barra {
+        height: 12px;
+        border-radius: 6px;
+        background: var(--border-soft);
+        overflow: hidden;
+        margin: 0.6rem 0;
+      }
+      .barra-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--dfe-border);
+        transition: width 0.3s ease;
+      }
+      .pasos {
+        list-style: none;
+        padding: 0;
+        margin: 0.6rem 0;
+      }
+      .pasos li {
+        padding: 0.2rem 0;
+        font-size: 0.95rem;
+      }
+      .pasos .ico {
+        display: inline-block;
+        width: 1.4rem;
+      }
+      .paso-ok .ico {
+        color: var(--color-success);
+      }
+      .paso-error .ico {
+        color: var(--color-error);
+      }
+      .log {
+        margin-top: 0.8rem;
+        max-height: 260px;
+        overflow: auto;
+        background: var(--bg-body);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+        padding: 0.6rem 0.8rem;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        line-height: 1.4;
+      }
+      .resultado-ok {
+        margin-top: 1rem;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--color-success);
+        border-radius: 10px;
+        background: rgba(46, 125, 50, 0.08);
+      }
+      .ruta {
+        font-family: Consolas, "Courier New", monospace;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% include 'partials/barra_superior.html' %}
+
+      {% with titulo=t('dfe_heading') %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
+
+      <p class="intro">{{ t('dfe_intro')|safe }}</p>
+
+      <form id="form-dfe" method="post" action="{{ url_for('dfe_descargar') }}" enctype="multipart/form-data" autocomplete="off">
+        <input type="hidden" id="dfe-carpeta-destino" name="carpeta_destino" value="" />
+        <div class="panel">
+          <h2>{{ t('dfe_import_titulo') }}</h2>
+          <p class="help">{{ t('dfe_import_help')|safe }}</p>
+          <p><a href="{{ url_for('dfe_plantilla') }}" download="Formato DFE.xlsx">{{ t('dfe_import_descargar') }}</a></p>
+          <label><strong>{{ t('dfe_import_label_file') }}</strong>
+            <input type="file" name="dfe_excel" accept=".xlsx" />
+          </label>
+        </div>
+
+        <div class="panel">
+          <h2>{{ t('dfe_manual_titulo') }}</h2>
+          <p class="help">{{ t('dfe_manual_help') }}</p>
+          <div id="filas-manual" class="filas-manual">
+            <div class="fila-manual">
+              <div class="campos-grid">
+                <label><strong>{{ t('dfe_manual_cuit_login') }}</strong>
+                  <input name="dfe_cuit_login" type="text" data-dfe="login" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
+                </label>
+                <label><strong>{{ t('dfe_manual_clave') }}</strong>
+                  <div class="clave-wrap">
+                    <input class="clave-input" name="dfe_clave_fiscal" type="password" data-dfe="clave" autocomplete="new-password" />
+                    <button type="button" class="clave-toggle" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}">{{ t('clave_mostrar') }}</button>
+                  </div>
+                </label>
+                <label><strong>{{ t('dfe_manual_cuit_repr') }}</strong>
+                  <input name="dfe_cuit_representado" type="text" data-dfe="repr" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
+                </label>
+                <label><strong>{{ t('dfe_manual_desde') }}</strong>
+                  <input name="dfe_fecha_desde" type="text" data-dfe="desde" autocomplete="off" placeholder="{{ t('dfe_manual_fecha_ph') }}" />
+                </label>
+                <label><strong>{{ t('dfe_manual_hasta') }}</strong>
+                  <input name="dfe_fecha_hasta" type="text" data-dfe="hasta" autocomplete="off" placeholder="{{ t('dfe_manual_fecha_ph') }}" />
+                </label>
+              </div>
+              <button type="button" class="fila-quitar" title="{{ t('dfe_manual_quitar') }}">&times;</button>
+            </div>
+          </div>
+          <button type="button" id="agregar-fila" class="btn-agregar">+ {{ t('dfe_manual_agregar') }}</button>
+        </div>
+
+        <div class="carpeta-row">
+          <p class="help" style="margin:0">{{ t('carpeta_destino_label') }}: <code id="dfe-carpeta-label" class="ruta">—</code></p>
+          <button type="button" class="btn-sec" id="dfe-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
+          <button type="button" class="btn-sec btn-cancelar-descarga" id="dfe-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
+        </div>
+
+        <p class="error" id="form-error" style="display: none"></p>
+        <div class="acciones acciones-form">
+          <button type="submit" class="btn-principal" id="btn-enviar">{{ t('dfe_submit') }}</button>
+          <button type="button" class="btn-peligro" id="dfe-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
+        </div>
+      </form>
+
+      <div class="progreso panel" id="progreso">
+        <h2>{{ t('dfe_progress_label') }}</h2>
+        <div class="barra"><div class="barra-fill" id="barra-fill"></div></div>
+        <div id="mensaje-progreso" class="help"></div>
+        <ul class="pasos" id="pasos"></ul>
+        <div class="resultado-ok" id="resultado-ok" style="display: none"></div>
+        <p class="error" id="error-progreso" style="display: none"></p>
+        <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('dfe_log_titulo') }}</h2>
+        <div class="log" id="log"></div>
+      </div>
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='elegir_carpeta.js') }}"></script>
+    <script src="{{ url_for('static', filename='cancelar_descarga.js') }}"></script>
+    <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    <script>
+      var I18N = {
+        sinDatos: {{ t('dfe_err_sin_datos')|tojson }},
+        okCarpeta: {{ t('dfe_ok_carpeta')|tojson }},
+        okTitulo: {{ t('dfe_ok_titulo')|tojson }},
+        working: {{ t('dfe_working')|tojson }},
+        quitar: {{ t('dfe_manual_quitar')|tojson }},
+        carpetaTitulo: {{ t('carpeta_elegir_titulo')|tojson }},
+        carpetaCancelada: {{ t('carpeta_cancelada')|tojson }},
+        fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
+        fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
+        cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+        limpiarConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }}
+      };
+
+      (function filas() {
+        var cont = document.getElementById("filas-manual");
+        var btnAdd = document.getElementById("agregar-fila");
+
+        function limpiarAutofill() {
+          // Evita que el navegador autocomplete con usuario/clave del sistema.
+          document.querySelectorAll('[data-dfe="login"], [data-dfe="clave"], [data-dfe="repr"]').forEach(function (i) {
+            if (i.dataset.touched !== "1") i.value = "";
+          });
+        }
+        cont.addEventListener("input", function (e) {
+          if (e.target && e.target.dataset && e.target.dataset.dfe) e.target.dataset.touched = "1";
+        });
+        setTimeout(limpiarAutofill, 60);
+        setTimeout(limpiarAutofill, 400);
+
+        function quitar(btn) {
+          var filas = cont.querySelectorAll(".fila-manual");
+          if (filas.length <= 1) {
+            btn.closest(".fila-manual").querySelectorAll("input").forEach(function (i) { i.value = ""; i.dataset.touched = ""; });
+            return;
+          }
+          btn.closest(".fila-manual").remove();
+        }
+        cont.addEventListener("click", function (e) {
+          if (e.target && e.target.classList.contains("fila-quitar")) quitar(e.target);
+        });
+        btnAdd.addEventListener("click", function () {
+          var base = cont.querySelector(".fila-manual");
+          var nueva = base.cloneNode(true);
+          nueva.querySelectorAll("input").forEach(function (i) { i.value = ""; i.dataset.touched = ""; });
+          if (window.resetClaveFields) window.resetClaveFields(nueva);
+          cont.appendChild(nueva);
+        });
+      })();
+
+      (function envio() {
+        var form = document.getElementById("form-dfe");
+        var btn = document.getElementById("btn-enviar");
+        var errBox = document.getElementById("form-error");
+        var prog = document.getElementById("progreso");
+        var barra = document.getElementById("barra-fill");
+        var msg = document.getElementById("mensaje-progreso");
+        var pasosUl = document.getElementById("pasos");
+        var logBox = document.getElementById("log");
+        var okBox = document.getElementById("resultado-ok");
+        var errProg = document.getElementById("error-progreso");
+        var timer = null;
+        var carpetaApi = McElegirCarpeta.enlazar({
+          inputId: "dfe-carpeta-destino",
+          labelId: "dfe-carpeta-label",
+          btnId: "dfe-btn-elegir-carpeta",
+          titulo: I18N.carpetaTitulo,
+          onCancel: function () {
+            errBox.style.display = "block";
+            errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
+          },
+          onError: function () {
+            errBox.style.display = "block";
+            errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
+          },
+        });
+
+        function hayDatos() {
+          var file = form.querySelector('input[name="dfe_excel"]');
+          if (file && file.files && file.files.length) return true;
+          var filas = document.querySelectorAll("#filas-manual .fila-manual");
+          for (var i = 0; i < filas.length; i++) {
+            var f = filas[i];
+            var cuit = (f.querySelector('[data-dfe="login"]').value || "").trim();
+            var clave = (f.querySelector('[data-dfe="clave"]').value || "").trim();
+            var d = (f.querySelector('[data-dfe="desde"]').value || "").trim();
+            var h = (f.querySelector('[data-dfe="hasta"]').value || "").trim();
+            if (cuit && clave && d && h) return true;
+          }
+          return false;
+        }
+
+        function pintaPasos(pasos) {
+          if (!pasos || !pasos.length) return;
+          pasosUl.innerHTML = "";
+          pasos.forEach(function (p) {
+            var li = document.createElement("li");
+            var ico = "○";
+            if (p.estado === "ok") { li.className = "paso-ok"; ico = "✓"; }
+            else if (p.estado === "en_curso") { ico = "⏳"; }
+            else if (p.estado === "error") { li.className = "paso-error"; ico = "✗"; }
+            li.innerHTML = '<span class="ico">' + ico + "</span>" + p.etiqueta;
+            pasosUl.appendChild(li);
+          });
+        }
+
+        function htmlFallos(resumen, carpeta) {
+          if (!resumen || !resumen.length) return "";
+          var errs = resumen.filter(function (r) { return r.error; });
+          if (!errs.length) return "";
+          var h =
+            "<p class=\"subtitulo-detalle\">" +
+            (I18N.fallosTitulo || "Fallos:") +
+            "</p><ul class=\"lista-fallos\">";
+          errs.forEach(function (r) {
+            h += "<li>CUIT " + (r.cuit || "?") + ": " + r.error + "</li>";
+          });
+          h += "</ul>";
+          if (carpeta && I18N.fallosArchivo) {
+            h += "<p class=\"subtitulo-detalle\">" + I18N.fallosArchivo + "</p>";
+          }
+          return h;
+        }
+
+        function poll(jobId) {
+          fetch("{{ url_for('dfe_estado', job_id='__ID__') }}".replace("__ID__", jobId))
+            .then(function (r) { return r.json(); })
+            .then(function (st) {
+              if (st.error === "job_not_found") return;
+              barra.style.width = (st.porcentaje || 0) + "%";
+              msg.textContent = st.mensaje || "";
+              pintaPasos(st.pasos);
+              if (st.log) logBox.textContent = st.log.join("\n");
+              logBox.scrollTop = logBox.scrollHeight;
+              if (st.estado === "ok") {
+                clearInterval(timer);
+                McCancelarDescarga.limpiar();
+                okBox.style.display = "block";
+                okBox.innerHTML =
+                  "<strong>" + I18N.okTitulo + "</strong><br>" +
+                  I18N.okCarpeta + ' <span class="ruta">' + (st.carpeta || "") + "</span><br>" +
+                  (st.cuits_ok + " CUIT · " + st.total_archivos + " archivo(s) · " + st.cuits_fallidos + " con error.") +
+                  htmlFallos(st.resumen, st.carpeta);
+                btn.disabled = false;
+                btn.textContent = "{{ t('dfe_submit') }}";
+              } else if (st.estado === "error" || st.estado === "cancelado") {
+                clearInterval(timer);
+                McCancelarDescarga.limpiar();
+                errProg.style.display = "block";
+                errProg.textContent = st.error || st.mensaje || "Error";
+                btn.disabled = false;
+                btn.textContent = "{{ t('dfe_submit') }}";
+              } else {
+                McCancelarDescarga.registrar("dfe", jobId);
+              }
+            })
+            .catch(function () {});
+        }
+
+        function lanzarDfe() {
+          btn.disabled = true;
+          btn.textContent = I18N.working;
+          prog.style.display = "block";
+          okBox.style.display = "none";
+          errProg.style.display = "none";
+          logBox.textContent = "";
+          var fd = new FormData(form);
+          fetch(form.action, { method: "POST", body: fd, headers: { "X-Requested-With": "fetch" } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.error) {
+                errBox.style.display = "block";
+                errBox.textContent = data.error;
+                btn.disabled = false;
+                btn.textContent = "{{ t('dfe_submit') }}";
+                return;
+              }
+              if (data.job_id) {
+                timer = setInterval(function () { poll(data.job_id); }, 1200);
+                poll(data.job_id);
+              }
+            })
+            .catch(function () {
+              errBox.style.display = "block";
+              errBox.textContent = "Error de red.";
+              btn.disabled = false;
+              btn.textContent = "{{ t('dfe_submit') }}";
+            });
+        }
+
+        form.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          errBox.style.display = "none";
+          if (!hayDatos()) {
+            errBox.style.display = "block";
+            errBox.textContent = I18N.sinDatos;
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = I18N.working;
+          McElegirCarpeta.resolver({ api: carpetaApi })
+            .then(function (ruta) {
+              if (!ruta) {
+                btn.disabled = false;
+                btn.textContent = "{{ t('dfe_submit') }}";
+                errBox.style.display = "block";
+                errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
+                return;
+              }
+              carpetaApi.aplicar(ruta);
+              lanzarDfe();
+            })
+            .catch(function () {
+              btn.disabled = false;
+              btn.textContent = "{{ t('dfe_submit') }}";
+              errBox.style.display = "block";
+              errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
+            });
+        });
+
+        McCancelarDescarga.enlazar(document.getElementById("dfe-btn-cancelar"), {
+          confirm: I18N.cancelarConfirm,
+        });
+
+        document.getElementById("dfe-btn-limpiar-datos").addEventListener("click", function () {
+          McLimpiarDatos({
+            confirm: I18N.limpiarConfirm,
+            formId: "form-dfe",
+            fileNames: ["dfe_excel"],
+            manualContainerId: "filas-manual",
+            carpetaInputId: "dfe-carpeta-destino",
+            carpetaLabelId: "dfe-carpeta-label",
+            onListo: function () {
+              prog.style.display = "none";
+              okBox.style.display = "none";
+              errProg.style.display = "none";
+              logBox.textContent = "";
+            },
+          });
+        });
+
+        {% if dfe_job_id %}
+        McCancelarDescarga.registrar("dfe", "{{ dfe_job_id }}");
+        timer = setInterval(function () { poll("{{ dfe_job_id }}"); }, 1200);
+        poll("{{ dfe_job_id }}");
+        {% endif %}
+      })();
+    </script>
+  </body>
+</html>

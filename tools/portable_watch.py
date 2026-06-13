@@ -57,7 +57,7 @@ def _run_build() -> None:
     if r.returncode != 0:
         print(f"Build terminó con código {r.returncode}\n", flush=True)
     else:
-        print("--- Listo: dist\\MisComprobantesAnalisis actualizado ---\n", flush=True)
+        print("--- Listo: dist\\AnalisisIntegralContribuyente actualizado ---\n", flush=True)
 
 
 def schedule_build(reason: str) -> None:

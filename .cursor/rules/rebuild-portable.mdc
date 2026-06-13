@@ -1,24 +1,43 @@
 ---
-description: Recompilar el portable automáticamente tras cambios de código
+description: Recompilar el portable al terminar todas las acciones de la tarea
 alwaysApply: true
 ---
 
-# Build portable obligatorio
+# Build portable al cerrar la tarea
 
-Tras modificar código de la aplicación (`app.py`, `run_desktop.py`, `cuit_en_arca/`, `templates/`, `i18n.py`, `MisComprobantesDesktop.spec`, `auth_users.json`, etc.), **recompilá el ejecutable** sin que el usuario lo pida:
+Al **terminar todas las acciones** de una tarea (implementación, fixes, refactors), **recompilá siempre** el ejecutable portable si hubo cambios en código de la aplicación. No esperes a que el usuario lo pida.
+
+## Comando
+
+Desde la raíz del proyecto:
 
 ```powershell
 python tools/portable_build.py
 ```
 
-## Cuándo hacerlo
+## Flujo obligatorio
 
-- Al **terminar** una tarea que tocó archivos de la app (no solo al final de la conversación).
-- Si el build falla por `.exe` en uso, avisá que cierre `MisComprobantesAnalisis.exe` y reintentá.
-- Podés lanzarlo en **segundo plano** (`block_until_ms: 0`) si la tarea ya está explicada al usuario.
+1. Completá todos los cambios de código y verificaciones (sintaxis, lints si aplica).
+2. **Al final**, antes de dar la respuesta al usuario, ejecutá el build portable.
+3. Informá en la respuesta si compiló OK o si falló (y por qué).
+
+## Cuándo compilar
+
+- Cambios en: `app.py`, `run_desktop.py`, `cuit_en_arca/`, `templates/`, `static/`, `i18n.py`, `MisComprobantesDesktop.spec`, `sumar_imp_total.py`, `plantillas_imputacion.py`, etc.
+- Aunque el usuario no mencione el build en su mensaje.
+
+## Cuándo NO compilar
+
+- Solo documentación sin cambios funcionales.
+- Solo operaciones git sin tocar código de la app.
+
+## Si falla el build
+
+- Si el `.exe` está en uso: pedí cerrar `AnalisisIntegralContribuyente.exe` y reintentá.
+- Podés lanzar el build en segundo plano mientras informás cambios; confirmá el resultado al terminar.
 
 ## Salida esperada
 
-`dist/MisComprobantesAnalisis/MisComprobantesAnalisis.exe` (+ `_internal` + `ms-playwright`).
+`dist/AnalisisIntegralContribuyente/AnalisisIntegralContribuyente.exe` (+ `_internal` + `ms-playwright`).
 
 No versionar `dist/` ni `build/` (están en `.gitignore`).

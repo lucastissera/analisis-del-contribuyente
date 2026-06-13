@@ -4,7 +4,7 @@
 
 Cada vez que modifiques archivos de la aplicación (`app.py`, `sumar_imp_total.py`, `templates/`, `cuit_en_arca/`, `i18n.py`, etc.), **debés actualizar el ejecutable** en:
 
-`dist/MisComprobantesAnalisis/MisComprobantesAnalisis.exe`
+`dist/AnalisisIntegralContribuyente/AnalisisIntegralContribuyente.exe`
 
 ### Comando (siempre al finalizar una tarea con cambios)
 
@@ -37,9 +37,9 @@ El proyecto incluye `.cursor/hooks.json`:
 
 Log del hook: `build/hook-rebuild.log`. Si el `.exe` está en ejecución, cerralo antes del build para evitar archivos bloqueados.
 
-### Regla del agente
+### Regla del agente (por defecto)
 
-`.cursor/rules/rebuild-portable.mdc` obliga a recompilar el portable al finalizar cualquier tarea con cambios de código, sin pedírselo al usuario.
+`.cursor/rules/rebuild-portable.mdc` (`alwaysApply: true`) obliga a recompilar el portable **siempre** al terminar cualquier tarea con cambios de código, **sin que el usuario lo pida**. Es el comportamiento por defecto del proyecto.
 
 ### Qué no versionar
 

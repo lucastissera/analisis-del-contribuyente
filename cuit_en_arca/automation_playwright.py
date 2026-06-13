@@ -24,11 +24,12 @@ from cuit_en_arca.errores import (
     AutomatizacionNoDisponibleError,
     CuitRepresentadoNoEncontradoError,
     LoginArcaError,
+    SinComprobantesError,
 )
 from cuit_en_arca.stealth import (
-    CHROMIUM_ARGS,
     STEALTH_INIT_SCRIPT,
     USER_AGENT_CHROME,
+    chromium_args,
     clic_humano,
     escribir_como_humano,
     pausa_humana,
@@ -36,12 +37,26 @@ from cuit_en_arca.stealth import (
 
 LOGIN_URL = "https://auth.afip.gob.ar/contribuyente_/login.xhtml"
 PORTAL_ARCA_URL = "https://portalcf.cloud.afip.gob.ar/portal/app/"
-# Tras login con sesión válida, el flujo Selenium probado abre esta URL.
+# Servicio MCMP vigente (Mis Comprobantes autenticado).
+URL_EMITIDOS_MCMP = "https://fes.afip.gob.ar/mcmp/jsp/comprobantesEmitidos.do"
+URL_RECIBIDOS_MCMP = "https://fes.afip.gob.ar/mcmp/jsp/comprobantesRecibidos.do"
+URL_MCMP_ROOT = "https://fes.afip.gob.ar/mcmp/"
+# Legacy / redirección desde portal (fallback).
 URL_MIS_COMPROBANTES_DIRECTA = (
     "https://serviciosweb.afip.gob.ar/genericos/comprobantes/Default.aspx",
 )
-ESPERA_CORTA_SEC = 3.5
+ESPERA_CORTA_SEC = 3.0
 TipoComprobantes = Literal["emitidos", "recibidos", "ambos"]
+
+
+def _paso(on_paso, clave: str, estado: str) -> None:
+    """Notifica el avance de un paso de la checklist (si hay callback)."""
+    if on_paso is None:
+        return
+    try:
+        on_paso(clave, estado)
+    except Exception:
+        pass
 
 
 def _esperar_pagina(page, timeout: int = 42_000) -> None:
@@ -50,7 +65,68 @@ def _esperar_pagina(page, timeout: int = 42_000) -> None:
         page.wait_for_load_state("domcontentloaded", timeout=timeout)
     except Exception:
         pass
-    pausa_humana(0.35, 0.84)
+    pausa_humana(0.3, 0.7)
+
+
+def _dir_diagnostico() -> Path:
+    """Carpeta donde dejar capturas/HTML para depurar fallos de navegación."""
+    try:
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).resolve().parent
+        else:
+            base = Path.cwd()
+    except Exception:
+        base = Path.cwd()
+    destino = base / "diagnostico_arca"
+    try:
+        destino.mkdir(parents=True, exist_ok=True)
+        return destino
+    except Exception:
+        import tempfile
+
+        destino = Path(tempfile.gettempdir()) / "diagnostico_arca"
+        destino.mkdir(parents=True, exist_ok=True)
+        return destino
+
+
+def _volcar_diagnostico(page, etiqueta: str) -> str:
+    """Guarda captura + HTML + URL del estado actual para depurar.
+
+    Devuelve la ruta base (sin extensión) o cadena vacía si no se pudo.
+    """
+    try:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        base = _dir_diagnostico()
+        stem = f"{ts}_{re.sub(r'[^a-zA-Z0-9_-]', '_', etiqueta)}"
+        ruta_base = base / stem
+        try:
+            page.screenshot(path=str(ruta_base) + ".png", full_page=True)
+        except Exception:
+            pass
+        try:
+            url = page.url
+        except Exception:
+            url = ""
+        try:
+            html = page.content()
+        except Exception:
+            html = ""
+        try:
+            fechas = _campos_fecha_visibles(page)
+        except Exception:
+            fechas = "?"
+        cabecera = (
+            f"<!-- URL: {url} | fechaEmision_visible: {fechas} -->\n"
+        )
+        try:
+            (Path(str(ruta_base) + ".html")).write_text(
+                cabecera + (html or ""), encoding="utf-8", errors="ignore"
+            )
+        except Exception:
+            pass
+        return str(ruta_base)
+    except Exception:
+        return ""
 
 _FRASES_ERROR_LOGIN = (
     "clave incorrect",
@@ -107,6 +183,11 @@ def _encontrar_seccion_tipo(root, etiqueta: str):
         estrategias = (
             root.get_by_role("link", name=texto, exact=True),
             root.locator(f"a:text-is('{texto}')"),
+            root.locator(
+                f"input[type='submit'][value='{texto}' i], "
+                f"input[type='button'][value='{texto}' i], "
+                f"input[value='{texto}' i]"
+            ),
             root.get_by_role("link", name=re.compile(rf"^\s*{re.escape(texto)}\s*$", re.I)),
             root.get_by_role("tab", name=re.compile(re.escape(texto), re.I)),
             root.get_by_role("button", name=re.compile(re.escape(texto), re.I)),
@@ -297,14 +378,288 @@ def _pagina_es_constatacion(page) -> bool:
     )
 
 
+def _url_por_tipo(tipo: Literal["emitidos", "recibidos"]) -> str:
+    return URL_EMITIDOS_MCMP if tipo == "emitidos" else URL_RECIBIDOS_MCMP
+
+
+def _pagina_es_mcmp(page) -> bool:
+    try:
+        return "fes.afip.gob.ar/mcmp" in page.url.lower()
+    except Exception:
+        return False
+
+
+def _pagina_sesion_expirada_mcmp(page) -> bool:
+    """Página de MCMP "Su sesión ha expirado / usuario no logueado".
+
+    Aparece al entrar por URL directa sin haber establecido el SSO desde el
+    portal. La URL es /mcmp pero NO estamos autenticados.
+    """
+    try:
+        if (page.title() or "").strip().lower().startswith("su sesión ha expirado"):
+            return True
+    except Exception:
+        pass
+    try:
+        cuerpo = page.locator("body").inner_text(timeout=2500).lower()
+    except Exception:
+        return False
+    return (
+        "no está logueado" in cuerpo
+        or "no esta logueado" in cuerpo
+        or "la sesión ha expirado" in cuerpo
+        or "la sesion ha expirado" in cuerpo
+    )
+
+
+def _en_servicio_mcmp(page) -> bool:
+    """Estamos dentro del servicio MCMP autenticado (no login ni constatación)."""
+    if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
+        return False
+    if _pagina_es_mcmp(page) and _pagina_sesion_expirada_mcmp(page):
+        return False
+    return _pagina_es_mcmp(page)
+
+
+def _cuit_activo_mcmp(page) -> str | None:
+    """CUIT del contribuyente activo según '.nombre-activo' (11 dígitos) o None."""
+    for ctx in _iter_contextos(page):
+        try:
+            txt = ctx.evaluate(
+                "() => { const el = document.querySelector('.nombre-activo');"
+                " return el ? el.textContent : ''; }"
+            )
+        except Exception:
+            txt = ""
+        if txt:
+            digitos = re.sub(r"\D", "", txt)
+            if len(digitos) >= 11:
+                return digitos[-11:]
+    return None
+
+
+def _limpiar_razon_social(txt: str) -> str:
+    """Extrae el nombre/razón social quitando el CUIT y etiquetas del texto."""
+    s = re.sub(r"\s+", " ", str(txt or "")).strip()
+    if not s:
+        return ""
+    # Quitar el prefijo "Representando a:" y cualquier corchete (p. ej. "[ ]").
+    s = re.sub(r"(?i)\brepresentando\s+a\s*:?", " ", s)
+    s = re.sub(r"\[[^\]]*\]", " ", s)
+    # Quitar CUIT formateado (xx-xxxxxxxx-x) y corridas de 11 dígitos.
+    s = re.sub(r"\b\d{2}[\s.\-]?\d{8}[\s.\-]?\d\b", " ", s)
+    s = re.sub(r"\b\d{11}\b", " ", s)
+    # Quitar etiquetas habituales del encabezado del portal.
+    s = re.sub(
+        r"(?i)\b(cuit|cuil|cdi|clave fiscal|representand[oa]|representad[oa]|nivel|usuario)\b",
+        " ",
+        s,
+    )
+    s = re.sub(r"[|/]+", " ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" -–—:·,.[]")
+    return s.strip()
+
+
+def _razon_social_activa_mcmp(page) -> str:
+    """Razón social del contribuyente activo según '.nombre-activo' (sin CUIT)."""
+    for ctx in _iter_contextos(page):
+        try:
+            txt = ctx.evaluate(
+                "() => { const el = document.querySelector('.nombre-activo');"
+                " return el ? el.textContent : ''; }"
+            )
+        except Exception:
+            txt = ""
+        nombre = _limpiar_razon_social(txt)
+        if nombre:
+            return nombre
+    return ""
+
+
+def _selectores_campo_fecha():
+    return {
+        "rango": (
+            "input#fechaEmision",
+            "input[name='fechaEmision']",
+            "input[id='fechaEmision']",
+            "input[name*='fechaEmision' i]:not([name*='Desde' i]):not([name*='Hasta' i])",
+        ),
+        "desde": (
+            "input#fechaEmisionDesde",
+            "input[name='fechaEmisionDesde']",
+            "input[id*='fechaEmisionDesde' i]",
+            "input[name*='fechaDesde' i]",
+            "input[name*='fechaEmisionDesde' i]",
+        ),
+        "hasta": (
+            "input#fechaEmisionHasta",
+            "input[name='fechaEmisionHasta']",
+            "input[id*='fechaEmisionHasta' i]",
+            "input[name*='fechaHasta' i]",
+            "input[name*='fechaEmisionHasta' i]",
+        ),
+    }
+
+
+def _leer_valor_campo(loc) -> str:
+    try:
+        return (loc.input_value() or loc.get_attribute("value") or "").strip()
+    except Exception:
+        return ""
+
+
+def _escribir_fecha_campo(loc, valor: str) -> None:
+    loc.click()
+    pausa_humana(0.12, 0.28)
+    try:
+        loc.fill(str(valor))
+    except Exception:
+        try:
+            loc.press("Control+A")
+        except Exception:
+            pass
+        escribir_como_humano(loc, valor)
+    pausa_humana(0.1, 0.25)
+    try:
+        loc.evaluate(
+            "el => { el.dispatchEvent(new Event('input', { bubbles: true })); "
+            "el.dispatchEvent(new Event('change', { bubbles: true })); }"
+        )
+    except Exception:
+        pass
+    try:
+        loc.press("Tab")
+    except Exception:
+        pass
+    pausa_humana(0.12, 0.3)
+
+
+def _fecha_aplicada_en_campo(valor: str, fd: str, fh: str) -> bool:
+    if not valor:
+        return False
+    norm = re.sub(r"\s+", " ", valor)
+    return fd in norm and fh in norm
+
+
+def _llenar_daterangepicker_mcmp(ctx, fd: str, fh: str) -> bool:
+    """MCMP usa #fechaEmision con daterangepicker (no campos sueltos desde/hasta)."""
+    rango = f"{fd} - {fh}"
+    campo = ctx.locator("#fechaEmision, input[name='fechaEmision']").first
+    if not (campo.count() and campo.is_visible(timeout=1500)):
+        return False
+
+    try:
+        ok = campo.evaluate(
+            """(el, args) => {
+                const fd = args[0], fh = args[1], rango = args[2];
+                const $ = window.jQuery || window.$;
+                if ($ && typeof $ === 'function') {
+                    const $el = $(el);
+                    const drp = $el.data('daterangepicker');
+                    if (drp && window.moment) {
+                        drp.setStartDate(window.moment(fd, 'DD/MM/YYYY'));
+                        drp.setEndDate(window.moment(fh, 'DD/MM/YYYY'));
+                        $el.val(rango).trigger('change');
+                        return ($el.val() || '').includes(fd);
+                    }
+                }
+                el.value = rango;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return (el.value || '').includes(fd);
+            }""",
+            [fd, fh, rango],
+        )
+        if ok and _fecha_aplicada_en_campo(_leer_valor_campo(campo), fd, fh):
+            return True
+    except Exception:
+        pass
+
+    clic_humano(campo)
+    pausa_humana(0.35, 0.65)
+    picker = ctx.locator(".daterangepicker").last
+    try:
+        if picker.count() and picker.is_visible(timeout=2500):
+            for texto in ("Personalizado", "Rango personalizado", "Custom Range"):
+                item = picker.locator(
+                    f"li[data-range-key='{texto}'], li:has-text('{texto}')"
+                ).first
+                try:
+                    if item.count() and item.is_visible(timeout=500):
+                        clic_humano(item)
+                        pausa_humana(0.2, 0.45)
+                        break
+                except Exception:
+                    continue
+            inputs = picker.locator("input[type='text']")
+            n = inputs.count()
+            if n >= 2:
+                _escribir_fecha_campo(inputs.nth(0), fd)
+                _escribir_fecha_campo(inputs.nth(1), fh)
+            elif n == 1:
+                _escribir_fecha_campo(inputs.first, rango)
+            apply = picker.locator("button.applyBtn, .applyBtn").first
+            if apply.count() and apply.is_visible(timeout=800):
+                clic_humano(apply)
+            pausa_humana(0.25, 0.5)
+    except Exception:
+        pass
+
+    if not _fecha_aplicada_en_campo(_leer_valor_campo(campo), fd, fh):
+        _escribir_fecha_campo(campo, rango)
+    return _fecha_aplicada_en_campo(_leer_valor_campo(campo), fd, fh)
+
+
+def _campos_fecha_visibles(mc) -> bool:
+    sels = _selectores_campo_fecha()
+    for ctx in _iter_contextos(mc):
+        for grupo in sels.values():
+            for sel in grupo:
+                loc = ctx.locator(sel).first
+                try:
+                    if loc.count() and loc.is_visible(timeout=600):
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
+def _form_tipo_cargado(mc) -> bool:
+    """¿Cargó la pantalla Emitidos/Recibidos? Tolerante: campo de fecha visible
+    o presente en el DOM (el datepicker puede taparlo), o la DataTable/botón."""
+    if _campos_fecha_visibles(mc):
+        return True
+    sels = _selectores_campo_fecha()
+    for ctx in _iter_contextos(mc):
+        for grupo in sels.values():
+            for sel in grupo:
+                try:
+                    if ctx.locator(sel).first.count():
+                        return True
+                except Exception:
+                    continue
+        try:
+            if ctx.locator(
+                "table.dataTable, #fechaEmision, "
+                "input[value='Buscar' i], button:has-text('Buscar')"
+            ).first.count():
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _tiene_ui_mis_comprobantes(page) -> bool:
     """Emitidos/Recibidos o filtros de fecha visibles (validación estricta)."""
     if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
         return False
+    if _pagina_es_mcmp(page) and _campos_fecha_visibles(page):
+        return True
     for ctx in _iter_contextos(page):
         try:
             fechas = ctx.locator(
-                "input[id*='fechaEmision' i], input[name*='fechaDesde' i]"
+                "input[id*='fechaEmision' i], input[name*='fechaDesde' i], "
+                "input#fechaEmision, input[name='fechaEmision']"
             ).first
             if fechas.count() and fechas.is_visible(timeout=700):
                 return True
@@ -364,27 +719,85 @@ def _ir_al_portal_arca(page) -> None:
 
 
 def _ir_directo_mis_comprobantes(page):
-    """Navega directo al servicio con la cookie de sesión (flujo Selenium probado)."""
-    try:
-        page.goto(URL_MIS_COMPROBANTES_DIRECTA, wait_until="domcontentloaded")
-        _esperar_pagina(page, timeout=42_000)
-        pausa_humana(1.2, 2.4)
-        _esperar_mis_comprobantes_listo(page, timeout_sec=28)
-        if _pagina_es_login_afip(page) or _pagina_es_constatacion(page):
-            return None
+    """Entra al servicio MCMP (acepta el selector de contribuyente; rápido)."""
+    for url in (URL_MCMP_ROOT, URL_EMITIDOS_MCMP, URL_MIS_COMPROBANTES_DIRECTA):
         try:
-            page.wait_for_selector(
-                "a:has-text('Emitidos'), a:has-text('Recibidos'), "
-                "input[id*='fechaEmision' i], input[name*='fechaDesde' i]",
-                timeout=14_000,
-            )
+            page.goto(url, wait_until="domcontentloaded")
+            _esperar_pagina(page, timeout=42_000)
+            # Espera breve a que el redirect resuelva a MCMP (o al login).
+            for _ in range(12):
+                if _pagina_es_login_afip(page):
+                    break
+                if _en_servicio_mcmp(page):
+                    return page
+                pausa_humana(0.3, 0.6)
+            if _en_servicio_mcmp(page):
+                return page
         except Exception:
-            pass
-        if _tiene_ui_mis_comprobantes(page):
-            return page
+            continue
+    return None
+
+
+def _ir_a_pantalla_tipo(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
+    """Navega a emitidos/recibidos MCMP (URL directa o clic en el menú)."""
+    url = _url_por_tipo(tipo)
+    etiqueta = "Emitidos" if tipo == "emitidos" else "Recibidos"
+    destino = "comprobantesemitidos" if tipo == "emitidos" else "comprobantesrecibidos"
+
+    try:
+        if destino in mc.url.lower() and _campos_fecha_visibles(mc):
+            return
     except Exception:
         pass
-    return None
+
+    def _esperar_formulario(intentos: int = 16) -> bool:
+        for _ in range(intentos):
+            if _pagina_es_login_afip(mc) or _pagina_sesion_expirada_mcmp(mc):
+                raise AutomatizacionArcaError(
+                    f"La sesión expiró al abrir {etiqueta} en Mis Comprobantes."
+                )
+            if _form_tipo_cargado(mc):
+                return True
+            # Si en vez del formulario aparece el menú con enlaces de tipo,
+            # hacemos clic para entrar a la pantalla correspondiente.
+            if _enlaces_tipo_visibles(mc):
+                try:
+                    _ir_a_tipo_comprobantes(mc, tipo)
+                except Exception:
+                    pass
+                if _form_tipo_cargado(mc):
+                    return True
+            pausa_humana(0.4, 0.8)
+        return False
+
+    for intento in range(3):
+        try:
+            mc.goto(url, wait_until="domcontentloaded")
+            _esperar_pagina(mc, timeout=42_000)
+            pausa_humana(0.5, 1.0)
+        except Exception:
+            pass
+
+        if _esperar_formulario():
+            return
+
+        # No cargó el formulario: reintentar recargando o volviendo a la raíz
+        # del servicio (por si MCMP exige pasar por el selector/menú).
+        try:
+            if intento == 0:
+                mc.reload(wait_until="domcontentloaded")
+            else:
+                mc.goto(URL_MCMP_ROOT, wait_until="domcontentloaded")
+            _esperar_pagina(mc, timeout=42_000)
+            pausa_humana(0.5, 1.0)
+        except Exception:
+            pass
+
+    _volcar_diagnostico(mc, f"sin_formulario_{tipo}")
+    raise AutomatizacionArcaError(
+        f"No cargó el formulario de {etiqueta} en Mis Comprobantes "
+        f"({url})."
+    )
 
 
 def _nuevo_contexto_stealth(playwright, *, headless: bool):
@@ -394,7 +807,7 @@ def _nuevo_contexto_stealth(playwright, *, headless: bool):
         asegurar_chromium_playwright()
     browser = playwright.chromium.launch(
         headless=headless,
-        args=list(CHROMIUM_ARGS),
+        args=chromium_args(headless),
     )
     context = browser.new_context(
         locale="es-AR",
@@ -407,11 +820,14 @@ def _nuevo_contexto_stealth(playwright, *, headless: bool):
         is_mobile=False,
     )
     context.add_init_script(STEALTH_INIT_SCRIPT)
+    # NOTA: no interceptamos peticiones (context.route). Interceptar todas las
+    # requests ralentizaba el login de AFIP (cadena de redirects) y rompía la
+    # apertura de Mis Comprobantes. El ahorro de bloquear trackers no compensa.
     return browser, context
 
 
 def _detectar_fallo_login(page, cuit: str) -> None:
-    pausa_humana(0.84, 1.75)
+    pausa_humana(0.5, 1.0)
     try:
         cuerpo = page.locator("body").inner_text(timeout=5000).lower()
     except Exception:
@@ -513,51 +929,54 @@ def _abrir_mis_comprobantes(page):
     _esperar_post_login(page)
     _esperar_pagina(page, timeout=42_000)
 
-    for _ in range(2):
-        mc = _ir_directo_mis_comprobantes(page)
-        if mc is not None and _tiene_ui_mis_comprobantes(mc):
-            pausa_humana(0.56, 1.12)
-            return mc
-        pausa_humana(1.5, 2.5)
-
+    # IMPORTANTE: entrar por URL directa a fes.afip.gob.ar/mcmp NO autentica
+    # (muestra "Su sesión ha expirado"). El SSO se establece al abrir el servicio
+    # desde el portal, así que ese es el camino principal.
     link = _esperar_resultado_mis_comprobantes(page, intentos=8)
     if link is not None:
         mc = _click_servicio_y_obtener_pagina(page, link)
-        if _tiene_ui_mis_comprobantes(mc):
+        if _en_servicio_mcmp(mc) or _tiene_ui_mis_comprobantes(mc):
             return mc
 
     try:
         _ir_al_portal_arca(page)
         mc = _buscar_mis_comprobantes_en_portal(page)
-        if _tiene_ui_mis_comprobantes(mc):
+        if _en_servicio_mcmp(mc) or _tiene_ui_mis_comprobantes(mc):
             return mc
     except AutomatizacionArcaError:
         pass
 
+    # Reintento del enlace en el home del portal (por si el buscador falló).
+    try:
+        _ir_al_portal_arca(page)
+        link = _esperar_resultado_mis_comprobantes(page, intentos=8)
+        if link is not None:
+            mc = _click_servicio_y_obtener_pagina(page, link)
+            if _en_servicio_mcmp(mc) or _tiene_ui_mis_comprobantes(mc):
+                return mc
+    except AutomatizacionArcaError:
+        pass
+
+    # Último recurso: URL directa (solo sirve si el SSO ya quedó establecido).
     for _ in range(2):
         mc = _ir_directo_mis_comprobantes(page)
-        if mc is not None and _tiene_ui_mis_comprobantes(mc):
+        if mc is not None and _en_servicio_mcmp(mc):
             return mc
-        pausa_humana(1.0, 2.0)
+        pausa_humana(0.8, 1.6)
 
+    _volcar_diagnostico(page, "no_abrio_mis_comprobantes")
     raise AutomatizacionArcaError(
         "No se pudo abrir Mis Comprobantes tras el login "
-        "(URL directa, enlace en home y buscador del portal fallaron). "
+        "(enlace en el portal, buscador y URL directa fallaron). "
         "Verifique que el CUIT tenga el servicio «Mis Comprobantes» habilitado."
     )
 
 
 def _ya_en_pantalla_comprobantes(mc) -> bool:
     """Emitidos/Recibidos o filtros de fecha → ya no hace falta elegir contribuyente."""
+    if _campos_fecha_visibles(mc):
+        return True
     for ctx in _iter_contextos(mc):
-        try:
-            fechas = ctx.locator(
-                "input[id*='fechaEmision' i], input[name*='fechaDesde' i]"
-            ).first
-            if fechas.count() and fechas.is_visible(timeout=800):
-                return True
-        except Exception:
-            pass
         for etiqueta in ("Emitidos", "Recibidos"):
             if _encontrar_seccion_tipo(ctx, etiqueta) is not None:
                 return True
@@ -590,21 +1009,8 @@ def _filas_cuit_clicables(mc):
     return resultado
 
 
-def _elegir_perfil_representado(
-    mc,
-    cuit_repr: str,
-    *,
-    cuit_login: str | None = None,
-) -> None:
-    pausa_humana(0.6, 1.2)
-
-    if _ya_en_pantalla_comprobantes(mc):
-        return
-
-    cuit_repr_n = _normalizar_cuit_busqueda(cuit_repr)
-    cuit_login_n = _normalizar_cuit_busqueda(cuit_login) if cuit_login else cuit_repr_n
+def _intentar_clic_contribuyente(mc, cuit_repr_n: str) -> bool:
     fmt = f"{cuit_repr_n[:2]}-{cuit_repr_n[2:10]}-{cuit_repr_n[10]}"
-
     for loc in (
         mc.get_by_role("link", name=re.compile(re.escape(fmt), re.I)),
         mc.locator("a, tr, li, button").filter(has_text=re.compile(re.escape(fmt))),
@@ -613,30 +1019,157 @@ def _elegir_perfil_representado(
         try:
             if loc.count() and loc.first.is_visible(timeout=1000):
                 clic_humano(loc.first)
-                pausa_humana(ESPERA_CORTA_SEC * 0.7, ESPERA_CORTA_SEC * 1.2)
-                return
+                pausa_humana(ESPERA_CORTA_SEC * 0.6, ESPERA_CORTA_SEC * 1.0)
+                return True
         except Exception:
             continue
 
-    opciones = _filas_cuit_clicables(mc)
-
-    # Sin lista de perfiles: un solo contribuyente en sesión (CUIT ingreso por defecto).
-    if not opciones:
-        return
-
-    for item, cuit in opciones:
+    for item, cuit in _filas_cuit_clicables(mc):
         if cuit == cuit_repr_n:
             clic_humano(item)
-            pausa_humana(ESPERA_CORTA_SEC * 0.7, ESPERA_CORTA_SEC * 1.2)
+            pausa_humana(ESPERA_CORTA_SEC * 0.6, ESPERA_CORTA_SEC * 1.0)
+            return True
+    return False
+
+
+def _elegir_perfil_representado(
+    mc,
+    cuit_repr: str,
+    *,
+    cuit_login: str | None = None,
+) -> None:
+    pausa_humana(0.4, 0.9)
+
+    cuit_repr_n = _normalizar_cuit_busqueda(cuit_repr)
+    cuit_login_n = _normalizar_cuit_busqueda(cuit_login) if cuit_login else cuit_repr_n
+
+    # Si el contribuyente activo ya es el representado, no hace falta seleccionar.
+    activo = _cuit_activo_mcmp(mc)
+    if activo == cuit_repr_n:
+        return
+
+    # Intento directo en la pantalla actual (selector de contribuyente).
+    if _intentar_clic_contribuyente(mc, cuit_repr_n):
+        if _cuit_activo_mcmp(mc) in (None, cuit_repr_n):
             return
 
-    # Una sola opción o CUIT pedido = ingreso: AFIP ya usa el contribuyente activo.
-    if len(opciones) == 1 or cuit_repr_n == cuit_login_n:
+    # No estaba: vuelvo a la raíz del servicio (lista de contribuyentes) y reintento.
+    try:
+        mc.goto(URL_MCMP_ROOT, wait_until="domcontentloaded")
+        _esperar_pagina(mc, timeout=42_000)
+        pausa_humana(0.5, 1.0)
+    except Exception:
+        pass
+
+    if _intentar_clic_contribuyente(mc, cuit_repr_n):
+        return
+
+    # Sin lista de perfiles o el representado coincide con el ingreso: AFIP ya usa el activo.
+    activo = _cuit_activo_mcmp(mc)
+    if cuit_repr_n == cuit_login_n or activo == cuit_repr_n or _ya_en_pantalla_comprobantes(mc):
+        return
+    if not _filas_cuit_clicables(mc):
         return
 
     raise CuitRepresentadoNoEncontradoError(
         "Verificar datos ingresados: el CUIT representado no aparece en la lista."
     )
+
+
+def _enlaces_tipo_visibles(mc) -> bool:
+    for ctx in _iter_contextos(mc):
+        if _encontrar_seccion_tipo(ctx, "Emitidos") or _encontrar_seccion_tipo(
+            ctx, "Recibidos"
+        ):
+            return True
+    return False
+
+
+def _restablecer_menu_tipos(mc) -> None:
+    """Tras descargar Emitidos, vuelve al menú donde están Emitidos/Recibidos."""
+    if _enlaces_tipo_visibles(mc):
+        return
+
+    for ctx in _iter_contextos(mc):
+        for texto in (
+            "Volver",
+            "Nueva consulta",
+            "Nueva búsqueda",
+            "Menú principal",
+            "Menú",
+        ):
+            try:
+                loc = ctx.get_by_role("link", name=re.compile(texto, re.I))
+                if loc.count() and loc.first.is_visible(timeout=900):
+                    clic_humano(loc.first)
+                    _esperar_pagina(mc, timeout=35_000)
+                    pausa_humana(0.45, 0.9)
+                    if _enlaces_tipo_visibles(mc):
+                        return
+            except Exception:
+                continue
+
+    for _ in range(3):
+        try:
+            mc.go_back()
+            _esperar_pagina(mc, timeout=25_000)
+            pausa_humana(0.45, 0.9)
+            if _enlaces_tipo_visibles(mc):
+                return
+        except Exception:
+            break
+
+    try:
+        mc.goto(URL_EMITIDOS_MCMP, wait_until="domcontentloaded")
+        _esperar_pagina(mc, timeout=42_000)
+        pausa_humana(1.0, 2.0)
+        _esperar_mis_comprobantes_listo(mc, timeout_sec=24)
+    except Exception:
+        pass
+
+
+def _llenar_fechas_en_contexto(ctx, fd: str, fh: str) -> int:
+    """Devuelve 2 si las fechas quedaron cargadas (rango único o desde+hasta)."""
+    if _llenar_daterangepicker_mcmp(ctx, fd, fh):
+        return 2
+
+    sels = _selectores_campo_fecha()
+    rango_txt = f"{fd} - {fh}"
+
+    for sel in sels["rango"]:
+        loc = ctx.locator(sel).first
+        try:
+            if loc.count() and loc.is_visible(timeout=1200):
+                _escribir_fecha_campo(loc, rango_txt)
+                if _fecha_aplicada_en_campo(_leer_valor_campo(loc), fd, fh):
+                    return 2
+        except Exception:
+            continue
+
+    filled = 0
+    for sel in sels["desde"]:
+        loc = ctx.locator(sel).first
+        try:
+            if loc.count() and loc.is_visible(timeout=1200):
+                _escribir_fecha_campo(loc, fd)
+                if fd in _leer_valor_campo(loc):
+                    filled += 1
+                    break
+        except Exception:
+            continue
+
+    for sel in sels["hasta"]:
+        loc = ctx.locator(sel).first
+        try:
+            if loc.count() and loc.is_visible(timeout=1200):
+                _escribir_fecha_campo(loc, fh)
+                if fh in _leer_valor_campo(loc):
+                    filled += 1
+                    break
+        except Exception:
+            continue
+
+    return filled
 
 
 def _ir_a_tipo_comprobantes(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
@@ -658,6 +1191,8 @@ def _ir_a_tipo_comprobantes(mc, tipo: Literal["emitidos", "recibidos"]) -> None:
                 _esperar_pagina(mc, timeout=42_000)
                 pausa_humana(0.35, 0.7)
                 return
+        if intento in (3, 7, 11):
+            _restablecer_menu_tipos(mc)
         pausa_humana(0.5, 1.0)
 
     raise AutomatizacionArcaError(
@@ -670,36 +1205,18 @@ def _llenar_campo_fecha(mc, selectores: tuple[str, ...], valor: str) -> bool:
         loc = mc.locator(sel).first
         try:
             if loc.count() > 0 and loc.is_visible(timeout=1500):
-                escribir_como_humano(loc, valor)
-                return True
+                _escribir_fecha_campo(loc, valor)
+                return bool(_leer_valor_campo(loc))
         except Exception:
             continue
     return False
 
 
-def _aplicar_filtro_fechas_y_buscar(mc, fd: str, fh: str) -> None:
+def _aplicar_filtro_fechas_y_buscar(mc, fd: str, fh: str) -> str:
+    pausa_humana(0.35, 0.7)
     filled = 0
     for ctx in _iter_contextos(mc):
-        if _llenar_campo_fecha(
-            ctx,
-            (
-                "input[id*='fechaEmisionDesde' i]",
-                "input[name*='fechaDesde' i]",
-                "input[name*='fechaEmisionDesde' i]",
-            ),
-            fd,
-        ):
-            filled += 1
-        if _llenar_campo_fecha(
-            ctx,
-            (
-                "input[id*='fechaEmisionHasta' i]",
-                "input[name*='fechaHasta' i]",
-                "input[name*='fechaEmisionHasta' i]",
-            ),
-            fh,
-        ):
-            filled += 1
+        filled = max(filled, _llenar_fechas_en_contexto(ctx, fd, fh))
         if filled >= 2:
             break
 
@@ -720,73 +1237,430 @@ def _aplicar_filtro_fechas_y_buscar(mc, fd: str, fh: str) -> None:
                         or "inicio" in ph
                         or "desde" in nm
                         or "desde" in el_id
+                        or nm == "fechaemision"
+                        or el_id == "fechaemision"
                         or "emision" in nm
                     ):
-                        escribir_como_humano(el, fd)
-                        filled += 1
+                        _escribir_fecha_campo(el, fd if "emision" not in nm else f"{fd} - {fh}")
+                        filled = 2 if "emision" in nm and "desde" not in nm else filled + 1
                     elif filled == 1 and (
                         "hasta" in ph or "fin" in ph or "hasta" in nm or "hasta" in el_id
                     ):
-                        escribir_como_humano(el, fh)
+                        _escribir_fecha_campo(el, fh)
                         filled += 1
                 except Exception:
                     continue
             if filled >= 2:
                 break
 
-    buscar_clicado = False
+    if filled < 2:
+        raise AutomatizacionArcaError(
+            f"No se pudieron cargar las fechas {fd} — {fh} en el formulario de "
+            "Mis Comprobantes (campos no encontrados o no editables)."
+        )
+
+    pausa_humana(0.25, 0.55)
+    buscar = None
     for ctx in _iter_contextos(mc):
-        buscar = ctx.locator(
-            "input[value='Buscar'], input[value='BUSCAR'], button:has-text('Buscar')"
+        candidato = ctx.locator(
+            "#buscarComprobantes, input#buscarComprobantes, "
+            "button#buscarComprobantes, input[value='Buscar'], "
+            "input[value='BUSCAR'], button:has-text('Buscar')"
         ).first
-        if buscar.count() and buscar.is_visible(timeout=1500):
-            clic_humano(buscar)
-            buscar_clicado = True
-            break
-        btn = ctx.get_by_role("button", name=re.compile("buscar|consultar|aplicar", re.I))
-        if btn.count() and btn.first.is_visible(timeout=1000):
-            clic_humano(btn.first)
-            buscar_clicado = True
-            break
-    if not buscar_clicado:
+        try:
+            if candidato.count() and candidato.is_visible(timeout=1200):
+                buscar = candidato
+                break
+        except Exception:
+            continue
+
+    if buscar is None:
         btn = mc.get_by_role("button", name=re.compile("buscar|consultar|aplicar", re.I))
-        if btn.count():
-            clic_humano(btn.first)
-    _esperar_pagina(mc, timeout=84_000)
-    pausa_humana(0.56, 1.05)
-
-
-def _descargar_excel_o_csv(mc) -> tuple[bytes, str]:
-    with mc.expect_download(timeout=120_000) as dl_info:
-        excel_btn = mc.locator(
-            "a[href*='Excel' i], a:has-text('Excel'), "
-            "a:has-text('Descargar'), input[value*='Excel' i]"
-        ).first
-        if excel_btn.count() and excel_btn.is_visible(timeout=2000):
-            clic_humano(excel_btn)
+        if btn.count() and btn.first.is_visible(timeout=1000):
+            buscar = btn.first
         else:
-            alt = mc.get_by_role("button", name=re.compile("excel|xlsx", re.I))
-            if not alt.count():
-                alt = mc.locator("a, button").filter(
-                    has_text=re.compile(r"excel|\.xlsx", re.I)
+            raise AutomatizacionArcaError(
+                "No se encontró el botón Buscar en Mis Comprobantes."
+            )
+
+    try:
+        with mc.expect_response(
+            lambda r: "ajax.do" in r.url and r.status == 200,
+            timeout=90_000,
+        ):
+            clic_humano(buscar)
+    except Exception:
+        clic_humano(buscar)
+
+    return _esperar_resultados_mcmp(mc)
+
+
+_SEL_EXCEL = (
+    "button.buttons-excel.buttons-html5",
+    "button.buttons-excel",
+    "a.buttons-excel",
+    "[class*='buttons-excel']",
+    "a[href*='Excel' i]",
+    "button[title*='Excel' i]",
+    "a[title*='Excel' i]",
+    "button:has-text('Excel')",
+    "a:has-text('Excel')",
+)
+
+# Respaldo: cuando hay muchos comprobantes, ARCA a veces ofrece solo CSV.
+_SEL_CSV = (
+    "button.buttons-csv.buttons-html5",
+    "button.buttons-csv",
+    "a.buttons-csv",
+    "[class*='buttons-csv']",
+    "a[href*='csv' i]",
+    "button[title*='CSV' i]",
+    "a[title*='CSV' i]",
+    "button:has-text('CSV')",
+    "a:has-text('CSV')",
+)
+
+_FRASES_SIN_RESULTADOS = (
+    "no se encontraron",
+    "sin resultados",
+    "no hay datos",
+    "no existen comprobantes",
+    "no se hallaron",
+    "0 registros",
+)
+
+
+def _locator_boton_por_sel(mc, selectores):
+    """Devuelve el primer botón/enlace visible que matchee alguno de los selectores."""
+    for ctx in _iter_contextos(mc):
+        for sel in selectores:
+            loc = ctx.locator(sel)
+            try:
+                n = min(loc.count(), 6)
+            except Exception:
+                n = 0
+            for i in range(n):
+                item = loc.nth(i)
+                try:
+                    if item.is_visible(timeout=400):
+                        return item
+                except Exception:
+                    continue
+    return None
+
+
+def _locator_boton_excel(mc):
+    """Devuelve el primer botón/enlace de exportación a Excel visible (página o frames)."""
+    return _locator_boton_por_sel(mc, _SEL_EXCEL)
+
+
+def _locator_boton_csv(mc):
+    """Devuelve el primer botón/enlace de exportación a CSV visible (página o frames)."""
+    return _locator_boton_por_sel(mc, _SEL_CSV)
+
+
+def _locator_boton_descarga(mc):
+    """Prefiere Excel; si ARCA solo ofrece CSV (muchos comprobantes), usa CSV.
+
+    Devuelve (locator, formato) con formato 'xlsx' o 'csv', o (None, None).
+    """
+    btn = _locator_boton_excel(mc)
+    if btn is not None:
+        return btn, "xlsx"
+    btn = _locator_boton_csv(mc)
+    if btn is not None:
+        return btn, "csv"
+    return None, None
+
+
+def _hay_boton_descarga(mc) -> bool:
+    return _locator_boton_descarga(mc)[0] is not None
+
+
+def _hay_resultados_en_tabla(mc) -> bool:
+    for ctx in _iter_contextos(mc):
+        filas = ctx.locator(
+            "#tablaComprobantes tbody tr, table.dataTable tbody tr, "
+            "table#tabla tbody tr, .dataTables_wrapper table tbody tr"
+        )
+        try:
+            count = filas.count()
+        except Exception:
+            count = 0
+        for i in range(min(count, 3)):
+            try:
+                txt = (filas.nth(i).inner_text(timeout=600) or "").strip()
+            except Exception:
+                txt = ""
+            if txt and not any(f in txt.lower() for f in _FRASES_SIN_RESULTADOS):
+                return True
+    return False
+
+
+def _sin_resultados(mc) -> bool:
+    for ctx in _iter_contextos(mc):
+        try:
+            cuerpo = ctx.locator("body").inner_text(timeout=2000).lower()
+        except Exception:
+            continue
+        if any(f in cuerpo for f in _FRASES_SIN_RESULTADOS):
+            return True
+    return False
+
+
+def _procesando(mc) -> bool:
+    for ctx in _iter_contextos(mc):
+        try:
+            proc = ctx.locator(
+                ".dataTables_processing, #loading, .loading, .blockUI, "
+                ".cargando, [id*='procesando' i]"
+            ).first
+            if proc.count() and proc.is_visible(timeout=300):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _esperar_resultados_mcmp(mc, timeout_sec: float = 95) -> str:
+    """Espera fin de consulta. Devuelve 'ok', 'vacio' o 'timeout'."""
+    limite = time.time() + timeout_sec
+    while time.time() < limite:
+        if _procesando(mc):
+            pausa_humana(0.5, 1.0)
+            continue
+        if _hay_boton_descarga(mc) or _hay_resultados_en_tabla(mc):
+            return "ok"
+        if _sin_resultados(mc):
+            return "vacio"
+        pausa_humana(0.5, 1.0)
+    _esperar_pagina(mc, timeout=15_000)
+    if _hay_boton_descarga(mc) or _hay_resultados_en_tabla(mc):
+        return "ok"
+    if _sin_resultados(mc):
+        return "vacio"
+    return "timeout"
+
+
+def _extraer_de_zip(data: bytes, nombre_zip: str) -> tuple[bytes, str]:
+    """ARCA puede entregar la descarga como ZIP con el CSV/Excel adentro.
+
+    Devuelve (bytes_internos, nombre_interno). Prioriza CSV, luego Excel.
+    """
+    import io as _io
+    import zipfile
+
+    with zipfile.ZipFile(_io.BytesIO(data)) as zf:
+        nombres = [n for n in zf.namelist() if not n.endswith("/")]
+        elegido = None
+        for ext in (".csv", ".xlsx", ".xls"):
+            for n in nombres:
+                if n.lower().endswith(ext):
+                    elegido = n
+                    break
+            if elegido:
+                break
+        if elegido is None:
+            raise AutomatizacionArcaError(
+                f"La descarga ZIP no contiene CSV ni Excel (contenido: {nombres})."
+            )
+        contenido = zf.read(elegido)
+    return contenido, Path(elegido).name
+
+
+def _es_zip(data: bytes) -> bool:
+    return data[:4] == b"PK\x03\x04"
+
+
+def _descargar_excel_o_csv(mc, estado: str = "ok") -> tuple[bytes, str]:
+    if estado == "vacio":
+        raise SinComprobantesError(
+            "La consulta no devolvió comprobantes para el período indicado."
+        )
+
+    btn, formato = _locator_boton_descarga(mc)
+    if btn is None:
+        # Última espera por si DataTables tarda en renderizar los botones.
+        for _ in range(12):
+            pausa_humana(0.6, 1.1)
+            btn, formato = _locator_boton_descarga(mc)
+            if btn is not None:
+                break
+            if _sin_resultados(mc):
+                raise SinComprobantesError(
+                    "La consulta no devolvió comprobantes para el período indicado."
                 )
-            if alt.count():
-                clic_humano(alt.first)
-            else:
-                csv_btn = mc.locator("a, button").filter(has_text=re.compile("csv", re.I))
-                if csv_btn.count():
-                    clic_humano(csv_btn.first)
-                else:
-                    raise AutomatizacionArcaError(
-                        "No se encontró botón de descarga Excel ni CSV tras la búsqueda."
-                    )
+    if btn is None:
+        if _sin_resultados(mc):
+            raise SinComprobantesError(
+                "La consulta no devolvió comprobantes para el período indicado."
+            )
+        raise AutomatizacionArcaError(
+            "No se encontró botón de descarga (Excel ni CSV) tras la búsqueda "
+            "(¿terminó de cargar la consulta?)."
+        )
+
+    try:
+        btn.scroll_into_view_if_needed(timeout=2000)
+    except Exception:
+        pass
+
+    with mc.expect_download(timeout=120_000) as dl_info:
+        try:
+            clic_humano(btn)
+        except Exception:
+            btn.click(force=True)
     download = dl_info.value
     path = download.path()
     if path is None:
         raise AutomatizacionArcaError("La descarga no generó archivo temporal.")
     data = Path(path).read_bytes()
-    sug = download.suggested_filename or "mis_comprobantes_descarga"
+
+    sug = download.suggested_filename or f"mis_comprobantes_descarga.{formato}"
+
+    # ARCA suele entregar el CSV (muchos comprobantes) dentro de un ZIP. El
+    # botón Excel da un .xlsx (también ZIP internamente), por eso solo tratamos
+    # como contenedor cuando el nombre dice .zip o cuando vino por el botón CSV.
+    if sug.lower().endswith(".zip") or (formato == "csv" and _es_zip(data)):
+        data, sug = _extraer_de_zip(data, sug)
+
+    es_csv = sug.lower().endswith(".csv")
+    if es_csv:
+        # Un CSV válido debe tener al menos encabezado + 1 fila de datos.
+        texto = data.decode("utf-8", "ignore")
+        if not data or texto.count("\n") < 1:
+            raise AutomatizacionArcaError(
+                "El CSV descargado está vacío o incompleto. "
+                "Es probable que la búsqueda no haya aplicado el rango de fechas."
+            )
+    elif len(data) < 800:
+        raise AutomatizacionArcaError(
+            "El Excel descargado está vacío o incompleto. "
+            "Es probable que la búsqueda no haya aplicado el rango de fechas."
+        )
     return data, sug
+
+
+_JS_LEER_COLUMNAS = """
+() => {
+  const $ = window.jQuery || window.$;
+  if (!$ || !$.fn || !$.fn.dataTable) return null;
+  let s = null;
+  $('table').each(function () {
+    try {
+      if ($.fn.dataTable.isDataTable(this)) { s = $(this).DataTable().settings()[0]; return false; }
+    } catch (e) {}
+  });
+  if (!s || !s.aoColumns) return null;
+  return s.aoColumns.map(function (c) {
+    return {
+      title: (c.sTitle || '').replace(/\\s+/g, ' ').trim(),
+      data: c.mData,
+      visible: c.bVisible !== false,
+    };
+  });
+}
+"""
+
+_JS_CONSULTAR = """
+async (args) => {
+  const t = args.t, cuit = args.cuit;
+  const base = location.origin + '/mcmp/jsp/ajax.do?f=';
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmt = (d) => pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
+  const parse = (s) => { const p = s.split('/'); return new Date(+p[2], +p[1] - 1, +p[0]); };
+  let ini = parse(args.fd);
+  const fin = parse(args.fh);
+  const out = [];
+  let guard = 0;
+  while (ini <= fin && guard < 12) {
+    guard++;
+    let cf = new Date(ini.getFullYear(), 11, 31);
+    if (cf > fin) cf = fin;
+    const rango = fmt(ini) + ' - ' + fmt(cf);
+    const u1 = base + 'generarConsulta&t=' + t + '&fechaEmision=' +
+      encodeURIComponent(rango) + '&tiposComprobantes=&cuitConsultada=' + cuit;
+    let id = null;
+    try {
+      const r1 = await fetch(u1, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const j1 = await r1.json();
+      id = j1 && j1.datos && j1.datos.idConsulta;
+    } catch (e) { return { error: 'generarConsulta: ' + e }; }
+    if (id) {
+      try {
+        const r2 = await fetch(base + 'listaResultados&id=' + id,
+          { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const j2 = await r2.json();
+        const data = (j2 && j2.datos && j2.datos.data) || [];
+        for (const row of data) out.push(row);
+      } catch (e) { return { error: 'listaResultados: ' + e }; }
+    }
+    ini = new Date(cf.getFullYear(), cf.getMonth(), cf.getDate() + 1);
+  }
+  return { rows: out };
+}
+"""
+
+
+def _leer_columnas_datatable(mc):
+    """Lee la configuración de columnas (título + índice de dato) de la DataTable."""
+    for ctx in _iter_contextos(mc):
+        try:
+            cols = ctx.evaluate(_JS_LEER_COLUMNAS)
+        except Exception:
+            cols = None
+        if cols:
+            return cols
+    return None
+
+
+def _columnas_datatable_ok(cols) -> bool:
+    """Valida que la tabla traiga las columnas que el procesador necesita
+    (incluye el desglose por alícuota). Si no, conviene usar la descarga oficial."""
+    titulos = " | ".join((c.get("title") or "").lower() for c in cols)
+    tiene_alicuota = "iva 21" in titulos
+    requeridas = ("imp. total" in titulos and "tipo" in titulos and "fecha" in titulos)
+    return tiene_alicuota and requeridas
+
+
+def _consultar_json_mcmp(mc, t: str, fd: str, fh: str, cuit: str):
+    """Llama generarConsulta + listaResultados vía fetch (mismo origen, con sesión)."""
+    args = {"t": t, "fd": fd, "fh": fh, "cuit": re.sub(r"\D", "", cuit)}
+    for ctx in _iter_contextos(mc):
+        try:
+            res = ctx.evaluate(_JS_CONSULTAR, args)
+        except Exception:
+            res = None
+        if isinstance(res, dict) and "rows" in res:
+            return res["rows"]
+    raise AutomatizacionArcaError("La consulta JSON de Mis Comprobantes no respondió.")
+
+
+def _construir_xlsx_desde_json(cols, rows) -> bytes:
+    """Reconstruye el Excel oficial usando los títulos y el índice de dato de la tabla."""
+    import io as _io
+
+    from openpyxl import Workbook
+
+    visibles = [c for c in cols if c.get("visible", True) and (c.get("title") or "").strip()]
+    headers = [c["title"] for c in visibles]
+    idxs = [c.get("data") for c in visibles]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Comprobantes"
+    ws.append(headers)
+    for fila in rows:
+        valores = []
+        for di in idxs:
+            try:
+                valores.append(fila[di] if isinstance(di, int) and di < len(fila) else "")
+            except Exception:
+                valores.append("")
+        ws.append(valores)
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def _descargar_tipo_en_sesion(
@@ -798,12 +1672,38 @@ def _descargar_tipo_en_sesion(
     *,
     elegir_perfil: bool,
     cuit_login: str | None = None,
+    on_paso=None,
 ) -> tuple[bytes, str]:
     if elegir_perfil:
+        _paso(on_paso, "perfil", "en_curso")
         _elegir_perfil_representado(mc, cuit_repr, cuit_login=cuit_login)
-    _ir_a_tipo_comprobantes(mc, tipo)
-    _aplicar_filtro_fechas_y_buscar(mc, fd, fh)
-    return _descargar_excel_o_csv(mc)
+        _paso(on_paso, "perfil", "ok")
+    _paso(on_paso, tipo, "en_curso")
+    _ir_a_pantalla_tipo(mc, tipo)
+
+    # Vía rápida (API JSON interna de MCMP). Si la tabla no expone todas las
+    # columnas requeridas o algo falla, se usa la descarga oficial (UI).
+    try:
+        cols = _leer_columnas_datatable(mc)
+        if cols and _columnas_datatable_ok(cols):
+            cuit_consulta = _cuit_activo_mcmp(mc) or _normalizar_cuit_busqueda(cuit_repr)
+            t = "E" if tipo == "emitidos" else "R"
+            rows = _consultar_json_mcmp(mc, t, fd, fh, cuit_consulta)
+            if not rows:
+                raise SinComprobantesError(
+                    "La consulta no devolvió comprobantes para el período indicado."
+                )
+            data = _construir_xlsx_desde_json(cols, rows)
+            if len(data) >= 800:
+                return data, f"mis_comprobantes_{tipo}.xlsx"
+    except SinComprobantesError:
+        raise
+    except Exception:
+        pass
+
+    # Respaldo: método UI (descarga oficial del botón Excel de DataTables).
+    estado = _aplicar_filtro_fechas_y_buscar(mc, fd, fh)
+    return _descargar_excel_o_csv(mc, estado)
 
 
 def _flujo_post_login(
@@ -813,38 +1713,79 @@ def _flujo_post_login(
     fd: str,
     fh: str,
     tipo: TipoComprobantes,
+    on_paso=None,
 ) -> DescargaArcaResult:
     if tipo == "ambos":
-        data_e, nom_e = _descargar_tipo_en_sesion(
-            mc,
-            cuit_repr,
-            fd,
-            fh,
-            "emitidos",
-            elegir_perfil=True,
-            cuit_login=cuit_login,
+        avisos: list[str] = []
+        razon_social = ""
+        try:
+            data_e, nom_e = _descargar_tipo_en_sesion(
+                mc, cuit_repr, fd, fh, "emitidos",
+                elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso,
+            )
+            emitidos = (data_e, nom_e)
+            _paso(on_paso, "emitidos", "ok")
+        except SinComprobantesError:
+            emitidos = None
+            avisos.append("Emitidos: sin comprobantes en el período")
+            _paso(on_paso, "emitidos", "ok")
+        if not razon_social:
+            try:
+                razon_social = _razon_social_activa_mcmp(mc)
+            except Exception:
+                razon_social = ""
+        pausa_humana(0.4, 0.8)
+        try:
+            data_r, nom_r = _descargar_tipo_en_sesion(
+                mc, cuit_repr, fd, fh, "recibidos",
+                elegir_perfil=False, cuit_login=cuit_login, on_paso=on_paso,
+            )
+            recibidos = (data_r, nom_r)
+            _paso(on_paso, "recibidos", "ok")
+        except SinComprobantesError:
+            recibidos = None
+            avisos.append("Recibidos: sin comprobantes en el período")
+            _paso(on_paso, "recibidos", "ok")
+        except AutomatizacionArcaError as exc:
+            recibidos = None
+            avisos.append(f"falló Recibidos: {exc}")
+            _paso(on_paso, "recibidos", "error")
+
+        if not razon_social:
+            try:
+                razon_social = _razon_social_activa_mcmp(mc)
+            except Exception:
+                razon_social = ""
+
+        if emitidos is None and recibidos is None:
+            raise SinComprobantesError(
+                "; ".join(avisos) or "Sin comprobantes en el período."
+            )
+        return DescargaArcaResult(
+            emitidos=emitidos,
+            recibidos=recibidos,
+            aviso_parcial="; ".join(avisos) if avisos else None,
+            razon_social=razon_social or None,
         )
-        pausa_humana(0.7, 1.4)
-        data_r, nom_r = _descargar_tipo_en_sesion(
-            mc,
-            cuit_repr,
-            fd,
-            fh,
-            "recibidos",
-            elegir_perfil=False,
-            cuit_login=cuit_login,
-        )
-        return DescargaArcaResult(emitidos=(data_e, nom_e), recibidos=(data_r, nom_r))
+
     data, nom = _descargar_tipo_en_sesion(
-        mc,
-        cuit_repr,
-        fd,
-        fh,
-        tipo,
-        elegir_perfil=True,
-        cuit_login=cuit_login,
+        mc, cuit_repr, fd, fh, tipo,
+        elegir_perfil=True, cuit_login=cuit_login, on_paso=on_paso,
     )
-    return DescargaArcaResult.simple(data, nom, emitidos=(tipo == "emitidos"))
+    _paso(on_paso, tipo, "ok")
+    try:
+        razon_social = _razon_social_activa_mcmp(mc)
+    except Exception:
+        razon_social = ""
+    res = DescargaArcaResult.simple(data, nom, emitidos=(tipo == "emitidos"))
+    if razon_social:
+        res = DescargaArcaResult(
+            emitidos=res.emitidos,
+            recibidos=res.recibidos,
+            aviso_parcial=res.aviso_parcial,
+            razon_social=razon_social,
+        )
+    return res
 
 
 def ejecutar_descarga_mis_comprobantes(
@@ -854,6 +1795,7 @@ def ejecutar_descarga_mis_comprobantes(
     *,
     headless: bool = True,
     tipo: TipoComprobantes = "emitidos",
+    on_paso=None,
 ) -> DescargaArcaResult:
     if not _playwright_disponible():
         raise AutomatizacionNoDisponibleError(
@@ -874,16 +1816,24 @@ def ejecutar_descarga_mis_comprobantes(
             page = context.new_page()
             page.set_default_timeout(60_000)
 
+            _paso(on_paso, "login", "en_curso")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
             pausa_humana(0.56, 1.26)
             _llenar_cuit_y_avanzar(page, cred.cuit_login)
             _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
+            _paso(on_paso, "login", "ok")
+            _paso(on_paso, "mis_comprobantes", "en_curso")
             mc = _abrir_mis_comprobantes(page)
-            return _flujo_post_login(mc, cuit_repr, cuit_login, fd, fh, tipo)
+            _paso(on_paso, "mis_comprobantes", "ok")
+            return _flujo_post_login(
+                mc, cuit_repr, cuit_login, fd, fh, tipo, on_paso=on_paso
+            )
 
     except LoginArcaError:
         raise
     except CuitRepresentadoNoEncontradoError:
+        raise
+    except SinComprobantesError:
         raise
     except PlaywrightTimeout as exc:
         raise AutomatizacionArcaError(
