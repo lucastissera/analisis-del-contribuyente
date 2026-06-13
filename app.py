@@ -1321,6 +1321,7 @@ def np_descargar():
 
     def _worker() -> None:
         try:
+            progreso_cuit_np(job_id, 0, len(filas), "Iniciando…")
             carpeta = ejecutar_nuestra_parte_lote(
                 filas,
                 headless=headless,

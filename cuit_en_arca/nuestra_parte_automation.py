@@ -591,13 +591,150 @@ def _nombre_seguro(nombre: str, *, fallback: str = "archivo") -> str:
 # --------------------------------------------------------------------------- #
 # Apertura del servicio Nuestra Parte
 # --------------------------------------------------------------------------- #
+def _url_es_np(url: str | None) -> bool:
+    u = (url or "").lower()
+    if NP_HOST in u:
+        return True
+    if "arca.gob.ar" in u and "nuestra" in u and "parte" in u:
+        return True
+    return False
+
+
+def _np_ui_lista(np, *, timeout_sec: float = 35) -> bool:
+    """True cuando la SPA de Nuestra Parte muestra interfaz usable (no solo URL)."""
+    limite = time.time() + timeout_sec
+    while time.time() < limite:
+        if not _url_es_np(getattr(np, "url", "")):
+            pausa_humana(0.4, 0.7)
+            continue
+        try:
+            if np.locator(".e-navbar, header.navbar, nav.navbar").count():
+                return True
+            if np.get_by_text(re.compile(r"Tu informaci[oó]n", re.I)).count():
+                return True
+            if np.locator("e-custom-card, .e-custom-card").count():
+                return True
+        except Exception:
+            pass
+        pausa_humana(0.4, 0.7)
+    return _url_es_np(getattr(np, "url", ""))
+
+
+def _pagina_np_context(context) -> object | None:
+    for pg in context.pages:
+        try:
+            if pg.is_closed():
+                continue
+        except Exception:
+            continue
+        if _url_es_np(pg.url):
+            return pg
+    return None
+
+
+def _esperar_apertura_np(context, *, timeout_sec: float = 40) -> object | None:
+    limite = time.time() + timeout_sec
+    while time.time() < limite:
+        np = _pagina_np_context(context)
+        if np is not None:
+            return np
+        pausa_humana(0.45, 0.85)
+    return None
+
+
+def _locator_enlace_np(root):
+    candidatos = (
+        root.get_by_text(re.compile(r"Nuestra Parte", re.I)),
+        root.get_by_role("link", name=re.compile(r"Nuestra Parte", re.I)),
+        root.locator("a.accesoPrincipal[title*='Nuestra Parte' i]"),
+        root.locator("a[title*='Nuestra Parte' i]"),
+    )
+    for loc in candidatos:
+        for i in range(_cantidad(loc, 12)):
+            try:
+                item = loc.nth(i)
+                if item.is_visible(timeout=900):
+                    return item
+            except Exception:
+                continue
+    return None
+
+
+def _esperar_enlace_np(page, intentos: int = 10):
+    from cuit_en_arca.automation_playwright import _iter_contextos
+
+    for _ in range(intentos):
+        for ctx in _iter_contextos(page):
+            link = _locator_enlace_np(ctx)
+            if link is not None:
+                return link
+        pausa_humana(0.35, 0.7)
+    return None
+
+
+def _buscar_np_en_portal(page):
+    from cuit_en_arca.automation_playwright import (
+        _click_servicio_y_obtener_pagina,
+        _esperar_pagina,
+        _iter_contextos,
+        _locator_buscador_servicios,
+    )
+    from cuit_en_arca.dfe_automation import _activar_busqueda_portal
+
+    buscador = None
+    ctx_buscador = page
+    for ctx in _iter_contextos(page):
+        buscador = _locator_buscador_servicios(ctx)
+        if buscador is not None:
+            ctx_buscador = ctx
+            break
+    if buscador is None:
+        raise AutomatizacionArcaError(
+            "No se encontró la barra de búsqueda de servicios en ARCA."
+        )
+
+    escribir_como_humano(buscador, NP_TERMINO_BUSQUEDA)
+    pausa_humana(0.5, 1.0)
+    _activar_busqueda_portal(page, ctx_buscador)
+    pausa_humana(0.7, 1.3)
+    _esperar_pagina(page, timeout=35_000)
+
+    link = _esperar_enlace_np(page)
+    if link is None:
+        raise AutomatizacionArcaError(
+            "No apareció «Nuestra Parte» en los resultados del buscador de ARCA."
+        )
+    return _click_servicio_y_obtener_pagina(page, link)
+
+
+def _resolver_pagina_np(page, objetivo=None):
+    context = page.context
+    np = _esperar_apertura_np(context)
+    if np is None:
+        np = _pagina_np_context(context)
+    if np is None and objetivo is not None:
+        np = objetivo
+    if np is None and context.pages:
+        np = context.pages[-1]
+    if np is None:
+        np = page
+    try:
+        np.bring_to_front()
+    except Exception:
+        pass
+    np.set_default_timeout(40_000)
+    _esperar_np(np, 12_000)
+    pausa_humana(1.5, 2.5)
+    return np
+
+
 def _abrir_nuestra_parte(page):
     from cuit_en_arca.automation_playwright import (
         _click_servicio_y_obtener_pagina,
         _esperar_pagina,
         _esperar_post_login,
+        _ir_al_portal_arca,
         _iter_contextos,
-        _locator_buscador_servicios,
     )
 
     pausa_humana(0.8, 1.4)
@@ -605,42 +742,51 @@ def _abrir_nuestra_parte(page):
     _esperar_pagina(page, timeout=42_000)
 
     objetivo = None
-    buscador = None
-    for ctx in _iter_contextos(page):
-        buscador = _locator_buscador_servicios(ctx)
-        if buscador is not None:
-            break
-    if buscador is not None:
-        escribir_como_humano(buscador, NP_TERMINO_BUSQUEDA)
-        pausa_humana(1.0, 1.8)
-        res = page.get_by_text(re.compile(r"Nuestra Parte", re.I))
-        for i in range(_cantidad(res, 12)):
-            try:
-                if res.nth(i).is_visible(timeout=900):
-                    objetivo = _click_servicio_y_obtener_pagina(page, res.nth(i))
-                    break
-            except Exception:
-                continue
+    errores: list[str] = []
 
-    pausa_humana(2.2, 3.2)
-    np = None
-    for pg in page.context.pages:
-        if NP_HOST in (pg.url or "").lower():
-            np = pg
-            break
+    def _intentar_desde_portal_actual() -> object | None:
+        nonlocal objetivo
+        objetivo = None
+        try:
+            objetivo = _buscar_np_en_portal(page)
+        except AutomatizacionArcaError as exc:
+            errores.append(str(exc))
+            link = _esperar_enlace_np(page, intentos=8)
+            if link is not None:
+                try:
+                    objetivo = _click_servicio_y_obtener_pagina(page, link)
+                except Exception as exc2:
+                    errores.append(str(exc2))
+        if objetivo is None:
+            for ctx in _iter_contextos(page):
+                link = _locator_enlace_np(ctx)
+                if link is None:
+                    continue
+                try:
+                    objetivo = _click_servicio_y_obtener_pagina(page, link)
+                    break
+                except Exception as exc:
+                    errores.append(str(exc))
+        np = _resolver_pagina_np(page, objetivo)
+        if _np_ui_lista(np):
+            return np
+        return None
+
+    np = _intentar_desde_portal_actual()
     if np is None:
-        np = objetivo or page.context.pages[-1]
-    try:
-        np.bring_to_front()
-        np.set_default_timeout(40_000)
-        _esperar_np(np, 12_000)
-    except Exception:
-        pass
-    pausa_humana(1.5, 2.5)
-    if NP_HOST not in (np.url or "").lower():
+        try:
+            _ir_al_portal_arca(page)
+            np = _intentar_desde_portal_actual()
+        except Exception as exc:
+            errores.append(str(exc))
+
+    if np is None or not _np_ui_lista(np, timeout_sec=8):
+        detalle = errores[-1] if errores else (
+            "el servicio no terminó de cargar tras el login (común en servidor web)."
+        )
         raise AutomatizacionArcaError(
-            "No se pudo abrir «Nuestra Parte» desde el portal. "
-            "Verificá que el CUIT tenga el servicio habilitado."
+            "No se pudo abrir «Nuestra Parte» desde el portal "
+            f"({detalle}). Reintentá en unos minutos."
         )
     return np
 
@@ -1540,6 +1686,7 @@ def ejecutar_descarga_nuestra_parte(
             "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
         )
 
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
     from playwright.sync_api import sync_playwright
 
     from cuit_en_arca.automation_playwright import (
@@ -1548,6 +1695,7 @@ def ejecutar_descarga_nuestra_parte(
         _login_clave_fiscal,
         _nuevo_contexto_stealth,
     )
+    from cuit_en_arca.errores import LoginArcaError
 
     carpeta_destino.mkdir(parents=True, exist_ok=True)
     resultado = ResultadoNPCuit(
@@ -1566,6 +1714,7 @@ def ejecutar_descarga_nuestra_parte(
             page.set_default_timeout(60_000)
 
             _paso(on_paso, "login", "en_curso")
+            _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
             pausa_humana(0.56, 1.26)
             _llenar_cuit_y_avanzar(page, cred.cuit_login)
@@ -1573,6 +1722,7 @@ def ejecutar_descarga_nuestra_parte(
             _paso(on_paso, "login", "ok")
 
             _paso(on_paso, "servicio", "en_curso")
+            _log(on_log, "Abriendo Nuestra Parte…")
             np = _abrir_nuestra_parte(page)
             if _cuit_np_n(cred.cuit_representado) != _cuit_np_n(cred.cuit_login):
                 _seleccionar_representado_np(
@@ -1607,6 +1757,21 @@ def ejecutar_descarga_nuestra_parte(
 
             _log(on_log, f"Listo. Archivos: {resultado.total_archivos} en {carpeta_destino}")
             return resultado
+
+    except LoginArcaError:
+        raise
+    except CuitRepresentadoNoEncontradoError:
+        raise
+    except PlaywrightTimeout as exc:
+        raise AutomatizacionArcaError(
+            "Tiempo de espera agotado en ARCA (sitio lento o pantalla distinta a la esperada)."
+        ) from exc
+    except AutomatizacionArcaError:
+        raise
+    except Exception as exc:
+        raise AutomatizacionArcaError(
+            f"Error en automatización Nuestra Parte: {exc}"
+        ) from exc
     finally:
         if browser is not None:
             try:
@@ -1630,6 +1795,9 @@ def ejecutar_nuestra_parte_lote(
     nombre_carpeta_sesion: str | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) de «Nuestra Parte». Tolerante a errores."""
+    from cuit_en_arca.service import _requiere_playwright
+
+    _requiere_playwright()
     headless = _headless_desde_env() if headless is None else headless
     base = carpeta_np_base(
         base_elegida=carpeta_base,
