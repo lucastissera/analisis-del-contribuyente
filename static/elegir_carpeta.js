@@ -192,6 +192,13 @@
     if (err.message === "picker_carpeta_restringida" || esErrorCarpetaRestringida(err)) {
       return restringida;
     }
+    if (err.message === "picker_subcarpeta_fallida") {
+      return (
+        textos.subcarpetaFallida ||
+        textos.err_carpeta_subcarpeta_fallida ||
+        permisoDenegado
+      );
+    }
     return cancelada;
   }
 
@@ -208,6 +215,41 @@
       subcarpetaSesion: _subcarpetaSesion,
       parentNombre: _parentNombre,
       dirNombre: _dirNombre,
+    });
+  }
+
+  function confirmarPermisoEscritura(handle) {
+    if (!handle || typeof handle.queryPermission !== "function") {
+      return Promise.resolve(handle);
+    }
+    return handle.queryPermission({ mode: "readwrite" }).then(function (perm) {
+      if (perm === "granted") return handle;
+      if (typeof handle.requestPermission !== "function") {
+        throw new Error("picker_permiso_denegado");
+      }
+      return handle.requestPermission({ mode: "readwrite" }).then(function (p) {
+        if (p === "granted") return handle;
+        throw new Error("picker_permiso_denegado");
+      });
+    });
+  }
+
+  function esSubcarpetaSistema(nombre, sistema) {
+    var pref = PREFIJOS_SISTEMA[sistema];
+    return !!(pref && nombre && String(nombre).indexOf(pref + " ") === 0);
+  }
+
+  function usarSeleccionDirecta(handle, sistema, sesionInputId) {
+    if (!esSubcarpetaSistema(handle.name, sistema)) return null;
+    _parentHandle = handle;
+    _parentNombre = handle.name;
+    _dirHandle = handle;
+    _subcarpetaSesion = handle.name;
+    _dirNombre = handle.name;
+    _sistemaActual = sistema;
+    actualizarCampoSesion(sesionInputId);
+    return persistirEstado(sistema).then(function () {
+      return _dirNombre;
     });
   }
 
@@ -243,18 +285,7 @@
         });
       })
       .catch(function () {
-        _dirHandle = base;
-        _parentHandle = base;
-        _parentNombre = base.name || _parentNombre || "Carpeta";
-        _subcarpetaSesion = null;
-        _dirNombre = _parentNombre + " / " + subNombre;
-        if (sesionInputId) {
-          var el = document.getElementById(sesionInputId);
-          if (el) el.value = subNombre;
-        }
-        return persistirEstado(sistema).then(function () {
-          return _dirNombre;
-        });
+        return Promise.reject(new Error("picker_subcarpeta_fallida"));
       });
   }
 
@@ -286,20 +317,25 @@
         id: pickerId,
       })
       .then(function (parentHandle) {
-        _parentHandle = parentHandle;
-        _parentNombre = parentHandle.name || "Carpeta";
-        _dirHandle = parentHandle;
+        return confirmarPermisoEscritura(parentHandle).then(function (handle) {
+          _parentHandle = handle;
+          _parentNombre = handle.name || "Carpeta";
+          _dirHandle = handle;
 
-        if (sistema === "analisis_programado") {
-          _dirNombre = _parentNombre;
-          _subcarpetaSesion = null;
-          actualizarCampoSesion(sesionInputId);
-          return persistirEstado(sistema).then(function () {
-            return _dirNombre;
-          });
-        }
+          if (sistema === "analisis_programado") {
+            _dirNombre = _parentNombre;
+            _subcarpetaSesion = null;
+            actualizarCampoSesion(sesionInputId);
+            return persistirEstado(sistema).then(function () {
+              return _dirNombre;
+            });
+          }
 
-        return asegurarSubcarpetaSesion(sistema, sesionInputId);
+          var directo = usarSeleccionDirecta(handle, sistema, sesionInputId);
+          if (directo) return directo;
+
+          return asegurarSubcarpetaSesion(sistema, sesionInputId);
+        });
       })
       .catch(function (err) {
         if (err && err.name === "AbortError") return null;
@@ -397,9 +433,15 @@
       if (esModoEscritorio()) {
         return Promise.resolve(api.obtener());
       }
-      return asegurarSubcarpetaSesion(sistema, sesionInputId).then(function () {
-        api.aplicar(_dirNombre);
-        return _dirNombre;
+      var base = _parentHandle || _dirHandle;
+      if (!base) {
+        return Promise.reject(new Error("picker_sin_carpeta"));
+      }
+      return confirmarPermisoEscritura(base).then(function () {
+        return asegurarSubcarpetaSesion(sistema, sesionInputId).then(function () {
+          api.aplicar(_dirNombre);
+          return _dirNombre;
+        });
       });
     }
 

@@ -174,11 +174,12 @@ def _es_app_escritorio() -> bool:
     return getattr(sys, "frozen", False)
 
 
-def _nombre_carpeta_web_sesion(prefijo: str) -> str | None:
+def _nombre_carpeta_web_sesion(prefijo: str, raw: str | None = None) -> str | None:
     """Nombre de subcarpeta acordado con el navegador (web), p. ej. «Mis Comprobantes 2026-06-12 23-05»."""
     if _es_app_escritorio():
         return None
-    raw = (request.form.get("web_carpeta_sesion") or "").strip()
+    if raw is None:
+        raw = (request.form.get("web_carpeta_sesion") or "").strip()
     if not raw or not raw.startswith(f"{prefijo} "):
         return None
     if any(c in raw for c in "/\\") or ".." in raw:
@@ -940,6 +941,10 @@ def arca_descarga_lote():
             return jsonify({"error": msg}), 400
         return render_template("index.html", error=msg)
     carpeta_destino = str(base)
+    nombre_sesion_mc = _nombre_carpeta_web_sesion("Mis Comprobantes")
+
+    def _err_inesperado(exc: Exception) -> str:
+        return tr(lg, "err_arca_unexpected", exc=exc)
 
     from cuit_en_arca.cancelacion import reset_cancelacion
 
@@ -962,7 +967,7 @@ def arca_descarga_lote():
                 mapa_imputaciones=mapa_imputaciones,
                 carpeta_destino=carpeta_destino,
                 job_id=job_id,
-                nombre_carpeta_sesion=_nombre_carpeta_web_sesion("Mis Comprobantes"),
+                nombre_carpeta_sesion=nombre_sesion_mc,
             )
             if entrega:
                 entrega.escanear()
@@ -997,7 +1002,7 @@ def arca_descarga_lote():
         except ArcaProcesoError as exc:
             marcar_error(job_id, str(exc))
         except Exception as exc:
-            marcar_error(job_id, tr(lg, "err_arca_unexpected", exc=exc))
+            marcar_error(job_id, _err_inesperado(exc))
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -1123,6 +1128,10 @@ def dfe_descargar():
             return jsonify({"error": msg}), 400
         return render_template("dfe.html", error=msg)
     carpeta_destino = str(base)
+    nombre_sesion_dfe = _nombre_carpeta_web_sesion("DFE")
+
+    def _err_inesperado(exc: Exception) -> str:
+        return tr(lg, "err_arca_unexpected", exc=exc)
 
     from cuit_en_arca.cancelacion import reset_cancelacion
 
@@ -1161,7 +1170,7 @@ def dfe_descargar():
                 on_cuit_fin=_cuit_fin,
                 carpeta_base=carpeta_destino,
                 job_id=job_id,
-                nombre_carpeta_sesion=_nombre_carpeta_web_sesion("DFE"),
+                nombre_carpeta_sesion=nombre_sesion_dfe,
             )
             if entrega:
                 entrega.escanear()
@@ -1171,7 +1180,7 @@ def dfe_descargar():
         except ArcaProcesoError as exc:
             marcar_error_dfe(job_id, str(exc))
         except Exception as exc:
-            marcar_error_dfe(job_id, tr(lg, "err_arca_unexpected", exc=exc))
+            marcar_error_dfe(job_id, _err_inesperado(exc))
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -1284,6 +1293,10 @@ def np_descargar():
             return jsonify({"error": msg}), 400
         return render_template("nuestra_parte.html", error=msg)
     carpeta_destino = str(base)
+    nombre_sesion_np = _nombre_carpeta_web_sesion("Nuestra Parte")
+
+    def _err_inesperado(exc: Exception) -> str:
+        return tr(lg, "err_arca_unexpected", exc=exc)
 
     from cuit_en_arca.cancelacion import reset_cancelacion
 
@@ -1322,7 +1335,7 @@ def np_descargar():
                 on_cuit_fin=_cuit_fin,
                 carpeta_base=carpeta_destino,
                 job_id=job_id,
-                nombre_carpeta_sesion=_nombre_carpeta_web_sesion("Nuestra Parte"),
+                nombre_carpeta_sesion=nombre_sesion_np,
             )
             if entrega:
                 entrega.escanear()
@@ -1332,7 +1345,7 @@ def np_descargar():
         except ArcaProcesoError as exc:
             marcar_error_np(job_id, str(exc))
         except Exception as exc:
-            marcar_error_np(job_id, tr(lg, "err_arca_unexpected", exc=exc))
+            marcar_error_np(job_id, _err_inesperado(exc))
 
     threading.Thread(target=_worker, daemon=True).start()
 
