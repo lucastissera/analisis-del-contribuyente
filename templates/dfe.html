@@ -328,6 +328,7 @@
           <p class="help" style="margin:0">{{ t('carpeta_destino_label') }}: <code id="dfe-carpeta-label" class="ruta">—</code></p>
           {% if not modo_escritorio %}
           <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_modo_web') }}</p>
+          <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_permiso_navegador')|safe }}</p>
           {% endif %}
           <button type="button" class="btn-sec" id="dfe-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
           <button type="button" class="btn-sec btn-cancelar-descarga" id="dfe-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
@@ -372,6 +373,7 @@
         carpetaModoWeb: {{ t('carpeta_modo_web')|tojson }},
         errCarpetaWebApi: {{ t('err_carpeta_web_api')|tojson }},
         errCarpetaRestringida: {{ t('err_carpeta_restringida')|tojson }},
+        errCarpetaPermisoDenegado: {{ t('err_carpeta_permiso_denegado')|tojson }},
         carpetaCancelada: {{ t('carpeta_cancelada')|tojson }},
         fallosTitulo: {{ t('fallos_detalle_titulo')|tojson }},
         fallosArchivo: {{ t('fallos_ver_archivo')|tojson }},
@@ -451,6 +453,7 @@
             cancelada: I18N.carpetaCancelada,
             noSoportado: I18N.errCarpetaWebApi,
             restringida: I18N.errCarpetaRestringida,
+            permisoDenegado: I18N.errCarpetaPermisoDenegado,
           },
           sistema: "dfe",
           sesionInputId: "web-carpeta-sesion",
@@ -580,7 +583,11 @@
           }
           btn.disabled = true;
           btn.textContent = I18N.working;
-          McElegirCarpeta.resolver({ api: carpetaApi })
+          McElegirCarpeta.resolver({
+            api: carpetaApi,
+            sistema: "dfe",
+            sesionInputId: "web-carpeta-sesion",
+          })
             .then(function (ruta) {
               if (McElegirCarpeta.requiereCarpeta(ruta)) {
                 btn.disabled = false;

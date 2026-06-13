@@ -7,8 +7,12 @@
     analisis_programado: "Análisis Programado",
   };
 
+  var IDB_DB = "aic-carpeta-web";
+  var IDB_VER = 1;
+
   var _dirHandle = null;
   var _dirNombre = "";
+  var _parentHandle = null;
   var _parentNombre = "";
   var _subcarpetaSesion = null;
   var _sistemaActual = null;
@@ -56,19 +60,93 @@
     return pref + " " + stampCarpetaEjecucion();
   }
 
+  function abrirIdb() {
+    return new Promise(function (resolve, reject) {
+      if (!global.indexedDB) {
+        reject(new Error("no_idb"));
+        return;
+      }
+      var req = global.indexedDB.open(IDB_DB, IDB_VER);
+      req.onerror = function () {
+        reject(req.error);
+      };
+      req.onupgradeneeded = function (ev) {
+        ev.target.result.createObjectStore("handles", { keyPath: "sistema" });
+      };
+      req.onsuccess = function () {
+        resolve(req.result);
+      };
+    });
+  }
+
+  function guardarEnIdb(sistema, data) {
+    return abrirIdb()
+      .then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction("handles", "readwrite");
+          tx.objectStore("handles").put(
+            Object.assign({ sistema: sistema }, data)
+          );
+          tx.oncomplete = function () {
+            resolve();
+          };
+          tx.onerror = function () {
+            reject(tx.error);
+          };
+        });
+      })
+      .catch(function () {});
+  }
+
+  function leerDeIdb(sistema) {
+    return abrirIdb()
+      .then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction("handles", "readonly");
+          var req = tx.objectStore("handles").get(sistema);
+          req.onsuccess = function () {
+            resolve(req.result || null);
+          };
+          req.onerror = function () {
+            reject(req.error);
+          };
+        });
+      })
+      .catch(function () {
+        return null;
+      });
+  }
+
+  function restaurarDesdeIdb(sistema) {
+    return leerDeIdb(sistema).then(function (row) {
+      if (!row || !row.dirHandle) return false;
+      return row.dirHandle
+        .queryPermission({ mode: "readwrite" })
+        .then(function (perm) {
+          if (perm !== "granted") return false;
+          _dirHandle = row.dirHandle;
+          _subcarpetaSesion = row.subcarpetaSesion || null;
+          _parentNombre = row.parentNombre || row.dirHandle.name || "";
+          _dirNombre = row.dirNombre || row.dirHandle.name || "";
+          _sistemaActual = sistema;
+          return true;
+        });
+    }).catch(function () {
+      return false;
+    });
+  }
+
   function esErrorCarpetaRestringida(err) {
     if (!err) return false;
     var nombre = String(err.name || "");
     var msg = String(err.message || "").toLowerCase();
-    if (nombre === "SecurityError" || nombre === "NotAllowedError") {
-      if (
+    if (nombre === "SecurityError") {
+      return (
         msg.indexOf("system") >= 0 ||
         msg.indexOf("sistema") >= 0 ||
         msg.indexOf("restricted") >= 0 ||
         msg.indexOf("restring") >= 0
-      ) {
-        return true;
-      }
+      );
     }
     return (
       msg.indexOf("system file") >= 0 ||
@@ -76,6 +154,12 @@
       msg.indexOf("contains system") >= 0 ||
       msg.indexOf("contiene archivos") >= 0
     );
+  }
+
+  function esPermisoDenegado(err) {
+    if (!err || err.name !== "NotAllowedError") return false;
+    if (esErrorCarpetaRestringida(err)) return false;
+    return true;
   }
 
   function mensajeError(err, textos) {
@@ -94,9 +178,17 @@
       textos.err_carpeta_restringida ||
       textos.errCarpetaRestringida ||
       cancelada;
+    var permisoDenegado =
+      textos.permisoDenegado ||
+      textos.err_carpeta_permiso_denegado ||
+      textos.errCarpetaPermisoDenegado ||
+      cancelada;
 
     if (!err) return cancelada;
     if (err.message === "picker_web_no_soportado") return noSoportado;
+    if (err.message === "picker_permiso_denegado" || esPermisoDenegado(err)) {
+      return permisoDenegado;
+    }
     if (err.message === "picker_carpeta_restringida" || esErrorCarpetaRestringida(err)) {
       return restringida;
     }
@@ -109,31 +201,58 @@
     if (el) el.value = _subcarpetaSesion || "";
   }
 
-  function prepararCarpetaWeb(parentHandle, sistema) {
-    _sistemaActual = sistema || null;
-    _parentNombre = parentHandle.name || "Carpeta";
-
-    if (sistema === "analisis_programado") {
-      _dirHandle = parentHandle;
-      _dirNombre = _parentNombre;
-      _subcarpetaSesion = null;
-      return Promise.resolve(_dirNombre);
-    }
-
-    var subNombre = nombreSubcarpetaSistema(sistema || "mis_comprobantes");
-    if (!subNombre) {
-      _dirHandle = parentHandle;
-      _dirNombre = _parentNombre;
-      _subcarpetaSesion = null;
-      return Promise.resolve(_dirNombre);
-    }
-
-    return parentHandle.getDirectoryHandle(subNombre, { create: true }).then(function (subHandle) {
-      _dirHandle = subHandle;
-      _subcarpetaSesion = subNombre;
-      _dirNombre = _parentNombre + " / " + subNombre;
-      return _dirNombre;
+  function persistirEstado(sistema) {
+    if (!sistema || !_dirHandle) return Promise.resolve();
+    return guardarEnIdb(sistema, {
+      dirHandle: _dirHandle,
+      subcarpetaSesion: _subcarpetaSesion,
+      parentNombre: _parentNombre,
+      dirNombre: _dirNombre,
     });
+  }
+
+  function asegurarSubcarpetaSesion(sistema, sesionInputId) {
+    if (!sistema || sistema === "analisis_programado") {
+      _subcarpetaSesion = null;
+      actualizarCampoSesion(sesionInputId);
+      return Promise.resolve(_dirNombre);
+    }
+    if (_subcarpetaSesion && _dirHandle) {
+      actualizarCampoSesion(sesionInputId);
+      return Promise.resolve(_dirNombre);
+    }
+
+    var base = _parentHandle || _dirHandle;
+    if (!base) {
+      return Promise.reject(new Error("picker_sin_carpeta"));
+    }
+
+    var subNombre = nombreSubcarpetaSistema(sistema);
+    return base
+      .getDirectoryHandle(subNombre, { create: true })
+      .then(function (subHandle) {
+        _parentHandle = base;
+        _parentNombre = base.name || _parentNombre || "Carpeta";
+        _dirHandle = subHandle;
+        _subcarpetaSesion = subNombre;
+        _dirNombre = _parentNombre + " / " + subNombre;
+        _sistemaActual = sistema;
+        actualizarCampoSesion(sesionInputId);
+        return persistirEstado(sistema).then(function () {
+          return _dirNombre;
+        });
+      })
+      .catch(function (err) {
+        _dirHandle = base;
+        _parentHandle = base;
+        _parentNombre = base.name || _parentNombre || "Carpeta";
+        _subcarpetaSesion = subNombre;
+        _dirNombre = _parentNombre + " / " + subNombre;
+        actualizarCampoSesion(sesionInputId);
+        return persistirEstado(sistema).then(function () {
+          return _dirNombre;
+        });
+      });
   }
 
   function elegirCarpetaNativa(titulo) {
@@ -150,17 +269,40 @@
       });
   }
 
-  function elegirCarpetaWeb(titulo, sistema) {
+  function elegirCarpetaWeb(titulo, sistema, sesionInputId) {
     if (!soporteCarpetaWeb()) {
       return Promise.reject(new Error("picker_web_no_soportado"));
     }
+
+    var pickerId = "aic-" + (sistema || "mis_comprobantes");
+
     return global
-      .showDirectoryPicker({ mode: "readwrite" })
-      .then(function (handle) {
-        return prepararCarpetaWeb(handle, sistema);
+      .showDirectoryPicker({
+        mode: "readwrite",
+        startIn: "downloads",
+        id: pickerId,
+      })
+      .then(function (parentHandle) {
+        _parentHandle = parentHandle;
+        _parentNombre = parentHandle.name || "Carpeta";
+        _dirHandle = parentHandle;
+
+        if (sistema === "analisis_programado") {
+          _dirNombre = _parentNombre;
+          _subcarpetaSesion = null;
+          actualizarCampoSesion(sesionInputId);
+          return persistirEstado(sistema).then(function () {
+            return _dirNombre;
+          });
+        }
+
+        return asegurarSubcarpetaSesion(sistema, sesionInputId);
       })
       .catch(function (err) {
         if (err && err.name === "AbortError") return null;
+        if (esPermisoDenegado(err)) {
+          throw new Error("picker_permiso_denegado");
+        }
         if (esErrorCarpetaRestringida(err)) {
           throw new Error("picker_carpeta_restringida");
         }
@@ -168,11 +310,11 @@
       });
   }
 
-  function elegirCarpeta(titulo, sistema) {
+  function elegirCarpeta(titulo, sistema, sesionInputId) {
     if (esModoEscritorio()) {
       return elegirCarpetaNativa(titulo);
     }
-    return elegirCarpetaWeb(titulo, sistema);
+    return elegirCarpetaWeb(titulo, sistema, sesionInputId);
   }
 
   function configurarUiWeb(opts) {
@@ -199,9 +341,15 @@
       actualizarCampoSesion(sesionInputId);
     }
 
+    if (!esModoEscritorio()) {
+      restaurarDesdeIdb(sistema).then(function (ok) {
+        if (ok) aplicar(_dirNombre);
+      });
+    }
+
     function picker() {
       if (btn) btn.disabled = true;
-      return elegirCarpeta(titulo, sistema)
+      return elegirCarpeta(titulo, sistema, sesionInputId)
         .then(function (ruta) {
           if (btn) btn.disabled = false;
           if (!ruta) {
@@ -239,24 +387,54 @@
 
   function resolverCarpeta(opts) {
     var api = opts.api;
+    var sistema = opts.sistema || _sistemaActual || "mis_comprobantes";
+    var sesionInputId = opts.sesionInputId || null;
+
+    function finalizar() {
+      if (esModoEscritorio()) {
+        return Promise.resolve(api.obtener());
+      }
+      return asegurarSubcarpetaSesion(sistema, sesionInputId).then(function () {
+        api.aplicar(_dirNombre);
+        return _dirNombre;
+      });
+    }
+
     if (esModoEscritorio()) {
       var actual = api.obtener();
       if (actual) return Promise.resolve(actual);
       return api.elegir();
     }
-    if (_dirHandle) return Promise.resolve(_dirNombre);
-    return api.elegir();
+    if (_dirHandle) return finalizar();
+    return api.elegir().then(function (ruta) {
+      if (!ruta) return null;
+      return finalizar();
+    });
   }
 
   function limpiarCarpetaWeb() {
     _dirHandle = null;
     _dirNombre = "";
+    _parentHandle = null;
     _parentNombre = "";
     _subcarpetaSesion = null;
     _sistemaActual = null;
     document.querySelectorAll('input[name="web_carpeta_sesion"]').forEach(function (el) {
       el.value = "";
     });
+    if (global.indexedDB) {
+      abrirIdb()
+        .then(function (db) {
+          return new Promise(function (resolve) {
+            var tx = db.transaction("handles", "readwrite");
+            tx.objectStore("handles").clear();
+            tx.oncomplete = function () {
+              resolve();
+            };
+          });
+        })
+        .catch(function () {});
+    }
   }
 
   global.McElegirCarpeta = {

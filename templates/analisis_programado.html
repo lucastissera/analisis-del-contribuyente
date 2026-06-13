@@ -205,6 +205,7 @@
           <p class="help" style="margin:0">{{ t('ap_carpeta_destino') }}: <code id="carpeta-label" class="ruta">—</code></p>
           {% if not modo_escritorio %}
           <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_modo_web') }}</p>
+          <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_permiso_navegador')|safe }}</p>
           {% endif %}
           <button type="button" class="btn-sec" id="btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
           <button type="button" class="btn-sec btn-cancelar-descarga" id="ap-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
@@ -245,6 +246,7 @@
         carpetaModoWeb: {{ t('carpeta_modo_web')|tojson }},
         errCarpetaWebApi: {{ t('err_carpeta_web_api')|tojson }},
         errCarpetaRestringida: {{ t('err_carpeta_restringida')|tojson }},
+        errCarpetaPermisoDenegado: {{ t('err_carpeta_permiso_denegado')|tojson }},
         carpetaCancelada: {{ t('carpeta_cancelada')|tojson }},
         errorGuardar: {{ t('ap_err_guardar')|tojson }},
         sinSistema: {{ t('ap_err_sin_sistema')|tojson }},
@@ -382,6 +384,7 @@
             cancelada: I18N.carpetaCancelada,
             noSoportado: I18N.errCarpetaWebApi,
             restringida: I18N.errCarpetaRestringida,
+            permisoDenegado: I18N.errCarpetaPermisoDenegado,
           },
           sistema: "analisis_programado",
         });
@@ -417,7 +420,10 @@
             return;
           }
           btn.disabled = true;
-          McElegirCarpeta.resolver({ api: carpetaApi })
+          McElegirCarpeta.resolver({
+            api: carpetaApi,
+            sistema: "analisis_programado",
+          })
             .then(function (ruta) {
               if (McElegirCarpeta.requiereCarpeta(ruta)) {
                 btn.disabled = false;
