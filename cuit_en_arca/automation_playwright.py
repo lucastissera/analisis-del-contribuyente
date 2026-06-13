@@ -15,7 +15,10 @@ import sys
 import time
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
 from cuit_en_arca.credenciales import CredencialesArca
 from cuit_en_arca.descarga import DescargaArcaResult
@@ -1819,42 +1822,72 @@ def ejecutar_descarga_mis_comprobantes(
     tipo: TipoComprobantes = "emitidos",
     on_paso=None,
     on_log=None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> DescargaArcaResult:
     if not _playwright_disponible():
         raise AutomatizacionNoDisponibleError(
             "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
         )
 
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
+
+    if sesion is not None:
+        return _ejecutar_descarga_mis_comprobantes_impl(
+            sesion,
+            cred,
+            fecha_desde,
+            fecha_hasta,
+            tipo=tipo,
+            on_paso=on_paso,
+            on_log=on_log,
+        )
+
+    with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+        return _ejecutar_descarga_mis_comprobantes_impl(
+            sesion_local,
+            cred,
+            fecha_desde,
+            fecha_hasta,
+            tipo=tipo,
+            on_paso=on_paso,
+            on_log=on_log,
+        )
+
+
+def _ejecutar_descarga_mis_comprobantes_impl(
+    sesion: SesionPlaywrightCompartida,
+    cred: CredencialesArca,
+    fecha_desde: date,
+    fecha_hasta: date,
+    *,
+    tipo: TipoComprobantes = "emitidos",
+    on_paso=None,
+    on_log=None,
+) -> DescargaArcaResult:
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    from playwright.sync_api import sync_playwright
 
     fd, fh = _formatear_rango_afip(fecha_desde, fecha_hasta)
     cuit_repr = _normalizar_cuit_busqueda(cred.cuit_representado)
     cuit_login = _normalizar_cuit_busqueda(cred.cuit_login)
 
-    browser = None
+    page = sesion.nueva_pagina()
     try:
-        with sync_playwright() as p:
-            browser, context = _nuevo_contexto_stealth(p, headless=headless)
-            page = context.new_page()
-            page.set_default_timeout(60_000)
-
-            _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
-            _paso(on_paso, "login", "en_curso")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            pausa_humana(0.56, 1.26)
-            _llenar_cuit_y_avanzar(page, cred.cuit_login)
-            _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
-            _paso(on_paso, "login", "ok")
-            _log(on_log, "Sesión iniciada.")
-            _paso(on_paso, "mis_comprobantes", "en_curso")
-            _log(on_log, "Abriendo Mis Comprobantes…")
-            mc = _abrir_mis_comprobantes(page)
-            _paso(on_paso, "mis_comprobantes", "ok")
-            _log(on_log, f"Período: {fd} – {fh}.")
-            return _flujo_post_login(
-                mc, cuit_repr, cuit_login, fd, fh, tipo, on_paso=on_paso, on_log=on_log
-            )
+        _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
+        _paso(on_paso, "login", "en_curso")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        pausa_humana(0.56, 1.26)
+        _llenar_cuit_y_avanzar(page, cred.cuit_login)
+        _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
+        _paso(on_paso, "login", "ok")
+        _log(on_log, "Sesión iniciada.")
+        _paso(on_paso, "mis_comprobantes", "en_curso")
+        _log(on_log, "Abriendo Mis Comprobantes…")
+        mc = _abrir_mis_comprobantes(page)
+        _paso(on_paso, "mis_comprobantes", "ok")
+        _log(on_log, f"Período: {fd} – {fh}.")
+        return _flujo_post_login(
+            mc, cuit_repr, cuit_login, fd, fh, tipo, on_paso=on_paso, on_log=on_log
+        )
 
     except LoginArcaError:
         raise
@@ -1871,8 +1904,7 @@ def ejecutar_descarga_mis_comprobantes(
     except Exception as exc:
         raise AutomatizacionArcaError(f"Error en automatización: {exc}") from exc
     finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                pass
+        try:
+            page.close()
+        except Exception:
+            pass

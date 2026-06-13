@@ -28,7 +28,10 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
 from cuit_en_arca.credenciales import CredencialesArca
 from cuit_en_arca.errores import (
@@ -1680,6 +1683,7 @@ def ejecutar_descarga_nuestra_parte(
     headless: bool | None = None,
     on_log: Callable[[str], None] | None = None,
     on_paso: Callable[[str, str], None] | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> ResultadoNPCuit:
     """Descarga las 4 secciones de «Nuestra Parte» para un CUIT."""
     headless = _headless_desde_env() if headless is None else headless
@@ -1688,16 +1692,45 @@ def ejecutar_descarga_nuestra_parte(
             "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
         )
 
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
+
+    if sesion is not None:
+        return _ejecutar_descarga_nuestra_parte_impl(
+            sesion,
+            cred,
+            ejercicio,
+            carpeta_destino=carpeta_destino,
+            on_log=on_log,
+            on_paso=on_paso,
+        )
+
+    with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+        return _ejecutar_descarga_nuestra_parte_impl(
+            sesion_local,
+            cred,
+            ejercicio,
+            carpeta_destino=carpeta_destino,
+            on_log=on_log,
+            on_paso=on_paso,
+        )
+
+
+def _ejecutar_descarga_nuestra_parte_impl(
+    sesion: SesionPlaywrightCompartida,
+    cred: CredencialesArca,
+    ejercicio: str,
+    *,
+    carpeta_destino: Path,
+    on_log: Callable[[str], None] | None = None,
+    on_paso: Callable[[str, str], None] | None = None,
+) -> ResultadoNPCuit:
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    from playwright.sync_api import sync_playwright
 
     from cuit_en_arca.automation_playwright import (
         LOGIN_URL,
         _llenar_cuit_y_avanzar,
         _login_clave_fiscal,
-        _nuevo_contexto_stealth,
     )
-    from cuit_en_arca.errores import LoginArcaError
 
     carpeta_destino.mkdir(parents=True, exist_ok=True)
     resultado = ResultadoNPCuit(
@@ -1708,58 +1741,53 @@ def ejecutar_descarga_nuestra_parte(
         carpeta=str(carpeta_destino),
     )
 
-    browser = None
+    page = sesion.nueva_pagina()
     try:
-        with sync_playwright() as p:
-            browser, context = _nuevo_contexto_stealth(p, headless=headless)
-            page = context.new_page()
-            page.set_default_timeout(60_000)
+        _paso(on_paso, "login", "en_curso")
+        _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        pausa_humana(0.56, 1.26)
+        _llenar_cuit_y_avanzar(page, cred.cuit_login)
+        _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
+        _paso(on_paso, "login", "ok")
 
-            _paso(on_paso, "login", "en_curso")
-            _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            pausa_humana(0.56, 1.26)
-            _llenar_cuit_y_avanzar(page, cred.cuit_login)
-            _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
-            _paso(on_paso, "login", "ok")
+        _paso(on_paso, "servicio", "en_curso")
+        _log(on_log, "Abriendo Nuestra Parte…")
+        np = _abrir_nuestra_parte(page)
+        if _cuit_np_n(cred.cuit_representado) != _cuit_np_n(cred.cuit_login):
+            _seleccionar_representado_np(
+                np,
+                cred.cuit_representado,
+                cuit_login=cred.cuit_login,
+                on_log=on_log,
+            )
+        resultado.razon_social = _leer_razon_social(np) or None
+        _paso(on_paso, "servicio", "ok")
 
-            _paso(on_paso, "servicio", "en_curso")
-            _log(on_log, "Abriendo Nuestra Parte…")
-            np = _abrir_nuestra_parte(page)
-            if _cuit_np_n(cred.cuit_representado) != _cuit_np_n(cred.cuit_login):
-                _seleccionar_representado_np(
-                    np,
-                    cred.cuit_representado,
-                    cuit_login=cred.cuit_login,
-                    on_log=on_log,
+        _paso(on_paso, "tu_informacion", "en_curso")
+        _ir_tu_informacion(np)
+        sel = _seleccionar_ejercicio(np, ejercicio, on_log)
+        if sel:
+            resultado.ejercicio = sel
+        _log(on_log, f"Ejercicio: {resultado.ejercicio or '(actual)'}")
+        _paso(on_paso, "tu_informacion", "ok")
+
+        _paso(on_paso, "descargar", "en_curso")
+        _reset_ritmo_np()
+        _marcar_accion_np()
+        for clave, nombre in SECCIONES:
+            try:
+                sec = _procesar_seccion(
+                    np, clave, nombre, carpeta_destino, ejercicio, on_log
                 )
-            resultado.razon_social = _leer_razon_social(np) or None
-            _paso(on_paso, "servicio", "ok")
+            except Exception as exc:
+                sec = SeccionNP(clave=clave, nombre=nombre, nota=f"Error: {exc}")
+                _log(on_log, f"  • Error en sección {nombre}: {exc}")
+            resultado.secciones.append(sec)
+        _paso(on_paso, "descargar", "ok")
 
-            _paso(on_paso, "tu_informacion", "en_curso")
-            _ir_tu_informacion(np)
-            sel = _seleccionar_ejercicio(np, ejercicio, on_log)
-            if sel:
-                resultado.ejercicio = sel
-            _log(on_log, f"Ejercicio: {resultado.ejercicio or '(actual)'}")
-            _paso(on_paso, "tu_informacion", "ok")
-
-            _paso(on_paso, "descargar", "en_curso")
-            _reset_ritmo_np()
-            _marcar_accion_np()
-            for clave, nombre in SECCIONES:
-                try:
-                    sec = _procesar_seccion(
-                        np, clave, nombre, carpeta_destino, ejercicio, on_log
-                    )
-                except Exception as exc:
-                    sec = SeccionNP(clave=clave, nombre=nombre, nota=f"Error: {exc}")
-                    _log(on_log, f"  • Error en sección {nombre}: {exc}")
-                resultado.secciones.append(sec)
-            _paso(on_paso, "descargar", "ok")
-
-            _log(on_log, f"Listo. Archivos: {resultado.total_archivos} en {carpeta_destino}")
-            return resultado
+        _log(on_log, f"Listo. Archivos: {resultado.total_archivos} en {carpeta_destino}")
+        return resultado
 
     except LoginArcaError:
         raise
@@ -1776,11 +1804,10 @@ def ejecutar_descarga_nuestra_parte(
             f"Error en automatización Nuestra Parte: {exc}"
         ) from exc
     finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                pass
+        try:
+            page.close()
+        except Exception:
+            pass
 
 
 def ejecutar_nuestra_parte_lote(
@@ -1796,6 +1823,7 @@ def ejecutar_nuestra_parte_lote(
     job_id: str | None = None,
     modo_ap: bool = False,
     nombre_carpeta_sesion: str | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) de «Nuestra Parte». Tolerante a errores."""
     from cuit_en_arca.service import _requiere_playwright
@@ -1811,57 +1839,72 @@ def ejecutar_nuestra_parte_lote(
     resumen_lote: list[dict] = []
 
     from cuit_en_arca.cancelacion import verificar_cancelacion
+    from cuit_en_arca.sesion_playwright import (
+        SesionPlaywrightCompartida,
+        reutilizar_navegador_por_defecto,
+    )
 
-    for idx, fila in enumerate(filas, start=1):
-        if job_id:
-            verificar_cancelacion(job_id)
-        elif modo_ap:
-            verificar_cancelacion(ap=True)
-        cuit_log = getattr(fila, "cuit_login", "")
-        cuit_repr = getattr(fila, "cuit_representado", "") or cuit_log
-        ejercicio = getattr(fila, "ejercicio", "") or ""
-        if on_progreso:
-            on_progreso(idx - 1, total, f"CUIT {cuit_repr} ({idx}/{total})")
-        if on_reiniciar_pasos:
-            on_reiniciar_pasos()
+    def _procesar_lote(con_sesion: SesionPlaywrightCompartida | None) -> None:
+        for idx, fila in enumerate(filas, start=1):
+            if job_id:
+                verificar_cancelacion(job_id)
+            elif modo_ap:
+                verificar_cancelacion(ap=True)
+            cuit_log = getattr(fila, "cuit_login", "")
+            cuit_repr = getattr(fila, "cuit_representado", "") or cuit_log
+            ejercicio = getattr(fila, "ejercicio", "") or ""
+            if on_progreso:
+                on_progreso(idx - 1, total, f"CUIT {cuit_repr} ({idx}/{total})")
+            if on_reiniciar_pasos:
+                on_reiniciar_pasos()
 
-        cred = CredencialesArca(
-            cuit_login=cuit_log,
-            clave_fiscal=getattr(fila, "clave_fiscal", ""),
-            cuit_representado=cuit_repr,
-        )
-        dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
-        dest.mkdir(parents=True, exist_ok=True)
-
-        try:
-            res = ejecutar_descarga_nuestra_parte(
-                cred,
-                ejercicio,
-                carpeta_destino=dest,
-                headless=headless,
-                on_log=on_log,
-                on_paso=on_paso,
+            cred = CredencialesArca(
+                cuit_login=cuit_log,
+                clave_fiscal=getattr(fila, "clave_fiscal", ""),
+                cuit_representado=cuit_repr,
             )
-            if on_cuit_fin:
-                on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
-            resumen_lote.append(
-                {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
-            )
-        except Exception as exc:
-            _log(on_log, f"CUIT {cuit_repr}: ERROR {exc}")
-            if on_paso:
-                try:
-                    on_paso("descargar", "error")
-                except Exception:
-                    pass
-            if on_cuit_fin:
-                on_cuit_fin(cuit_repr, None, 0, str(exc))
-            resumen_lote.append(
-                {"cuit": cuit_repr, "razon_social": "", "error": str(exc)}
-            )
+            dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
+            dest.mkdir(parents=True, exist_ok=True)
 
-        if on_progreso:
-            on_progreso(idx, total, f"CUIT {cuit_repr} completado ({idx}/{total})")
+            try:
+                res = ejecutar_descarga_nuestra_parte(
+                    cred,
+                    ejercicio,
+                    carpeta_destino=dest,
+                    headless=headless,
+                    on_log=on_log,
+                    on_paso=on_paso,
+                    sesion=con_sesion,
+                )
+                if on_cuit_fin:
+                    on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
+                resumen_lote.append(
+                    {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
+                )
+            except Exception as exc:
+                _log(on_log, f"CUIT {cuit_repr}: ERROR {exc}")
+                if on_paso:
+                    try:
+                        on_paso("descargar", "error")
+                    except Exception:
+                        pass
+                if on_cuit_fin:
+                    on_cuit_fin(cuit_repr, None, 0, str(exc))
+                resumen_lote.append(
+                    {"cuit": cuit_repr, "razon_social": "", "error": str(exc)}
+                )
+
+            if on_progreso:
+                on_progreso(idx, total, f"CUIT {cuit_repr} completado ({idx}/{total})")
+
+    if sesion is not None:
+        _procesar_lote(sesion)
+    elif reutilizar_navegador_por_defecto(modo_ap=modo_ap, filas=total):
+        with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+            _log(on_log, "Navegador compartido activo (menor uso de RAM).")
+            _procesar_lote(sesion_local)
+    else:
+        _procesar_lote(None)
 
     from cuit_en_arca.fallos_arca import escribir_fallos_txt
 

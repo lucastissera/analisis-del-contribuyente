@@ -6,7 +6,10 @@ import io
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
 from cuit_en_arca.credenciales import CredencialesArca
 from cuit_en_arca.empaquetado import (
@@ -106,6 +109,7 @@ def ejecutar_lote_arca(
     job_id: str | None = None,
     modo_ap: bool = False,
     nombre_carpeta_sesion: str | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> ResultadoLoteArca:
     _requiere_playwright()
 
@@ -148,142 +152,159 @@ def ejecutar_lote_arca(
     if errores_planilla:
         _log_lote(on_log, f"Planilla: {len(errores_planilla)} fila(s) con error de formato.")
 
-    for i, fila in enumerate(filas):
-        if job_id:
-            verificar_cancelacion(job_id)
-        elif modo_ap:
-            verificar_cancelacion(ap=True)
-        if i > 0:
-            pausa_entre_filas_lote()
+    from cuit_en_arca.sesion_playwright import (
+        SesionPlaywrightCompartida,
+        reutilizar_navegador_por_defecto,
+    )
 
-        if on_reiniciar_pasos:
-            on_reiniciar_pasos()
+    def _procesar_lote(con_sesion: SesionPlaywrightCompartida | None) -> None:
+        nonlocal descargas_ok
+        for i, fila in enumerate(filas):
+            if job_id:
+                verificar_cancelacion(job_id)
+            elif modo_ap:
+                verificar_cancelacion(ap=True)
+            if i > 0:
+                pausa_entre_filas_lote()
 
-        if on_progreso:
-            on_progreso(
-                i + 1,
-                total,
-                f"CUIT {fila.cuit_representado} (fila {fila.fila_excel})…",
-                False,
-            )
-        _log_lote(
-            on_log,
-            f"— Fila {i + 1}/{total} (Excel {fila.fila_excel}): "
-            f"CUIT {fila.cuit_representado} · {fila.fecha_desde} – {fila.fecha_hasta} —",
-        )
+            if on_reiniciar_pasos:
+                on_reiniciar_pasos()
 
-        cred = CredencialesArca(
-            cuit_login=fila.cuit_login,
-            clave_fiscal=fila.clave_fiscal,
-            cuit_representado=fila.cuit_representado,
-        )
-        desde = parsear_fecha_argentina(fila.fecha_desde)
-        hasta = parsear_fecha_argentina(fila.fecha_hasta)
-
-        try:
-            resultado = ejecutar_descarga_mis_comprobantes(
-                cred,
-                desde,
-                hasta,
-                headless=headless,
-                tipo="ambos",
-                on_paso=on_paso,
-                on_log=on_log,
-            )
-        except LoginArcaError as exc:
-            ingresos_fallidos.append(
-                f"CUIT ingreso {fila.cuit_login} (fila {fila.fila_excel}): {exc}"
-            )
-            _log_lote(on_log, f"Ingreso fallido (fila {fila.fila_excel}): {exc}")
             if on_progreso:
-                on_progreso(i + 1, total, f"Fila {fila.fila_excel}: ingreso fallido", True)
-            continue
-        except Exception as exc:
-            advertencias.append(
-                f"CUIT {fila.cuit_representado} (fila {fila.fila_excel}): {exc}"
+                on_progreso(
+                    i + 1,
+                    total,
+                    f"CUIT {fila.cuit_representado} (fila {fila.fila_excel})…",
+                    False,
+                )
+            _log_lote(
+                on_log,
+                f"— Fila {i + 1}/{total} (Excel {fila.fila_excel}): "
+                f"CUIT {fila.cuit_representado} · {fila.fecha_desde} – {fila.fecha_hasta} —",
             )
-            _log_lote(on_log, f"Error en fila {fila.fila_excel}: {exc}")
+
+            cred = CredencialesArca(
+                cuit_login=fila.cuit_login,
+                clave_fiscal=fila.clave_fiscal,
+                cuit_representado=fila.cuit_representado,
+            )
+            desde = parsear_fecha_argentina(fila.fecha_desde)
+            hasta = parsear_fecha_argentina(fila.fecha_hasta)
+
+            try:
+                resultado = ejecutar_descarga_mis_comprobantes(
+                    cred,
+                    desde,
+                    hasta,
+                    headless=headless,
+                    tipo="ambos",
+                    on_paso=on_paso,
+                    on_log=on_log,
+                    sesion=con_sesion,
+                )
+            except LoginArcaError as exc:
+                ingresos_fallidos.append(
+                    f"CUIT ingreso {fila.cuit_login} (fila {fila.fila_excel}): {exc}"
+                )
+                _log_lote(on_log, f"Ingreso fallido (fila {fila.fila_excel}): {exc}")
+                if on_progreso:
+                    on_progreso(i + 1, total, f"Fila {fila.fila_excel}: ingreso fallido", True)
+                continue
+            except Exception as exc:
+                advertencias.append(
+                    f"CUIT {fila.cuit_representado} (fila {fila.fila_excel}): {exc}"
+                )
+                _log_lote(on_log, f"Error en fila {fila.fila_excel}: {exc}")
+                if on_progreso:
+                    on_progreso(i + 1, total, f"Fila {fila.fila_excel}: error", True)
+                continue
+
+            cuit = fila.cuit_representado
+            razon_social_arca = (resultado.razon_social or "").strip()
+            nuevos: list[tuple[str, bytes, bool]] = []  # (nombre, datos, emitidos)
+            if resultado.emitidos:
+                data_e, nom_e = resultado.emitidos
+                nombre_e = _nombre_seguro(cuit, "emitidos", nom_e)
+                archivos[nombre_e] = data_e
+                nuevos.append((nombre_e, data_e, True))
+                if carpeta is not None:
+                    (carpeta / nombre_e).write_bytes(data_e)
+                _log_lote(on_log, f"  • Emitidos guardado: {nombre_e}")
+            if resultado.recibidos:
+                data_r, nom_r = resultado.recibidos
+                nombre_r = _nombre_seguro(cuit, "recibidos", nom_r)
+                archivos[nombre_r] = data_r
+                nuevos.append((nombre_r, data_r, False))
+                if carpeta is not None:
+                    (carpeta / nombre_r).write_bytes(data_r)
+                _log_lote(on_log, f"  • Recibidos guardado: {nombre_r}")
+            if resultado.aviso_parcial:
+                advertencias.append(
+                    f"CUIT {cuit} (fila {fila.fila_excel}): {resultado.aviso_parcial}"
+                )
+            if resultado.emitidos or resultado.recibidos:
+                descargas_ok += 1
+
+            # Procesamiento automático de los archivos recién descargados.
+            if nuevos:
+                if on_paso:
+                    on_paso("procesamiento", "en_curso")
+                _log_lote(on_log, "Procesando archivos descargados…")
+                fallo_proc = False
+                for nombre, datos, es_emit in nuevos:
+                    try:
+                        # Las imputaciones contables, por ahora, solo a recibidos.
+                        excel_proc, resumen = procesar_comprobantes_a_excel_y_resumen(
+                            datos,
+                            nombre,
+                            emitidos=es_emit,
+                            mapa_imputaciones=None if es_emit else mapa_imputaciones,
+                        )
+                        # El procesado siempre es un Excel, aunque el original sea .csv.
+                        nombre_proc = f"{nombre.rsplit('.', 1)[0]}.xlsx"
+                        procesados[nombre_proc] = excel_proc
+                        if dir_proc is not None:
+                            (dir_proc / nombre_proc).write_bytes(excel_proc)
+                        _log_lote(on_log, f"  • Procesado: {nombre_proc}")
+                        resumen_cuit.agregar(
+                            cuit,
+                            emitidos=es_emit,
+                            # Prioridad: razón social leída de ARCA al seleccionar el
+                            # CUIT; si no, la del propio archivo (emisor/receptor).
+                            razon_social=razon_social_arca
+                            or resumen.get("razon_social", ""),
+                            por_mes=resumen.get("por_mes", {}),
+                        )
+                    except Exception as exc:  # no abortar el lote por un archivo
+                        fallo_proc = True
+                        advertencias.append(
+                            f"CUIT {cuit} (fila {fila.fila_excel}): "
+                            f"no se pudo procesar «{nombre}»: {exc}"
+                        )
+                if on_paso:
+                    on_paso("procesamiento", "error" if fallo_proc else "ok")
+                if fallo_proc:
+                    _log_lote(on_log, "Procesamiento completado con advertencias.")
+                else:
+                    _log_lote(on_log, "Procesamiento completado.")
+
             if on_progreso:
-                on_progreso(i + 1, total, f"Fila {fila.fila_excel}: error", True)
-            continue
+                on_progreso(
+                    i + 1,
+                    total,
+                    f"Fila {fila.fila_excel} completada",
+                    True,
+                )
+            _log_lote(on_log, f"Fila {fila.fila_excel} completada.")
 
-        cuit = fila.cuit_representado
-        razon_social_arca = (resultado.razon_social or "").strip()
-        nuevos: list[tuple[str, bytes, bool]] = []  # (nombre, datos, emitidos)
-        if resultado.emitidos:
-            data_e, nom_e = resultado.emitidos
-            nombre_e = _nombre_seguro(cuit, "emitidos", nom_e)
-            archivos[nombre_e] = data_e
-            nuevos.append((nombre_e, data_e, True))
-            if carpeta is not None:
-                (carpeta / nombre_e).write_bytes(data_e)
-            _log_lote(on_log, f"  • Emitidos guardado: {nombre_e}")
-        if resultado.recibidos:
-            data_r, nom_r = resultado.recibidos
-            nombre_r = _nombre_seguro(cuit, "recibidos", nom_r)
-            archivos[nombre_r] = data_r
-            nuevos.append((nombre_r, data_r, False))
-            if carpeta is not None:
-                (carpeta / nombre_r).write_bytes(data_r)
-            _log_lote(on_log, f"  • Recibidos guardado: {nombre_r}")
-        if resultado.aviso_parcial:
-            advertencias.append(
-                f"CUIT {cuit} (fila {fila.fila_excel}): {resultado.aviso_parcial}"
-            )
-        if resultado.emitidos or resultado.recibidos:
-            descargas_ok += 1
-
-        # Procesamiento automático de los archivos recién descargados.
-        if nuevos:
-            if on_paso:
-                on_paso("procesamiento", "en_curso")
-            _log_lote(on_log, "Procesando archivos descargados…")
-            fallo_proc = False
-            for nombre, datos, es_emit in nuevos:
-                try:
-                    # Las imputaciones contables, por ahora, solo a recibidos.
-                    excel_proc, resumen = procesar_comprobantes_a_excel_y_resumen(
-                        datos,
-                        nombre,
-                        emitidos=es_emit,
-                        mapa_imputaciones=None if es_emit else mapa_imputaciones,
-                    )
-                    # El procesado siempre es un Excel, aunque el original sea .csv.
-                    nombre_proc = f"{nombre.rsplit('.', 1)[0]}.xlsx"
-                    procesados[nombre_proc] = excel_proc
-                    if dir_proc is not None:
-                        (dir_proc / nombre_proc).write_bytes(excel_proc)
-                    _log_lote(on_log, f"  • Procesado: {nombre_proc}")
-                    resumen_cuit.agregar(
-                        cuit,
-                        emitidos=es_emit,
-                        # Prioridad: razón social leída de ARCA al seleccionar el
-                        # CUIT; si no, la del propio archivo (emisor/receptor).
-                        razon_social=razon_social_arca
-                        or resumen.get("razon_social", ""),
-                        por_mes=resumen.get("por_mes", {}),
-                    )
-                except Exception as exc:  # no abortar el lote por un archivo
-                    fallo_proc = True
-                    advertencias.append(
-                        f"CUIT {cuit} (fila {fila.fila_excel}): "
-                        f"no se pudo procesar «{nombre}»: {exc}"
-                    )
-            if on_paso:
-                on_paso("procesamiento", "error" if fallo_proc else "ok")
-            if fallo_proc:
-                _log_lote(on_log, "Procesamiento completado con advertencias.")
-            else:
-                _log_lote(on_log, "Procesamiento completado.")
-
-        if on_progreso:
-            on_progreso(
-                i + 1,
-                total,
-                f"Fila {fila.fila_excel} completada",
-                True,
-            )
-        _log_lote(on_log, f"Fila {fila.fila_excel} completada.")
+    if sesion is not None:
+        _procesar_lote(sesion)
+    elif reutilizar_navegador_por_defecto(modo_ap=modo_ap, filas=total):
+        with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+            _log_lote(on_log, "Navegador compartido activo (menor uso de RAM).")
+            _procesar_lote(sesion_local)
+    else:
+        _procesar_lote(None)
 
     lineas_errores = []
     if ingresos_fallidos:

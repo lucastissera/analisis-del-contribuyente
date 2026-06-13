@@ -357,122 +357,132 @@ def ejecutar_analisis_programado(
         from cuit_en_arca.service import _headless_desde_env
 
         headless = _headless_desde_env()
+        from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
-        if "mis_comprobantes" in cfg.sistemas:
-            verificar_cancelacion(ap=True)
-            marcar_paso_ap("mis_comprobantes", "en_curso")
-            mc, err_mc = filas_mis_comprobantes(filas_ap)
-            resultado["sistemas"]["mis_comprobantes"] = {"filas": len(mc), "errores_planilla": err_mc}
-            if mc:
-                from cuit_en_arca.lote import ejecutar_lote_arca
+        with SesionPlaywrightCompartida(headless=headless) as sesion:
+            log("Navegador compartido: un solo Chromium para todo el análisis programado.")
 
-                log(f"Mis Comprobantes: {len(mc)} fila(s)…")
-                try:
-                    res = ejecutar_lote_arca(
-                        mc,
-                        errores_planilla=err_mc,
-                        carpeta_destino=base / "Mis Comprobantes",
-                        headless=headless,
-                        modo_ap=True,
-                        on_log=log,
-                    )
-                    resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
-                    resultado["sistemas"]["mis_comprobantes"]["fallos"] = list(res.ingresos_fallidos)
-                    resultado["fallos"].extend(res.ingresos_fallidos)
-                    if res.advertencias:
-                        resultado["fallos"].extend(res.advertencias)
-                    marcar_paso_ap("mis_comprobantes", "ok")
-                except CancelacionUsuarioError as exc:
-                    marcar_cancelado_ap(str(exc))
-                    if not manual:
-                        limpiar_cache_programacion(cfg)
-                    return resultado
-                except Exception as exc:
-                    resultado["sistemas"]["mis_comprobantes"]["error"] = str(exc)
-                    resultado["fallos"].append(f"Mis Comprobantes: {exc}")
+            if "mis_comprobantes" in cfg.sistemas:
+                verificar_cancelacion(ap=True)
+                marcar_paso_ap("mis_comprobantes", "en_curso")
+                mc, err_mc = filas_mis_comprobantes(filas_ap)
+                resultado["sistemas"]["mis_comprobantes"] = {"filas": len(mc), "errores_planilla": err_mc}
+                if mc:
+                    from cuit_en_arca.lote import ejecutar_lote_arca
+
+                    log(f"Mis Comprobantes: {len(mc)} fila(s)…")
+                    try:
+                        res = ejecutar_lote_arca(
+                            mc,
+                            errores_planilla=err_mc,
+                            carpeta_destino=base / "Mis Comprobantes",
+                            headless=headless,
+                            modo_ap=True,
+                            on_log=log,
+                            sesion=sesion,
+                        )
+                        resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
+                        resultado["sistemas"]["mis_comprobantes"]["fallos"] = list(res.ingresos_fallidos)
+                        resultado["fallos"].extend(res.ingresos_fallidos)
+                        if res.advertencias:
+                            resultado["fallos"].extend(res.advertencias)
+                        marcar_paso_ap("mis_comprobantes", "ok")
+                    except CancelacionUsuarioError as exc:
+                        marcar_cancelado_ap(str(exc))
+                        if not manual:
+                            limpiar_cache_programacion(cfg)
+                        return resultado
+                    except Exception as exc:
+                        resultado["sistemas"]["mis_comprobantes"]["error"] = str(exc)
+                        resultado["fallos"].append(f"Mis Comprobantes: {exc}")
+                        marcar_paso_ap("mis_comprobantes", "error")
+                elif err_mc:
+                    resultado["fallos"].extend(err_mc)
                     marcar_paso_ap("mis_comprobantes", "error")
-            elif err_mc:
-                resultado["fallos"].extend(err_mc)
-                marcar_paso_ap("mis_comprobantes", "error")
-            else:
-                log("Mis Comprobantes: sin filas con fechas en la planilla.")
-                marcar_paso_ap("mis_comprobantes", "ok")
-            if entrega:
-                entrega.escanear()
+                else:
+                    log("Mis Comprobantes: sin filas con fechas en la planilla.")
+                    marcar_paso_ap("mis_comprobantes", "ok")
+                if entrega:
+                    entrega.escanear()
+                sesion.cerrar_paginas()
 
-        if "dfe" in cfg.sistemas:
-            verificar_cancelacion(ap=True)
-            marcar_paso_ap("dfe", "en_curso")
-            dfe, err_dfe = filas_dfe(filas_ap)
-            resultado["sistemas"]["dfe"] = {"filas": len(dfe), "errores_planilla": err_dfe}
-            if dfe:
-                from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
+            if "dfe" in cfg.sistemas:
+                verificar_cancelacion(ap=True)
+                marcar_paso_ap("dfe", "en_curso")
+                dfe, err_dfe = filas_dfe(filas_ap)
+                resultado["sistemas"]["dfe"] = {"filas": len(dfe), "errores_planilla": err_dfe}
+                if dfe:
+                    from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
 
-                log(f"DFE: {len(dfe)} fila(s)…")
-                try:
-                    carpeta_dfe = ejecutar_dfe_lote(
-                        dfe,
-                        headless=headless,
-                        on_log=log,
-                        carpeta_base=base / "DFE",
-                        modo_ap=True,
-                    )
-                    resultado["sistemas"]["dfe"]["carpeta"] = str(carpeta_dfe)
-                    marcar_paso_ap("dfe", "ok")
-                except CancelacionUsuarioError as exc:
-                    marcar_cancelado_ap(str(exc))
-                    if not manual:
-                        limpiar_cache_programacion(cfg)
-                    return resultado
-                except Exception as exc:
-                    resultado["sistemas"]["dfe"]["error"] = str(exc)
-                    resultado["fallos"].append(f"DFE: {exc}")
+                    log(f"DFE: {len(dfe)} fila(s)…")
+                    try:
+                        carpeta_dfe = ejecutar_dfe_lote(
+                            dfe,
+                            headless=headless,
+                            on_log=log,
+                            carpeta_base=base / "DFE",
+                            modo_ap=True,
+                            sesion=sesion,
+                        )
+                        resultado["sistemas"]["dfe"]["carpeta"] = str(carpeta_dfe)
+                        marcar_paso_ap("dfe", "ok")
+                    except CancelacionUsuarioError as exc:
+                        marcar_cancelado_ap(str(exc))
+                        if not manual:
+                            limpiar_cache_programacion(cfg)
+                        return resultado
+                    except Exception as exc:
+                        resultado["sistemas"]["dfe"]["error"] = str(exc)
+                        resultado["fallos"].append(f"DFE: {exc}")
+                        marcar_paso_ap("dfe", "error")
+                elif err_dfe:
+                    resultado["fallos"].extend(err_dfe)
                     marcar_paso_ap("dfe", "error")
-            elif err_dfe:
-                resultado["fallos"].extend(err_dfe)
-                marcar_paso_ap("dfe", "error")
-            else:
-                log("DFE: sin filas con fechas en la planilla.")
-                marcar_paso_ap("dfe", "ok")
-            if entrega:
-                entrega.escanear()
+                else:
+                    log("DFE: sin filas con fechas en la planilla.")
+                    marcar_paso_ap("dfe", "ok")
+                if entrega:
+                    entrega.escanear()
+                sesion.cerrar_paginas()
 
-        if "nuestra_parte" in cfg.sistemas:
-            verificar_cancelacion(ap=True)
-            marcar_paso_ap("nuestra_parte", "en_curso")
-            np, err_np = filas_nuestra_parte(filas_ap)
-            resultado["sistemas"]["nuestra_parte"] = {"filas": len(np), "errores_planilla": err_np}
-            if np:
-                from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
+            if "nuestra_parte" in cfg.sistemas:
+                verificar_cancelacion(ap=True)
+                marcar_paso_ap("nuestra_parte", "en_curso")
+                np, err_np = filas_nuestra_parte(filas_ap)
+                resultado["sistemas"]["nuestra_parte"] = {"filas": len(np), "errores_planilla": err_np}
+                if np:
+                    from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
 
-                log(f"Nuestra Parte: {len(np)} fila(s)…")
-                try:
-                    carpeta_np = ejecutar_nuestra_parte_lote(
-                        np,
-                        headless=headless,
-                        on_log=log,
-                        carpeta_base=base / "Nuestra Parte",
-                        modo_ap=True,
-                    )
-                    resultado["sistemas"]["nuestra_parte"]["carpeta"] = str(carpeta_np)
-                    marcar_paso_ap("nuestra_parte", "ok")
-                except CancelacionUsuarioError as exc:
-                    marcar_cancelado_ap(str(exc))
-                    if not manual:
-                        limpiar_cache_programacion(cfg)
-                    return resultado
-                except Exception as exc:
-                    resultado["sistemas"]["nuestra_parte"]["error"] = str(exc)
-                    resultado["fallos"].append(f"Nuestra Parte: {exc}")
+                    log(f"Nuestra Parte: {len(np)} fila(s)…")
+                    try:
+                        carpeta_np = ejecutar_nuestra_parte_lote(
+                            np,
+                            headless=headless,
+                            on_log=log,
+                            carpeta_base=base / "Nuestra Parte",
+                            modo_ap=True,
+                            sesion=sesion,
+                        )
+                        resultado["sistemas"]["nuestra_parte"]["carpeta"] = str(carpeta_np)
+                        marcar_paso_ap("nuestra_parte", "ok")
+                    except CancelacionUsuarioError as exc:
+                        marcar_cancelado_ap(str(exc))
+                        if not manual:
+                            limpiar_cache_programacion(cfg)
+                        return resultado
+                    except Exception as exc:
+                        resultado["sistemas"]["nuestra_parte"]["error"] = str(exc)
+                        resultado["fallos"].append(f"Nuestra Parte: {exc}")
+                        marcar_paso_ap("nuestra_parte", "error")
+                elif err_np:
+                    resultado["fallos"].extend(err_np)
                     marcar_paso_ap("nuestra_parte", "error")
-            elif err_np:
-                resultado["fallos"].extend(err_np)
-                marcar_paso_ap("nuestra_parte", "error")
-            else:
-                log("Nuestra Parte: sin filas con ejercicio en la planilla.")
-                marcar_paso_ap("nuestra_parte", "ok")
-            if entrega:
-                entrega.escanear()
+                else:
+                    log("Nuestra Parte: sin filas con ejercicio en la planilla.")
+                    marcar_paso_ap("nuestra_parte", "ok")
+                if entrega:
+                    entrega.escanear()
+                sesion.cerrar_paginas()
 
         from cuit_en_arca.fallos_arca import escribir_fallos_txt
 

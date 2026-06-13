@@ -26,7 +26,10 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
 from cuit_en_arca.credenciales import CredencialesArca
 from cuit_en_arca.errores import (
@@ -1079,6 +1082,7 @@ def ejecutar_descarga_dfe(
     headless: bool | None = None,
     on_log: Callable[[str], None] | None = None,
     on_paso: Callable[[str, str], None] | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> ResultadoDfeCuit:
     """Descarga las comunicaciones del DFE de un CUIT a ``carpeta_destino``."""
     headless = _headless_desde_env() if headless is None else headless
@@ -1087,14 +1091,47 @@ def ejecutar_descarga_dfe(
             "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
         )
 
+    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
+
+    if sesion is not None:
+        return _ejecutar_descarga_dfe_impl(
+            sesion,
+            cred,
+            fecha_desde,
+            fecha_hasta,
+            carpeta_destino=carpeta_destino,
+            on_log=on_log,
+            on_paso=on_paso,
+        )
+
+    with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+        return _ejecutar_descarga_dfe_impl(
+            sesion_local,
+            cred,
+            fecha_desde,
+            fecha_hasta,
+            carpeta_destino=carpeta_destino,
+            on_log=on_log,
+            on_paso=on_paso,
+        )
+
+
+def _ejecutar_descarga_dfe_impl(
+    sesion: SesionPlaywrightCompartida,
+    cred: CredencialesArca,
+    fecha_desde: date | None,
+    fecha_hasta: date | None,
+    *,
+    carpeta_destino: Path,
+    on_log: Callable[[str], None] | None = None,
+    on_paso: Callable[[str, str], None] | None = None,
+) -> ResultadoDfeCuit:
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
-    from playwright.sync_api import sync_playwright
 
     from cuit_en_arca.automation_playwright import (
         LOGIN_URL,
         _llenar_cuit_y_avanzar,
         _login_clave_fiscal,
-        _nuevo_contexto_stealth,
         _razon_social_activa_mcmp,
     )
 
@@ -1113,78 +1150,73 @@ def ejecutar_descarga_dfe(
             except Exception:
                 pass
 
-    browser = None
+    page = sesion.nueva_pagina()
     try:
-        with sync_playwright() as p:
-            browser, context = _nuevo_contexto_stealth(p, headless=headless)
-            page = context.new_page()
-            page.set_default_timeout(60_000)
+        paso("login", "en_curso")
+        _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        pausa_humana(0.6, 1.2)
+        _llenar_cuit_y_avanzar(page, cred.cuit_login)
+        _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
+        paso("login", "ok")
 
-            paso("login", "en_curso")
-            _log(on_log, f"Iniciando sesión en ARCA (CUIT {cred.cuit_login})…")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            pausa_humana(0.6, 1.2)
-            _llenar_cuit_y_avanzar(page, cred.cuit_login)
-            _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
-            paso("login", "ok")
-
-            paso("ventanilla", "en_curso")
-            _log(on_log, "Abriendo Domicilio Fiscal Electrónico…")
-            ve = _abrir_dfe(page)
-            _cerrar_popup_dfe(ve, on_log)
-            try:
-                ve.bring_to_front()
-            except Exception:
-                pass
-            usar_representados = _cuit_dfe_n(cred.cuit_representado) != _cuit_dfe_n(
-                cred.cuit_login
-            )
-            if usar_representados:
-                _log(
-                    on_log,
-                    f"DFE: consultando comunicaciones del representado "
-                    f"{_cuit_dfe_fmt(_cuit_dfe_n(cred.cuit_representado))}…",
-                )
-                _configurar_dfe_representados(ve, cred.cuit_representado, on_log)
-            try:
-                resultado.razon_social = _razon_social_activa_mcmp(ve) or None
-            except Exception:
-                resultado.razon_social = None
-            paso("ventanilla", "ok")
-
-            paso("listar", "en_curso")
-            filas = _preparar_listado_dfe(
-                ve,
-                fecha_desde,
-                fecha_hasta,
+        paso("ventanilla", "en_curso")
+        _log(on_log, "Abriendo Domicilio Fiscal Electrónico…")
+        ve = _abrir_dfe(page)
+        _cerrar_popup_dfe(ve, on_log)
+        try:
+            ve.bring_to_front()
+        except Exception:
+            pass
+        usar_representados = _cuit_dfe_n(cred.cuit_representado) != _cuit_dfe_n(
+            cred.cuit_login
+        )
+        if usar_representados:
+            _log(
                 on_log,
-                representados=usar_representados,
+                f"DFE: consultando comunicaciones del representado "
+                f"{_cuit_dfe_fmt(_cuit_dfe_n(cred.cuit_representado))}…",
             )
-            _log(on_log, f"Comunicaciones detectadas: {len(filas)}.")
-            objetivo = _seleccionar_objetivo(
-                filas, fecha_desde, fecha_hasta, representados=usar_representados
-            )
-            _log(on_log, f"A procesar: {len(objetivo)} comunicación(es).")
-            paso("listar", "ok")
+            _configurar_dfe_representados(ve, cred.cuit_representado, on_log)
+        try:
+            resultado.razon_social = _razon_social_activa_mcmp(ve) or None
+        except Exception:
+            resultado.razon_social = None
+        paso("ventanilla", "ok")
 
-            paso("descargar", "en_curso")
-            for idx, com in enumerate(objetivo, start=1):
-                _log(on_log, f"[{idx}/{len(objetivo)}] {com.get('asunto','')[:60]} "
-                             f"(N° {com['id']}, {com.get('recibido','')})")
-                if usar_representados:
-                    ok_det = _abrir_detalle_representado(ve, com)
-                else:
-                    ok_det = _abrir_detalle(ve, com["id"])
-                if not ok_det:
-                    _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
-                    continue
-                res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
-                resultado.comunicaciones.append(res_com)
-                _volver_a_lista(ve, representados=usar_representados)
-            paso("descargar", "ok")
-            _log(on_log, f"Listo. Archivos guardados: {resultado.total_archivos} en {carpeta_destino}")
+        paso("listar", "en_curso")
+        filas = _preparar_listado_dfe(
+            ve,
+            fecha_desde,
+            fecha_hasta,
+            on_log,
+            representados=usar_representados,
+        )
+        _log(on_log, f"Comunicaciones detectadas: {len(filas)}.")
+        objetivo = _seleccionar_objetivo(
+            filas, fecha_desde, fecha_hasta, representados=usar_representados
+        )
+        _log(on_log, f"A procesar: {len(objetivo)} comunicación(es).")
+        paso("listar", "ok")
 
-            return resultado
+        paso("descargar", "en_curso")
+        for idx, com in enumerate(objetivo, start=1):
+            _log(on_log, f"[{idx}/{len(objetivo)}] {com.get('asunto','')[:60]} "
+                         f"(N° {com['id']}, {com.get('recibido','')})")
+            if usar_representados:
+                ok_det = _abrir_detalle_representado(ve, com)
+            else:
+                ok_det = _abrir_detalle(ve, com["id"])
+            if not ok_det:
+                _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
+                continue
+            res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
+            resultado.comunicaciones.append(res_com)
+            _volver_a_lista(ve, representados=usar_representados)
+        paso("descargar", "ok")
+        _log(on_log, f"Listo. Archivos guardados: {resultado.total_archivos} en {carpeta_destino}")
+
+        return resultado
 
     except LoginArcaError:
         raise
@@ -1199,11 +1231,10 @@ def ejecutar_descarga_dfe(
     except Exception as exc:
         raise AutomatizacionArcaError(f"Error en automatización DFE: {exc}") from exc
     finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception:
-                pass
+        try:
+            page.close()
+        except Exception:
+            pass
 
 
 def _fecha_de(texto: str) -> date | None:
@@ -1259,6 +1290,7 @@ def ejecutar_dfe_lote(
     job_id: str | None = None,
     modo_ap: bool = False,
     nombre_carpeta_sesion: str | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) del DFE y guarda todo en ``DFE yyyy-mm-dd``.
 
@@ -1275,62 +1307,77 @@ def ejecutar_dfe_lote(
     resumen_lote: list[dict] = []
 
     from cuit_en_arca.cancelacion import verificar_cancelacion
+    from cuit_en_arca.sesion_playwright import (
+        SesionPlaywrightCompartida,
+        reutilizar_navegador_por_defecto,
+    )
 
-    for idx, fila in enumerate(filas, start=1):
-        if job_id:
-            verificar_cancelacion(job_id)
-        elif modo_ap:
-            verificar_cancelacion(ap=True)
-        cuit_log = getattr(fila, "cuit_login", "")
-        cuit_repr = getattr(fila, "cuit_representado", "") or cuit_log
-        if on_progreso:
-            on_progreso(idx - 1, total, f"CUIT {cuit_repr} ({idx}/{total})")
-        if on_reiniciar_pasos:
-            on_reiniciar_pasos()
+    def _procesar_lote(con_sesion: SesionPlaywrightCompartida | None) -> None:
+        for idx, fila in enumerate(filas, start=1):
+            if job_id:
+                verificar_cancelacion(job_id)
+            elif modo_ap:
+                verificar_cancelacion(ap=True)
+            cuit_log = getattr(fila, "cuit_login", "")
+            cuit_repr = getattr(fila, "cuit_representado", "") or cuit_log
+            if on_progreso:
+                on_progreso(idx - 1, total, f"CUIT {cuit_repr} ({idx}/{total})")
+            if on_reiniciar_pasos:
+                on_reiniciar_pasos()
 
-        cred = CredencialesArca(
-            cuit_login=cuit_log,
-            clave_fiscal=getattr(fila, "clave_fiscal", ""),
-            cuit_representado=cuit_repr,
-        )
-        fd = _fecha_de(getattr(fila, "fecha_desde", "") or "")
-        fh = _fecha_de(getattr(fila, "fecha_hasta", "") or "")
-
-        # Subcarpeta por CUIT (evita choques de nombres entre contribuyentes).
-        dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
-        dest.mkdir(parents=True, exist_ok=True)
-
-        try:
-            res = ejecutar_descarga_dfe(
-                cred,
-                fd,
-                fh,
-                carpeta_destino=dest,
-                headless=headless,
-                on_log=on_log,
-                on_paso=on_paso,
+            cred = CredencialesArca(
+                cuit_login=cuit_log,
+                clave_fiscal=getattr(fila, "clave_fiscal", ""),
+                cuit_representado=cuit_repr,
             )
-            if on_cuit_fin:
-                on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
-            resumen_lote.append(
-                {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
-            )
-        except Exception as exc:
-            _log(on_log, f"CUIT {cuit_repr}: ERROR {exc}")
-            if on_paso:
-                # marcar el paso actual como error visualmente
-                try:
-                    on_paso("descargar", "error")
-                except Exception:
-                    pass
-            if on_cuit_fin:
-                on_cuit_fin(cuit_repr, None, 0, str(exc))
-            resumen_lote.append(
-                {"cuit": cuit_repr, "razon_social": "", "error": str(exc)}
-            )
+            fd = _fecha_de(getattr(fila, "fecha_desde", "") or "")
+            fh = _fecha_de(getattr(fila, "fecha_hasta", "") or "")
 
-        if on_progreso:
-            on_progreso(idx, total, f"CUIT {cuit_repr} completado ({idx}/{total})")
+            # Subcarpeta por CUIT (evita choques de nombres entre contribuyentes).
+            dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
+            dest.mkdir(parents=True, exist_ok=True)
+
+            try:
+                res = ejecutar_descarga_dfe(
+                    cred,
+                    fd,
+                    fh,
+                    carpeta_destino=dest,
+                    headless=headless,
+                    on_log=on_log,
+                    on_paso=on_paso,
+                    sesion=con_sesion,
+                )
+                if on_cuit_fin:
+                    on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
+                resumen_lote.append(
+                    {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
+                )
+            except Exception as exc:
+                _log(on_log, f"CUIT {cuit_repr}: ERROR {exc}")
+                if on_paso:
+                    # marcar el paso actual como error visualmente
+                    try:
+                        on_paso("descargar", "error")
+                    except Exception:
+                        pass
+                if on_cuit_fin:
+                    on_cuit_fin(cuit_repr, None, 0, str(exc))
+                resumen_lote.append(
+                    {"cuit": cuit_repr, "razon_social": "", "error": str(exc)}
+                )
+
+            if on_progreso:
+                on_progreso(idx, total, f"CUIT {cuit_repr} completado ({idx}/{total})")
+
+    if sesion is not None:
+        _procesar_lote(sesion)
+    elif reutilizar_navegador_por_defecto(modo_ap=modo_ap, filas=total):
+        with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+            _log(on_log, "Navegador compartido activo (menor uso de RAM).")
+            _procesar_lote(sesion_local)
+    else:
+        _procesar_lote(None)
 
     from cuit_en_arca.fallos_arca import escribir_fallos_txt
 
