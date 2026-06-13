@@ -74,11 +74,13 @@ from auth import (
 from cursor_cloud import (
     CursorCloudError,
     cancelar_run as cursor_cancelar_run,
-    config_publica as cursor_config_publica,
-    configurado as cursor_cloud_configurado,
     crear_agente as cursor_crear_agente,
     crear_run as cursor_crear_run,
+    obtener_run as cursor_obtener_run,
+    requiere_repo as cursor_requiere_repo,
+    run_publico as cursor_run_publico,
     stream_run as cursor_stream_run,
+    verificar_enlace as cursor_verificar_enlace,
 )
 
 try:
@@ -259,6 +261,16 @@ def _requiere_admin():
         abort(403)
 
 
+def _mensaje_error_cursor(lg: str, exc: CursorCloudError) -> str:
+    if exc.code == "usage_limit_exceeded":
+        return tr(
+            lg,
+            "admin_cursor_err_usage_limit",
+            url="https://www.cursor.com/dashboard?tab=settings",
+        )
+    return str(exc)
+
+
 @app.before_request
 def _session_idle_and_login():
     if request.endpoint == "static" or (
@@ -280,7 +292,16 @@ def _session_idle_and_login():
             session["last_activity"] = now
             session.modified = True
 
-    if request.endpoint in ("login", "set_lang", "desktop_quit", "logout", "api_auth_users", None):
+    if request.endpoint in (
+        "login",
+        "set_lang",
+        "desktop_quit",
+        "logout",
+        "api_auth_users",
+        "solicitar_acceso",
+        "activar_cuenta",
+        None,
+    ):
         return None
     if session.get("user"):
         return None
@@ -418,6 +439,175 @@ def set_lang(code: str):
     return redirect(url_for("index"))
 
 
+@app.route("/solicitar-acceso", methods=["GET", "POST"])
+def solicitar_acceso():
+    from auth_registro import alta_publica_habilitada
+
+    if not alta_publica_habilitada():
+        return redirect(url_for("login"))
+    if session.get("user"):
+        return redirect(url_for("index"))
+    lg = normalize_lang(session.get("lang"))
+    enlace_activacion = None
+    error_msg = None
+    if request.method == "POST":
+        from auth_registro import crear_solicitud, formatear_cuit, normalizar_cuit
+
+        cuit = (request.form.get("cuit") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        nombre = (request.form.get("nombre") or "").strip()
+        try:
+            token, _reg = crear_solicitud(cuit=cuit, email=email, nombre=nombre)
+            enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
+            cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
+            flash(
+                tr(
+                    lg,
+                    "alta_ok_solicitud",
+                    cuit=cuit_ok,
+                    horas=os.environ.get("AUTH_ALTA_TOKEN_HORAS", "72"),
+                ),
+                "success",
+            )
+        except ValueError as exc:
+            key = f"alta_err_{exc}"
+            error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+    return render_template(
+        "solicitar_acceso.html",
+        enlace_activacion=enlace_activacion,
+        error_msg=error_msg,
+        whatsapp_url=whatsapp_new_user_url(),
+    )
+
+
+@app.route("/activar-cuenta/<token>", methods=["GET", "POST"])
+def activar_cuenta(token: str):
+    if session.get("user"):
+        return redirect(url_for("index"))
+    from auth_registro import (
+        activar_cuenta as registro_activar,
+        formatear_cuit,
+        notificar_admin_alta,
+        obtener_solicitud,
+    )
+
+    lg = normalize_lang(session.get("lang"))
+    sol = obtener_solicitud(token)
+    if not sol and request.method == "GET":
+        return render_template(
+            "activar_cuenta.html",
+            token=token,
+            invalido=True,
+            solicitud=None,
+        )
+    error_msg = None
+    if request.method == "POST":
+        pwd = request.form.get("password") or ""
+        pwd2 = request.form.get("password2") or ""
+        if pwd != pwd2:
+            error_msg = tr(lg, "alta_err_password_no_coincide")
+        else:
+            try:
+                reg = registro_activar(token, pwd)
+                notificar_admin_alta(
+                    reg["cuit"],
+                    str(reg.get("email") or ""),
+                    str(reg.get("nombre") or ""),
+                )
+                cuit_ok = formatear_cuit(str(reg["cuit"]))
+                return render_template(
+                    "activar_cuenta.html",
+                    token=token,
+                    invalido=False,
+                    solicitud=None,
+                    cuit_fmt=cuit_ok,
+                    completado_pendiente=True,
+                    min_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
+                )
+            except ValueError as exc:
+                key = f"alta_err_{exc}"
+                error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+        sol = obtener_solicitud(token)
+    cuit_fmt = formatear_cuit(str(sol["cuit"])) if sol else ""
+    return render_template(
+        "activar_cuenta.html",
+        token=token,
+        invalido=not sol,
+        solicitud=sol,
+        cuit_fmt=cuit_fmt,
+        error_msg=error_msg,
+        min_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
+    )
+
+
+@app.route("/admin/altas-usuarios", methods=["GET", "POST"])
+def admin_altas_usuarios():
+    _requiere_admin()
+    from auth_registro import (
+        aprobar_cuenta,
+        crear_solicitud,
+        formatear_cuit,
+        listar_altas_recientes,
+        listar_pendientes_aprobacion,
+        normalizar_cuit,
+        rechazar_cuenta,
+        whatsapp_alta_admin_url,
+    )
+
+    lg = normalize_lang(session.get("lang"))
+    enlace_generado = session.pop("admin_enlace_alta", None)
+
+    if request.method == "POST":
+        accion = (request.form.get("accion") or "").strip()
+        cuit = (request.form.get("cuit") or "").strip()
+        if accion == "aprobar":
+            if aprobar_cuenta(cuit):
+                flash(tr(lg, "admin_altas_ok_aprobada", cuit=formatear_cuit(cuit)), "success")
+            else:
+                flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "rechazar":
+            if rechazar_cuenta(cuit):
+                flash(tr(lg, "admin_altas_ok_rechazada"), "success")
+            else:
+                flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "generar_enlace":
+            email = (request.form.get("email") or "").strip()
+            nombre = (request.form.get("nombre") or "").strip()
+            try:
+                token, _reg = crear_solicitud(cuit=cuit, email=email, nombre=nombre)
+                enlace = url_for("activar_cuenta", token=token, _external=True)
+                session["admin_enlace_alta"] = enlace
+                flash(
+                    tr(lg, "admin_altas_enlace_ok", cuit=formatear_cuit(normalizar_cuit(cuit) or cuit)),
+                    "success",
+                )
+            except ValueError as exc:
+                key = f"alta_err_{exc}"
+                flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
+        return redirect(url_for("admin_altas_usuarios"))
+
+    pendientes = listar_pendientes_aprobacion()
+    for p in pendientes:
+        p["whatsapp_url"] = whatsapp_alta_admin_url(
+            str(p.get("cuit") or ""),
+            str(p.get("email") or ""),
+            str(p.get("nombre") or ""),
+        )
+    altas = listar_altas_recientes(40)
+    for a in altas:
+        a["whatsapp_url"] = whatsapp_alta_admin_url(
+            str(a.get("cuit") or ""),
+            str(a.get("email") or ""),
+            str(a.get("nombre") or ""),
+        )
+    return render_template(
+        "admin_altas_usuarios.html",
+        pendientes=pendientes,
+        altas=altas,
+        enlace_generado=enlace_generado,
+    )
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if session.get("user"):
@@ -435,23 +625,33 @@ def login():
             session.modified = True
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
         lg = normalize_lang(session.get("lang"))
+        login_error_pending = motivo == "pending_approval"
         return render_template(
             "login.html",
             login_error=motivo == "invalid",
             login_error_expired=motivo in ("expired", "not_yet"),
+            login_error_pending=login_error_pending,
             login_error_msg=(
-                tr(lg, "login_error_expired")
-                if motivo in ("expired", "not_yet")
-                else tr(lg, "login_error_bad")
+                tr(lg, "login_error_pending")
+                if login_error_pending
+                else (
+                    tr(lg, "login_error_expired")
+                    if motivo in ("expired", "not_yet")
+                    else tr(lg, "login_error_bad")
+                )
             ),
             next=next_val,
             whatsapp_url=whatsapp_new_user_url(),
+            alta_publica=alta_publica_habilitada(),
         )
     next_val = (request.args.get("next") or "").strip()
+    from auth_registro import alta_publica_habilitada
+
     return render_template(
         "login.html",
         next=next_val,
         whatsapp_url=whatsapp_new_user_url(),
+        alta_publica=alta_publica_habilitada(),
     )
 
 
@@ -1698,22 +1898,28 @@ def admin_cursor():
     _requiere_admin()
     return render_template(
         "admin_cursor.html",
-        cursor_config=cursor_config_publica(),
+        cursor_config=cursor_verificar_enlace(probar_api=False),
     )
 
 
 @app.get("/admin/cursor/estado")
 def admin_cursor_estado():
     _requiere_admin()
-    return jsonify(cursor_config_publica())
+    probar = request.args.get("probar") in ("1", "true", "yes")
+    return jsonify(cursor_verificar_enlace(probar_api=probar))
 
 
 @app.post("/admin/cursor/mensaje")
 def admin_cursor_mensaje():
     _requiere_admin()
     lg = normalize_lang(session.get("lang"))
-    if not cursor_cloud_configurado():
+    verif = cursor_verificar_enlace(probar_api=False)
+    if not verif.get("configured"):
         return jsonify({"error": tr(lg, "admin_cursor_err_no_config")}), 503
+    if cursor_requiere_repo() and not verif.get("repo_url"):
+        return jsonify({"error": tr(lg, "admin_cursor_err_sin_repo")}), 400
+    if not verif.get("ready"):
+        return jsonify({"error": tr(lg, "admin_cursor_err_checks")}), 400
     data = request.get_json(silent=True) or {}
     texto = (data.get("text") or "").strip()
     agent_id = (data.get("agent_id") or "").strip()
@@ -1730,8 +1936,34 @@ def admin_cursor_mensaje():
                 "agent_id": out.get("agent_id"),
                 "run_id": out.get("run_id"),
                 "agent_url": out.get("agent_url"),
+                "flujo": [
+                    "enviado",
+                    "agente",
+                    "push",
+                    "pr" if verif.get("auto_create_pr") else "listo",
+                ],
             }
         )
+    except CursorCloudError as exc:
+        return jsonify(
+            {
+                "error": _mensaje_error_cursor(lg, exc),
+                "code": exc.code,
+                "help_url": (
+                    "https://www.cursor.com/dashboard?tab=settings"
+                    if exc.code == "usage_limit_exceeded"
+                    else None
+                ),
+            }
+        ), exc.status
+
+
+@app.get("/admin/cursor/run/<agent_id>/<run_id>")
+def admin_cursor_run(agent_id: str, run_id: str):
+    _requiere_admin()
+    try:
+        run = cursor_obtener_run(agent_id, run_id)
+        return jsonify({"ok": True, "run": cursor_run_publico(run)})
     except CursorCloudError as exc:
         return jsonify({"error": str(exc), "code": exc.code}), exc.status
 
@@ -1747,7 +1979,7 @@ def admin_cursor_stream(agent_id: str, run_id: str):
                 yield chunk
         except CursorCloudError as exc:
             payload = json.dumps({"message": str(exc)}, ensure_ascii=False)
-            yield f"event: error\ndata: {payload}\n\n".encode("utf-8")
+            yield f"event: cursor_error\ndata: {payload}\n\n".encode("utf-8")
 
     return Response(
         generate(),

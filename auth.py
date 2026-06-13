@@ -365,13 +365,29 @@ def export_users_payload() -> dict[str, Any]:
     """JSON completo de usuarios (para sync remoto de portables)."""
     data = _leer_payload_env_json()
     if data:
-        return data
-    cuentas = _load_cuentas_sin_env_json()
-    return {
-        "version": 1,
-        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "users": {u: c.a_dict() for u, c in cuentas.items()},
-    }
+        payload = data
+    else:
+        cuentas = _load_cuentas_sin_env_json()
+        payload = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "users": {u: c.a_dict() for u, c in cuentas.items()},
+        }
+    try:
+        from auth_registro import cargar_usuarios_overlay
+
+        overlay = cargar_usuarios_overlay()
+        if overlay:
+            users = payload.setdefault("users", {})
+            if isinstance(users, dict):
+                for u, meta in overlay.items():
+                    if u not in users and isinstance(meta, dict):
+                        if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+                            continue
+                        users[u] = meta
+    except Exception:
+        pass
+    return payload
 
 
 def verificar_token_remoto(auth_header: str | None) -> bool:
@@ -509,9 +525,18 @@ def estado_auth() -> dict[str, Any]:
 
 def _load_cuentas() -> dict[str, CuentaUsuario]:
     env_cuentas = _usuarios_desde_env_json()
-    if env_cuentas:
-        return env_cuentas
-    return _load_cuentas_sin_env_json()
+    base = env_cuentas if env_cuentas else _load_cuentas_sin_env_json()
+    try:
+        from auth_registro import cargar_usuarios_overlay
+
+        overlay = cargar_usuarios_overlay()
+        if overlay:
+            for u, c in _parse_cuentas(overlay).items():
+                if u not in base:
+                    base[u] = c
+    except Exception:
+        _LOG.debug("Overlay de usuarios registrados no disponible", exc_info=True)
+    return base
 
 
 def load_users() -> dict[str, str]:
@@ -524,13 +549,20 @@ def load_users() -> dict[str, str]:
 
 
 def verificar_acceso(username: str, password: str) -> str | None:
-    """Devuelve None si el acceso es válido; si no, 'invalid', 'expired' o 'not_yet'."""
+    """Devuelve None si válido; si no: invalid, expired, not_yet, pending_approval."""
+    from auth_registro import verificar_acceso_overlay, verificar_password
+
     u = (username or "").strip()
     pwd = (password or "").strip()
     if not u:
         return "invalid"
+    pendiente = verificar_acceso_overlay(u, pwd)
+    if pendiente == "pending_approval":
+        return "pending_approval"
+    if pendiente == "invalid":
+        return "invalid"
     cuenta = _load_cuentas().get(u)
-    if cuenta is None or cuenta.password != pwd:
+    if cuenta is None or not verificar_password(cuenta.password, pwd):
         return "invalid"
     return _motivo_vigencia(cuenta)
 

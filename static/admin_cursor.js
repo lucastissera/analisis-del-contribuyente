@@ -13,10 +13,15 @@
   var btnEnviar = document.getElementById("btn-enviar");
   var btnNueva = document.getElementById("btn-nueva");
   var btnCancelar = document.getElementById("btn-cancelar");
+  var btnProbar = document.getElementById("btn-probar-api");
   var estadoRun = document.getElementById("estado-run");
   var avisoConfig = document.getElementById("aviso-config");
-  var avisoRepo = document.getElementById("aviso-repo");
   var linkAgente = document.getElementById("link-agente");
+  var checksLista = document.getElementById("checks-lista");
+  var flujoPasos = document.getElementById("flujo-pasos");
+  var panelGit = document.getElementById("panel-git");
+  var gitResumen = document.getElementById("git-resumen");
+  var gitLinks = document.getElementById("git-links");
 
   var agentId = null;
   var runId = null;
@@ -24,6 +29,8 @@
   var eventSource = null;
   var asistenteActual = null;
   var ocupado = false;
+  var pollTimer = null;
+  var vioPush = false;
 
   function t(key, fallback) {
     return I[key] || fallback || key;
@@ -37,9 +44,75 @@
 
   function setOcupado(val) {
     ocupado = !!val;
-    if (btnEnviar) btnEnviar.disabled = ocupado;
-    if (input) input.disabled = ocupado;
+    if (btnEnviar) btnEnviar.disabled = ocupado || !cfg.ready;
+    if (input) input.disabled = ocupado || !cfg.ready;
     if (btnCancelar) btnCancelar.hidden = !ocupado;
+  }
+
+  function marcarPaso(paso, estado) {
+    if (!flujoPasos) return;
+    var li = flujoPasos.querySelector('[data-paso="' + paso + '"]');
+    if (!li) return;
+    li.classList.remove("activo", "hecho");
+    if (estado) li.classList.add(estado);
+  }
+
+  function resetFlujo() {
+    if (!flujoPasos) return;
+    flujoPasos.querySelectorAll("li").forEach(function (li) {
+      li.classList.remove("activo", "hecho");
+    });
+    vioPush = false;
+  }
+
+  function renderChecks(data) {
+    cfg = data || cfg;
+    if (!checksLista) return;
+    checksLista.innerHTML = "";
+    (cfg.checks || []).forEach(function (c) {
+      var li = document.createElement("li");
+      li.className = c.ok ? "ok" : "fail";
+      li.textContent = c.mensaje || c.id;
+      checksLista.appendChild(li);
+    });
+    if (avisoConfig) {
+      if (cfg.ready) {
+        avisoConfig.hidden = true;
+      } else {
+        avisoConfig.hidden = false;
+        avisoConfig.textContent = t(
+          "admin_cursor_err_checks",
+          "Completá la configuración antes de enviar."
+        );
+      }
+    }
+    setOcupado(ocupado);
+    if (avisoConfig && !cfg.ready && cfg.diagnostico) {
+      var d = cfg.diagnostico;
+      var extra = [];
+      if (d.api_key_len) extra.push("API key: " + d.api_key_len + " chars");
+      if (cfg.repo_url_raw && !cfg.repo_url) {
+        extra.push("Repo con formato inválido: " + cfg.repo_url_raw);
+      }
+      if (d.vars_cursor && d.vars_cursor.length) {
+        extra.push("Vars: " + d.vars_cursor.join(", "));
+      }
+      if (extra.length) {
+        avisoConfig.textContent += " (" + extra.join(" · ") + ")";
+      }
+    }
+  }
+
+  function cargarEstado(probar) {
+    var url = "/admin/cursor/estado" + (probar ? "?probar=1" : "");
+    return fetch(url)
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (data) {
+        renderChecks(data);
+        return data;
+      });
   }
 
   function guardarAgentId(id) {
@@ -88,6 +161,62 @@
 
   function agregarTool(nombre, detalle) {
     agregarMensaje("tool", detalle, nombre || "tool");
+    var low = (detalle || "").toLowerCase();
+    if (
+      low.indexOf("push") >= 0 ||
+      low.indexOf("commit") >= 0 ||
+      low.indexOf("git") >= 0
+    ) {
+      vioPush = true;
+      marcarPaso("push", "hecho");
+    }
+  }
+
+  function mostrarGit(run) {
+    if (!panelGit || !run) return;
+    var branches = run.branches || [];
+    if (!branches.length && !run.result) return;
+
+    panelGit.hidden = false;
+    if (gitLinks) gitLinks.innerHTML = "";
+
+    var prUrl = null;
+    var branchUrl = null;
+    branches.forEach(function (b) {
+      if (b.pr_url) prUrl = b.pr_url;
+      if (b.branch_url) branchUrl = b.branch_url;
+    });
+
+    if (gitResumen) {
+      var branchName = cfg.branch || "main";
+      gitResumen.textContent = t(
+        "admin_cursor_push_ok",
+        "Código pusheado. Mergeá a " + branchName + " para actualizar Render."
+      ).replace("{branch}", branchName);
+    }
+
+    if (gitLinks) {
+      if (prUrl) {
+        var aPr = document.createElement("a");
+        aPr.href = prUrl;
+        aPr.target = "_blank";
+        aPr.rel = "noopener";
+        aPr.textContent = t("admin_cursor_ver_pr", "Abrir pull request");
+        gitLinks.appendChild(aPr);
+        marcarPaso("pr", "hecho");
+      }
+      if (branchUrl) {
+        var aBr = document.createElement("a");
+        aBr.href = branchUrl;
+        aBr.target = "_blank";
+        aBr.rel = "noopener";
+        aBr.textContent = t("admin_cursor_ver_rama", "Ver rama en GitHub");
+        gitLinks.appendChild(aBr);
+      }
+    }
+    if (prUrl || branchUrl) {
+      marcarPaso("push", "hecho");
+    }
   }
 
   function cerrarStream() {
@@ -97,15 +226,81 @@
     }
   }
 
+  function detenerPoll() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function pollRun(intentos) {
+    if (!agentId || !runId) return;
+    detenerPoll();
+    fetch(
+      "/admin/cursor/run/" +
+        encodeURIComponent(agentId) +
+        "/" +
+        encodeURIComponent(runId)
+    )
+      .then(function (r) {
+        return r.json().then(function (body) {
+          if (!r.ok) throw new Error((body && body.error) || r.statusText);
+          return body;
+        });
+      })
+      .then(function (body) {
+        var run = body.run || {};
+        if (run.branches && run.branches.length) {
+          mostrarGit(run);
+        }
+        if (run.terminal) {
+          if (run.result && !asistenteActual) {
+            asistenteActual = agregarMensaje(
+              "asistente",
+              run.result,
+              t("admin_cursor_asistente", "Cursor Cloud")
+            );
+          }
+          finalizarRun(
+            t("admin_cursor_estado_fin", "Finalizado") + ": " + (run.status || "")
+          );
+          return;
+        }
+        if (intentos > 0) {
+          setEstado(t("admin_cursor_esperando_git", "Esperando commit/push…"), true);
+          pollTimer = setTimeout(function () {
+            pollRun(intentos - 1);
+          }, 4000);
+        } else {
+          finalizarRun(t("admin_cursor_estado_listo", "Listo"));
+        }
+      })
+      .catch(function () {
+        if (intentos > 0) {
+          pollTimer = setTimeout(function () {
+            pollRun(intentos - 1);
+          }, 5000);
+        } else {
+          finalizarRun(t("admin_cursor_estado_listo", "Listo"));
+        }
+      });
+  }
+
   function finalizarRun(estadoTexto) {
     cerrarStream();
+    detenerPoll();
     setOcupado(false);
     asistenteActual = null;
     setEstado(estadoTexto || t("admin_cursor_estado_listo", "Listo"), false);
+    marcarPaso("agente", "hecho");
+    if (agentId && runId) {
+      pollRun(8);
+    }
   }
 
   function manejarEvento(tipo, data) {
     if (tipo === "assistant" && data && data.text) {
+      marcarPaso("agente", "activo");
       if (!asistenteActual) {
         asistenteActual = agregarMensaje(
           "asistente",
@@ -118,6 +313,7 @@
       return;
     }
     if (tipo === "status" && data && data.status) {
+      marcarPaso("agente", "activo");
       setEstado(
         t("admin_cursor_estado_run", "Ejecutando") + ": " + data.status,
         true
@@ -141,41 +337,33 @@
       } else if (data.text && asistenteActual && !asistenteActual.textContent) {
         asistenteActual.textContent = data.text;
       }
-      var fin = data.status || "FINISHED";
-      if (data.git && data.git.branches && data.git.branches.length) {
-        data.git.branches.forEach(function (b) {
-          var line = (b.branch || "") + (b.prUrl ? " → " + b.prUrl : "");
-          if (line) agregarMensaje("sistema", line);
-        });
+      if (data.git) {
+        mostrarGit({ branches: (data.git.branches || []).map(function (b) {
+          return {
+            repo: b.repoUrl,
+            branch: b.branch,
+            pr_url: b.prUrl,
+            branch_url: b.repoUrl && b.branch
+              ? "https://" + b.repoUrl + "/tree/" + b.branch
+              : null,
+          };
+        })});
       }
+      var fin = data.status || "FINISHED";
       finalizarRun(t("admin_cursor_estado_fin", "Finalizado") + ": " + fin);
       return;
     }
-    if (tipo === "error") {
+    if (tipo === "cursor_error") {
       agregarMensaje(
         "sistema",
         (data && data.message) || t("admin_cursor_err_stream", "Error en el stream")
       );
-      finalizarRun(t("admin_cursor_estado_error", "Error"));
+      pollRun(5);
       return;
     }
     if (tipo === "done") {
-      finalizarRun(t("admin_cursor_estado_listo", "Listo"));
-    }
-  }
-
-  function parseSseChunk(texto) {
-    var evento = "message";
-    var datos = "";
-    texto.split("\n").forEach(function (linea) {
-      if (linea.indexOf("event:") === 0) evento = linea.slice(6).trim();
-      if (linea.indexOf("data:") === 0) datos += linea.slice(5).trim();
-    });
-    if (!datos) return;
-    try {
-      manejarEvento(evento, JSON.parse(datos));
-    } catch (e) {
-      manejarEvento(evento, { text: datos });
+      setOcupado(false);
+      pollRun(8);
     }
   }
 
@@ -184,6 +372,7 @@
     setOcupado(true);
     setEstado(t("admin_cursor_estado_run", "Ejecutando") + "…", true);
     asistenteActual = null;
+    marcarPaso("agente", "activo");
 
     var url =
       "/admin/cursor/stream/" +
@@ -192,42 +381,47 @@
       encodeURIComponent(rid);
     eventSource = new EventSource(url);
 
-    eventSource.addEventListener("assistant", function (ev) {
-      parseSseChunk("event: assistant\ndata: " + ev.data);
+    ["assistant", "status", "tool_call", "result", "done"].forEach(function (ev) {
+      eventSource.addEventListener(ev, function (e) {
+        manejarEvento(ev === "done" ? "done" : ev, e.data ? JSON.parse(e.data) : {});
+      });
     });
-    eventSource.addEventListener("status", function (ev) {
-      parseSseChunk("event: status\ndata: " + ev.data);
+
+    eventSource.addEventListener("cursor_error", function (ev) {
+      if (ev.data) {
+        try {
+          manejarEvento("cursor_error", JSON.parse(ev.data));
+        } catch (e) {
+          manejarEvento("cursor_error", { message: ev.data });
+        }
+      }
     });
-    eventSource.addEventListener("tool_call", function (ev) {
-      parseSseChunk("event: tool_call\ndata: " + ev.data);
-    });
-    eventSource.addEventListener("result", function (ev) {
-      parseSseChunk("event: result\ndata: " + ev.data);
-    });
-    eventSource.addEventListener("error", function (ev) {
-      if (ev.data) parseSseChunk("event: error\ndata: " + ev.data);
-    });
-    eventSource.addEventListener("done", function () {
-      finalizarRun(t("admin_cursor_estado_listo", "Listo"));
-    });
+
     eventSource.onerror = function () {
       if (!ocupado) return;
       agregarMensaje(
         "sistema",
-        t("admin_cursor_err_conexion", "Se perdió la conexión con el agente.")
+        t("admin_cursor_err_conexion", "Stream interrumpido; consultando estado…")
       );
-      finalizarRun(t("admin_cursor_estado_error", "Error"));
+      cerrarStream();
+      setOcupado(false);
+      pollRun(12);
     };
   }
 
   function enviarMensaje(texto) {
-    if (!cfg.configured) {
+    if (!cfg.ready) {
       agregarMensaje(
         "sistema",
-        t("admin_cursor_err_no_config", "Falta configurar CURSOR_API_KEY en el servidor.")
+        t("admin_cursor_err_checks", "Completá la configuración antes de enviar.")
       );
       return;
     }
+    resetFlujo();
+    if (panelGit) panelGit.hidden = true;
+    marcarPaso("enviado", "hecho");
+    marcarPaso("agente", "activo");
+
     agregarMensaje("usuario", texto, t("admin_cursor_vos", "Vos"));
     setOcupado(true);
 
@@ -241,7 +435,11 @@
     })
       .then(function (r) {
         return r.json().then(function (body) {
-          if (!r.ok) throw new Error((body && body.error) || r.statusText);
+          if (!r.ok) {
+            var err = new Error((body && body.error) || r.statusText);
+            err.helpUrl = body && body.help_url;
+            throw err;
+          }
           return body;
         });
       })
@@ -262,20 +460,27 @@
       })
       .catch(function (err) {
         setOcupado(false);
+        marcarPaso("agente", "");
         agregarMensaje("sistema", String(err.message || err));
+        if (err.helpUrl) {
+          agregarMensaje("sistema", err.helpUrl);
+        }
         setEstado(t("admin_cursor_estado_error", "Error"), false);
       });
   }
 
   function nuevaConversacion() {
     cerrarStream();
+    detenerPoll();
     agentId = null;
     runId = null;
     agentUrl = null;
     guardarAgentId(null);
     actualizarLinkAgente();
+    resetFlujo();
     setOcupado(false);
     setEstado(t("admin_cursor_estado_listo", "Listo"), false);
+    if (panelGit) panelGit.hidden = true;
     if (mensajesEl) {
       mensajesEl.innerHTML = "";
       agregarMensaje("sistema", t("admin_cursor_nueva_ok", "Nueva conversación."));
@@ -296,33 +501,10 @@
     });
   }
 
-  function initAvisos() {
-    if (!cfg.configured && avisoConfig) {
-      avisoConfig.hidden = false;
-      avisoConfig.textContent = t(
-        "admin_cursor_aviso_no_config",
-        "Configurá CURSOR_API_KEY en Render para habilitar el chat."
-      );
-    }
-    if (cfg.repo_url && avisoRepo) {
-      avisoRepo.hidden = false;
-      avisoRepo.textContent = t(
-        "admin_cursor_repo",
-        "Repositorio"
-      ) + ": " + cfg.repo_url + " (" + (cfg.branch || "main") + ")";
-    } else if (avisoRepo) {
-      avisoRepo.hidden = false;
-      avisoRepo.textContent = t(
-        "admin_cursor_sin_repo",
-        "Sin repo GitHub: el agente trabajará sin clonar código (solo chat)."
-      );
-    }
-  }
-
   if (form) {
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
-      if (ocupado) return;
+      if (ocupado || !cfg.ready) return;
       var texto = (input && input.value || "").trim();
       if (!texto) return;
       if (input) input.value = "";
@@ -331,8 +513,16 @@
   }
   if (btnNueva) btnNueva.addEventListener("click", nuevaConversacion);
   if (btnCancelar) btnCancelar.addEventListener("click", cancelarRun);
+  if (btnProbar) {
+    btnProbar.addEventListener("click", function () {
+      btnProbar.disabled = true;
+      cargarEstado(true).finally(function () {
+        btnProbar.disabled = false;
+      });
+    });
+  }
 
   agentId = cargarAgentId();
-  initAvisos();
+  renderChecks(cfg);
   setEstado(t("admin_cursor_estado_listo", "Listo"), false);
 })();

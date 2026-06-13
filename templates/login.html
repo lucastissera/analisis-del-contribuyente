@@ -112,6 +112,12 @@
         margin-bottom: 0.75rem;
         font-size: 0.95rem;
       }
+      .ok {
+        color: #2e7d32;
+        margin-bottom: 0.75rem;
+        font-size: 0.95rem;
+      }
+      html.modo-oscuro .ok { color: #66bb6a; }
       .login-nuevo {
         margin-top: 1rem;
         font-size: 0.92rem;
@@ -148,6 +154,11 @@
         {% elif login_error %}
         <p class="error" role="alert">{{ t('login_error_bad') }}</p>
         {% endif %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+        <p class="{{ 'ok' if cat == 'success' else 'error' }}" role="alert">{{ msg }}</p>
+        {% endfor %}
+        {% endwith %}
         <form method="post" action="{{ url_for('login') }}" autocomplete="on">
           <input type="hidden" name="next" value="{{ next or '' }}" />
           <div class="login-field">
@@ -163,12 +174,11 @@
           </div>
         </form>
         <p class="login-nuevo">
-          <a
-            href="{{ whatsapp_url }}"
-            target="_blank"
-            rel="noopener noreferrer"
-            >{{ t('login_new_user') }}</a
-          >
+          <a href="{{ whatsapp_url }}" target="_blank" rel="noopener noreferrer">{{ t('login_new_user') }}</a>
+          {% if alta_publica | default(true) %}
+          ·
+          <a href="{{ url_for('solicitar_acceso') }}">{{ t('alta_link_solicitar') }}</a>
+          {% endif %}
         </p>
       </div>
 

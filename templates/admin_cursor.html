@@ -179,6 +179,49 @@
       }
       .btn:disabled { opacity: 0.55; cursor: default; }
       .links-agente { font-size: 0.9rem; }
+      .checks-panel, .flujo-panel, .git-panel {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 1rem;
+        background: var(--bg-panel);
+      }
+      .checks-panel h2, .flujo-panel h2, .git-panel h2 {
+        margin: 0 0 0.55rem;
+        font-size: 1rem;
+      }
+      .checks-lista { list-style: none; padding: 0; margin: 0; }
+      .checks-lista li { padding: 0.25rem 0; font-size: 0.92rem; }
+      .checks-lista li.ok::before { content: "✓ "; color: var(--color-ok); }
+      .checks-lista li.fail::before { content: "✗ "; color: var(--color-error); }
+      .flujo-pasos {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.45rem;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .flujo-pasos li {
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+        padding: 0.45rem 0.55rem;
+        font-size: 0.82rem;
+        color: var(--text-muted);
+      }
+      .flujo-pasos li.activo {
+        border-style: solid;
+        border-color: var(--admin-border);
+        color: var(--text-primary);
+        font-weight: bold;
+        background: var(--admin-bg);
+      }
+      .flujo-pasos li.hecho {
+        border-color: var(--color-ok);
+        color: var(--color-ok);
+      }
+      .git-links { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 0.45rem; }
+      .git-links a { font-weight: bold; }
     </style>
   </head>
   <body>
@@ -191,8 +234,32 @@
 
       <p class="intro">{{ t('admin_cursor_intro') | safe }}</p>
 
+      <div class="checks-panel">
+        <h2>{{ t('admin_cursor_checks_titulo') }}</h2>
+        <ul id="checks-lista" class="checks-lista"></ul>
+        <div class="acciones" style="margin-top: 0.55rem">
+          <button type="button" id="btn-probar-api" class="btn">{{ t('admin_cursor_checks_probar') }}</button>
+        </div>
+      </div>
+
+      <div class="flujo-panel">
+        <h2>{{ t('admin_cursor_flujo_titulo') }}</h2>
+        <ol id="flujo-pasos" class="flujo-pasos">
+          <li data-paso="enviado">{{ t('admin_cursor_paso_enviado') }}</li>
+          <li data-paso="agente">{{ t('admin_cursor_paso_agente') }}</li>
+          <li data-paso="push">{{ t('admin_cursor_paso_push') }}</li>
+          <li data-paso="pr">{{ t('admin_cursor_paso_pr') }}</li>
+          <li data-paso="render">{{ t('admin_cursor_paso_render') }}</li>
+        </ol>
+      </div>
+
+      <div id="panel-git" class="git-panel" hidden>
+        <h2>{{ t('admin_cursor_git_titulo') }}</h2>
+        <p id="git-resumen"></p>
+        <div id="git-links" class="git-links"></div>
+      </div>
+
       <div id="aviso-config" class="aviso error" hidden></div>
-      <div id="aviso-repo" class="aviso ok" hidden></div>
 
       <div class="panel-chat">
         <div class="barra-chat">

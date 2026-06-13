@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('alta_activar_title') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" />
+    <style>
+      :root {
+        --bg-body: #fff; --bg-panel: #fafafa; --text-primary: #1a1a1a;
+        --text-muted: #444; --border: #bbb; --color-error: #b00020;
+        --color-link: #1565c0; --btn-bg: #111; --btn-text: #fff; --btn-border: #333;
+      }
+      html.modo-oscuro {
+        --bg-body: #0f1014; --bg-panel: #1a1c22; --text-primary: #eceef3;
+        --text-muted: #aeb4c0; --border: #3d424d; --color-error: #ff8a95;
+        --color-link: #8ab4ff; --btn-bg: #3d7dd9; --btn-text: #0c1118; --btn-border: #5b93e8;
+      }
+      body { font-family: Arial, sans-serif; margin: 1rem; background: var(--bg-body); color: var(--text-primary); }
+      .pagina { max-width: 420px; margin: 0 auto; }
+      .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; background: var(--bg-panel); }
+      .field { margin-bottom: 0.85rem; }
+      .field label { display: block; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.25rem; }
+      .field input { width: 100%; box-sizing: border-box; padding: 0.45rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-body); color: var(--text-primary); }
+      .error { color: var(--color-error); margin-bottom: 0.75rem; }
+      .help { font-size: 0.85rem; color: var(--text-muted); }
+      button { padding: 0.55rem 1rem; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); border-radius: 6px; cursor: pointer; }
+    </style>
+    <script>
+      try { if (localStorage.getItem("tema") === "oscuro") document.documentElement.classList.add("modo-oscuro"); } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div class="pagina">
+      {% with mostrar_volver=false, mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
+      <div class="card">
+        {% with titulo=t('alta_activar_heading'), variante='login' %}{% include 'partials/cabecera_isologo.html' %}{% endwith %}
+
+        {% if invalido %}
+        <p class="error">{{ t('alta_err_token_invalido') }}</p>
+        <p><a href="{{ url_for('solicitar_acceso') }}">{{ t('alta_solicitar_otra') }}</a></p>
+        {% elif completado_pendiente %}
+        <h2>{{ t('alta_pendiente_titulo') }}</h2>
+        <p class="help">{{ t('alta_pendiente_body', cuit=cuit_fmt) }}</p>
+        <p><a href="{{ url_for('login') }}">{{ t('alta_volver_login') }}</a></p>
+        {% else %}
+        <p class="help">{{ t('alta_activar_intro', cuit=cuit_fmt) }}</p>
+        {% if error_msg %}
+        <p class="error">{{ error_msg }}</p>
+        {% endif %}
+        <form method="post">
+          <div class="field">
+            <label for="password">{{ t('alta_password_label') }}</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+            <p class="help">{{ t('alta_password_help', min=min_len) }}</p>
+          </div>
+          <div class="field">
+            <label for="password2">{{ t('alta_password2_label') }}</label>
+            <input id="password2" name="password2" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+          </div>
+          <button type="submit">{{ t('alta_btn_activar') }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

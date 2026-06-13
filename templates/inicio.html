@@ -168,6 +168,11 @@
           <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
         </a>
         {% if es_administrador %}
+        <a class="boton-grande boton-admin" href="{{ url_for('admin_altas_usuarios') }}">
+          <span class="icono" aria-hidden="true">&#128100;</span>
+          <span class="titulo">{{ t('inicio_btn_admin_altas') }}</span>
+          <span class="desc">{{ t('inicio_btn_admin_altas_desc') }}</span>
+        </a>
         <a class="boton-grande boton-admin" href="{{ url_for('admin_cursor') }}">
           <span class="icono" aria-hidden="true">&#9881;</span>
           <span class="titulo">{{ t('inicio_btn_admin_cursor') }}</span>

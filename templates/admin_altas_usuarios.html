@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('admin_altas_title') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <style>
+      body { font-family: Arial, sans-serif; margin: 1rem; }
+      .pagina { max-width: 820px; margin: 0 auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin-bottom: 1.5rem; }
+      th, td { text-align: left; padding: 0.45rem; border-bottom: 1px solid #ddd; }
+      .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1.2rem; }
+      .ok { color: #2e7d32; } .warn { color: #e65100; }
+      input { padding: 0.35rem; margin: 0.2rem 0; }
+      button { padding: 0.35rem 0.65rem; cursor: pointer; margin-right: 0.35rem; }
+      .btn-aprob { background: #2e7d32; color: #fff; border: none; border-radius: 4px; }
+      .btn-rech { background: #c62828; color: #fff; border: none; border-radius: 4px; }
+      .enlace-box { word-break: break-all; background: #f5f5f5; padding: 0.6rem; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% include 'partials/barra_superior.html' %}
+      <h1>{{ t('admin_altas_heading') }}</h1>
+      <p>{{ t('admin_altas_intro') }}</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <p class="{{ 'ok' if cat == 'success' else 'warn' }}">{{ msg }}</p>
+      {% endfor %}
+      {% endwith %}
+
+      {% if enlace_generado %}
+      <div class="panel">
+        <h2>{{ t('admin_altas_enlace_titulo') }}</h2>
+        <p>{{ t('admin_altas_enlace_help') }}</p>
+        <div class="enlace-box"><a href="{{ enlace_generado }}">{{ enlace_generado }}</a></div>
+      </div>
+      {% endif %}
+
+      <div class="panel">
+        <h2>{{ t('admin_altas_generar_titulo') }}</h2>
+        <p class="help">{{ t('admin_altas_generar_help') }}</p>
+        <form method="post">
+          <input type="hidden" name="accion" value="generar_enlace" />
+          <div>
+            <label>{{ t('alta_cuit_label') }}</label><br />
+            <input name="cuit" required placeholder="20-12345678-9" />
+          </div>
+          <div>
+            <label>{{ t('alta_email_label') }}</label><br />
+            <input name="email" type="email" required />
+          </div>
+          <div>
+            <label>{{ t('alta_nombre_label') }}</label><br />
+            <input name="nombre" type="text" />
+          </div>
+          <p><button type="submit">{{ t('admin_altas_btn_generar') }}</button></p>
+        </form>
+      </div>
+
+      <h2>{{ t('admin_altas_pendientes_titulo') }}</h2>
+      {% if not pendientes %}
+      <p>{{ t('admin_altas_pendientes_vacio') }}</p>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t('alta_cuit_label') }}</th>
+            <th>{{ t('alta_email_label') }}</th>
+            <th>{{ t('admin_altas_col_clave') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in pendientes %}
+          <tr>
+            <td>{{ p.cuit_fmt or p.cuit }}</td>
+            <td>{{ p.email or '—' }}</td>
+            <td>{{ p.password_definida or '—' }}</td>
+            <td>
+              <form method="post" style="display:inline">
+                <input type="hidden" name="accion" value="aprobar" />
+                <input type="hidden" name="cuit" value="{{ p.cuit }}" />
+                <button type="submit" class="btn-aprob">{{ t('admin_altas_btn_aprobar') }}</button>
+              </form>
+              <form method="post" style="display:inline">
+                <input type="hidden" name="accion" value="rechazar" />
+                <input type="hidden" name="cuit" value="{{ p.cuit }}" />
+                <button type="submit" class="btn-rech">{{ t('admin_altas_btn_rechazar') }}</button>
+              </form>
+              <a href="{{ p.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <h2>{{ t('admin_altas_historial_titulo') }}</h2>
+      {% if not altas %}
+      <p>{{ t('admin_altas_vacio') }}</p>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t('alta_cuit_label') }}</th>
+            <th>{{ t('alta_email_label') }}</th>
+            <th>{{ t('admin_altas_fecha') }}</th>
+            <th>{{ t('admin_altas_col_estado') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in altas %}
+          <tr>
+            <td>{{ a.cuit }}</td>
+            <td>{{ a.email or '—' }}</td>
+            <td>{{ a.activado or '—' }}</td>
+            <td>{{ a.estado or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </body>
+</html>
