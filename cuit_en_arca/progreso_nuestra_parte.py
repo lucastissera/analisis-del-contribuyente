@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import threading
-import time
-from dataclasses import dataclass, field
+from cuit_en_arca.hora_log import hora_log_ar
 from typing import Any, Callable
 
 _lock = threading.Lock()
@@ -99,7 +97,7 @@ def callback_log_np(job_id: str) -> Callable[[str], None]:
             if not item:
                 return
             st: EstadoJobNP = item["estado"]
-            ts = time.strftime("%H:%M:%S")
+            ts = hora_log_ar()
             st.log.append(f"[{ts}] {texto}")
             if len(st.log) > _MAX_LOG:
                 st.log = st.log[-_MAX_LOG:]

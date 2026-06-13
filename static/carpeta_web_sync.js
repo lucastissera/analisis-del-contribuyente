@@ -33,16 +33,32 @@
     if (!handle || !archivos || !archivos.length) return;
 
     function rutaDestino(rutaRelativa) {
+      var norm = String(rutaRelativa || "").replace(/\\/g, "/");
       var sesion =
         global.McElegirCarpeta && global.McElegirCarpeta.obtenerSubcarpetaSesion
           ? global.McElegirCarpeta.obtenerSubcarpetaSesion()
           : null;
-      if (!sesion) return rutaRelativa;
-      var norm = String(rutaRelativa || "").replace(/\\/g, "/");
-      var pref = String(sesion).replace(/\\/g, "/");
-      if (norm.indexOf(pref + "/") === 0) return norm.slice(pref.length + 1);
-      var partes = norm.split("/").filter(Boolean);
-      if (partes.length && partes[0] === pref) return partes.slice(1).join("/");
+      if (sesion) {
+        var pref = String(sesion).replace(/\\/g, "/");
+        if (norm.indexOf(pref + "/") === 0) return norm.slice(pref.length + 1);
+        var partes = norm.split("/").filter(Boolean);
+        if (partes.length && partes[0] === pref) return partes.slice(1).join("/");
+      }
+      // Si el servidor generó otro timestamp (p. ej. TZ distinta), quitar prefijo conocido.
+      var partes2 = norm.split("/").filter(Boolean);
+      if (partes2.length > 1) {
+        var prefijos = [
+          "Nuestra Parte",
+          "DFE",
+          "Mis Comprobantes",
+          "Análisis Programado",
+        ];
+        for (var p = 0; p < prefijos.length; p++) {
+          if (partes2[0].indexOf(prefijos[p] + " ") === 0) {
+            return partes2.slice(1).join("/");
+          }
+        }
+      }
       return norm;
     }
 

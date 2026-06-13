@@ -234,9 +234,16 @@ def ejecutar_analisis_programado(
     }
 
     log_prog = callback_log_ap()
+    entrega_ref: list = [None]
 
     def log(msg: str) -> None:
         log_prog(msg)
+        ent = entrega_ref[0]
+        if ent is not None:
+            from cuit_en_arca.entrega_web import log_indica_archivo_nuevo
+
+            if log_indica_archivo_nuevo(msg):
+                ent.escanear()
         if on_log:
             try:
                 on_log(msg)
@@ -264,6 +271,7 @@ def ejecutar_analisis_programado(
             from cuit_en_arca.progreso_analisis_programado import agregar_archivo_ap
 
             entrega = EntregaWeb(base, make_registrar(agregar_archivo_ap))
+            entrega_ref[0] = entrega
             entrega.escanear()
         log(f"Inicio análisis programado → {base}")
         marcar_paso_ap("preparacion", "ok")

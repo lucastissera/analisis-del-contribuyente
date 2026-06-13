@@ -8,6 +8,34 @@ from pathlib import Path
 from typing import Callable
 
 RegistrarArchivo = Callable[[str, bytes, str], None]
+LogCallback = Callable[[str], None]
+
+
+def log_indica_archivo_nuevo(texto: str) -> bool:
+    """True si el mensaje de log sugiere que se escribió un archivo en disco."""
+    t = (texto or "").lower()
+    return (
+        "exportado:" in t
+        or "descargado:" in t
+        or "adjunto descargado" in t
+        or "pantalla impresa a pdf" in t
+        or "guardada en pdf" in t
+        or "pdf de pantalla" in t
+        or " pantalla guardada" in t
+    )
+
+
+def envolver_log_con_entrega(on_log: LogCallback | None, entrega: EntregaWeb | None):
+    """Tras cada exportación, registra archivos nuevos para sync al navegador (web)."""
+    if entrega is None or on_log is None:
+        return on_log
+
+    def _cb(texto: str) -> None:
+        on_log(texto)
+        if log_indica_archivo_nuevo(texto):
+            entrega.escanear()
+
+    return _cb
 
 _descargas: dict | None = None
 

@@ -194,7 +194,7 @@ def _fabricar_entrega(
     carpeta_form: str | None,
     agregar_estado,
 ):
-    from cuit_en_arca.entrega_web import EntregaWeb, carpeta_trabajo_web, make_registrar
+    from cuit_en_arca.entrega_web import EntregaWeb, carpeta_trabajo_web, envolver_log_con_entrega, make_registrar
 
     if _es_app_escritorio():
         p = (carpeta_form or "").strip()
@@ -1138,7 +1138,7 @@ def dfe_descargar():
     reset_cancelacion(job_id)
     crear_job_dfe(job_id, len(filas))
     reiniciar_pasos_dfe(job_id)
-    on_log = callback_log_dfe(job_id)
+    on_log = envolver_log_con_entrega(callback_log_dfe(job_id), entrega)
     on_paso = callback_paso_dfe(job_id)
 
     def _reinit() -> None:
@@ -1299,7 +1299,7 @@ def np_descargar():
     reset_cancelacion(job_id)
     crear_job_np(job_id, len(filas))
     reiniciar_pasos_np(job_id)
-    on_log = callback_log_np(job_id)
+    on_log = envolver_log_con_entrega(callback_log_np(job_id), entrega)
     on_paso = callback_paso_np(job_id)
 
     def _reinit() -> None:

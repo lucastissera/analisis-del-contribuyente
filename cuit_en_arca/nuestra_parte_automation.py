@@ -1086,15 +1086,16 @@ def _exportar_menu_actual(np, dest: Path, prefijo: str, on_log=None) -> str:
             k += 1
         d.save_as(str(ruta))
         _log(on_log, f"  • Exportado: {ruta.name}")
-        _marcar_accion_np()
         return str(ruta)
     except Exception as exc:
         _log(on_log, f"  • No se pudo exportar «{prefijo}»: {exc}")
         return ""
+    finally:
+        _marcar_accion_np()
 
 
 def _exportar_grilla_visible(
-    np, dest: Path, prefijo: str, on_log=None, *, solo_viewport: bool = False
+    np, dest: Path, prefijo: str, on_log=None, *, solo_viewport: bool = False, modo_ritmo: str = "general"
 ) -> list[str]:
     """Abre cada botón EXPORTAR visible y descarga su grilla."""
     guardados: list[str] = []
@@ -1129,6 +1130,7 @@ def _exportar_grilla_visible(
             if not _visible(b) and _estado_scroll(np).fondo_alcanzado:
                 continue
         try:
+            _esperar_ritmo_np(modo_ritmo)
             _click_np(np, b)
             pausa_humana(0.2, 0.35)
         except Exception:
@@ -1181,8 +1183,6 @@ def _procesar_acordeones(
     except Exception:
         n = 0
     for i in range(n):
-        if i > 0:
-            _esperar_ritmo_np(modo_ritmo)
         b = accs.nth(i)
         try:
             titulo = (b.inner_text(timeout=800) or "").strip().replace("\n", " ")
@@ -1202,7 +1202,9 @@ def _procesar_acordeones(
         except Exception:
             continue
 
-        guardados += _exportar_grilla_visible(np, dest, titulo, on_log, solo_viewport=True)
+        guardados += _exportar_grilla_visible(
+            np, dest, titulo, on_log, solo_viewport=True, modo_ritmo=modo_ritmo
+        )
         if ver_detalles:
             guardados += _procesar_ver_detalles(np, dest, titulo, on_log)
     return guardados
@@ -1744,6 +1746,7 @@ def ejecutar_descarga_nuestra_parte(
 
             _paso(on_paso, "descargar", "en_curso")
             _reset_ritmo_np()
+            _marcar_accion_np()
             for clave, nombre in SECCIONES:
                 try:
                     sec = _procesar_seccion(
