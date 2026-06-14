@@ -356,9 +356,54 @@ def verificar_password(stored: str, password: str) -> bool:
 
 
 def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
-    data = _read_store("usuarios_registrados", {"users": {}})
-    users = data.get("users") if isinstance(data, dict) else {}
+    users = _cargar_overlay_completo().get("users")
     return users if isinstance(users, dict) else {}
+
+
+def _cargar_overlay_completo() -> dict[str, Any]:
+    """Blob usuarios_registrados con clave users (tolera JSON mal migrado)."""
+    data = _read_store("usuarios_registrados", {"version": 1, "users": {}})
+    if not isinstance(data, dict):
+        return {"version": 1, "users": {}}
+    users = data.get("users")
+    if isinstance(users, dict):
+        return data
+    flat = {
+        k: v
+        for k, v in data.items()
+        if isinstance(v, dict) and k not in ("version", "updated_at", "users")
+    }
+    if flat:
+        return {
+            "version": data.get("version", 1),
+            "users": flat,
+            "updated_at": data.get("updated_at"),
+        }
+    data["users"] = {}
+    return data
+
+
+def _guardar_overlay_completo(overlay: dict[str, Any]) -> None:
+    if not isinstance(overlay.get("users"), dict):
+        overlay["users"] = {}
+    overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _write_store("usuarios_registrados", overlay)
+
+
+def cuenta_en_registro_altas(cuit: str) -> bool:
+    """True si ya hay fila en usuarios_registrados (Neon). No usa AUTH_USERS_JSON legacy."""
+    raw = (cuit or "").strip()
+    if not raw:
+        return False
+    try:
+        overlay = cargar_usuarios_overlay()
+        if raw in overlay:
+            return True
+        u = normalizar_cuit(raw)
+        return bool(u and u in overlay)
+    except Exception as exc:
+        _LOG.warning("No se pudo verificar registro de %s: %s", raw, exc)
+        return False
 
 
 def _meta_overlay(cuit: str) -> dict[str, Any] | None:
@@ -461,7 +506,7 @@ def crear_solicitud(
     tel = normalizar_telefono(telefono_area, telefono_numero)
     if not tel:
         raise ValueError("telefono_invalido")
-    if usuario_existe(u):
+    if cuenta_en_registro_altas(u):
         raise ValueError("cuit_duplicado")
 
     tel_area, tel_numero = tel
@@ -526,14 +571,15 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
         if not sol:
             raise ValueError("token_invalido")
         cuit = str(sol["cuit"])
-        if usuario_existe(cuit):
+        if cuenta_en_registro_altas(cuit):
             raise ValueError("cuit_duplicado")
 
-        overlay_path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, overlay_path)
-        if not isinstance(overlay.get("users"), dict):
+        overlay = _cargar_overlay_completo()
+        users = overlay["users"]
+        if not isinstance(users, dict):
             overlay["users"] = {}
-        overlay["users"][cuit] = {
+            users = overlay["users"]
+        users[cuit] = {
             "password": hash_password(pwd),
             "email": sol.get("email"),
             "nombre": sol.get("nombre") or "",
@@ -544,8 +590,7 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
             "pendiente_aprobacion": True,
             "password_definida": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _write_store("usuarios_registrados", overlay, overlay_path)
+        _guardar_overlay_completo(overlay)
 
         data = _cargar_solicitudes()
         if tok in data.get("solicitudes", {}):
@@ -596,7 +641,7 @@ def crear_usuario_admin(
     hoy = date.today()
     if vh < hoy:
         raise ValueError("vencimiento_pasado")
-    if usuario_existe(u):
+    if cuenta_en_registro_altas(u):
         raise ValueError("usuario_duplicado")
 
     em = (email or "").strip().lower()
@@ -667,15 +712,14 @@ def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
 
 
 def aprobar_cuenta(cuit: str) -> bool:
-    u = resolver_clave_overlay(cuit)
-    if not u:
-        return False
-    dias = _dias_suscripcion()
-    hoy = date.today()
-    valido_hasta = hoy + timedelta(days=dias)
     with _lock:
-        path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        u = resolver_clave_overlay(cuit)
+        if not u:
+            return False
+        dias = _dias_suscripcion()
+        hoy = date.today()
+        valido_hasta = hoy + timedelta(days=dias)
+        overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return False
@@ -684,8 +728,7 @@ def aprobar_cuenta(cuit: str) -> bool:
         users[u]["valido_desde"] = hoy.isoformat()
         users[u]["valido_hasta"] = valido_hasta.isoformat()
         users[u]["aprobado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _write_store("usuarios_registrados", overlay, path)
+        _guardar_overlay_completo(overlay)
     return True
 
 

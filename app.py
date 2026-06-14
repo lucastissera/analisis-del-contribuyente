@@ -603,10 +603,11 @@ def api_estado_altas():
     if enabled():
         out["postgresql"] = estado_db()
     try:
-        from auth_registro import _cargar_solicitudes
+        from auth_registro import _cargar_solicitudes, listar_pendientes_aprobacion
 
         sols = _cargar_solicitudes().get("solicitudes")
         out["solicitudes_pendientes"] = len(sols) if isinstance(sols, dict) else 0
+        out["usuarios_pendientes_aprobacion"] = len(listar_pendientes_aprobacion())
         out["ok"] = True
     except Exception as exc:
         out["ok"] = False
@@ -616,69 +617,100 @@ def api_estado_altas():
 
 @app.route("/activar-cuenta/<token>", methods=["GET", "POST"])
 def activar_cuenta(token: str):
-    if session.get("user"):
-        return redirect(url_for("index"))
     from auth_registro import (
         activar_cuenta as registro_activar,
         formatear_cuit,
         notificar_admin_alta,
         obtener_solicitud,
+        _min_password_len,
     )
 
     lg = normalize_lang(session.get("lang"))
-    sol = obtener_solicitud(token)
-    if not sol and request.method == "GET":
+    min_len = _min_password_len()
+    try:
+        if session.get("user"):
+            return redirect(url_for("index"))
+
+        sol = obtener_solicitud(token)
+        if not sol and request.method == "GET":
+            return render_template(
+                "activar_cuenta.html",
+                token=token,
+                invalido=True,
+                solicitud=None,
+                min_len=min_len,
+            )
+
+        error_msg = None
+        if request.method == "POST":
+            pwd = request.form.get("password") or ""
+            pwd2 = request.form.get("password2") or ""
+            if pwd != pwd2:
+                error_msg = tr(lg, "alta_err_password_no_coincide")
+            else:
+                try:
+                    reg = registro_activar(token, pwd)
+                    try:
+                        notificar_admin_alta(
+                            reg["cuit"],
+                            str(reg.get("email") or ""),
+                            str(reg.get("nombre") or ""),
+                        )
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(
+                            "Alta guardada pero falló la notificación al admin: %s", exc
+                        )
+                    cuit_ok = formatear_cuit(str(reg["cuit"]))
+                    return render_template(
+                        "activar_cuenta.html",
+                        token=token,
+                        invalido=False,
+                        solicitud=None,
+                        cuit_fmt=cuit_ok,
+                        completado_pendiente=True,
+                        min_len=min_len,
+                    )
+                except ValueError as exc:
+                    key = f"alta_err_{exc}"
+                    error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+                except RuntimeError:
+                    error_msg = tr(lg, "alta_err_guardado")
+                except Exception as exc:
+                    logging.getLogger(__name__).exception(
+                        "Error inesperado al activar cuenta (token=%s…): %s",
+                        (token or "")[:12],
+                        exc,
+                    )
+                    error_msg = tr(lg, "alta_err_guardado")
+            sol = obtener_solicitud(token)
+
+        cuit_fmt = formatear_cuit(str(sol.get("cuit") or "")) if sol else ""
         return render_template(
             "activar_cuenta.html",
             token=token,
-            invalido=True,
-            solicitud=None,
+            invalido=not sol,
+            solicitud=sol,
+            cuit_fmt=cuit_fmt,
+            error_msg=error_msg,
+            min_len=min_len,
         )
-    error_msg = None
-    if request.method == "POST":
-        pwd = request.form.get("password") or ""
-        pwd2 = request.form.get("password2") or ""
-        if pwd != pwd2:
-            error_msg = tr(lg, "alta_err_password_no_coincide")
-        else:
-            try:
-                reg = registro_activar(token, pwd)
-                try:
-                    notificar_admin_alta(
-                        reg["cuit"],
-                        str(reg.get("email") or ""),
-                        str(reg.get("nombre") or ""),
-                    )
-                except Exception as exc:
-                    logging.getLogger(__name__).warning(
-                        "Alta guardada pero falló la notificación al admin: %s", exc
-                    )
-                cuit_ok = formatear_cuit(str(reg["cuit"]))
-                return render_template(
-                    "activar_cuenta.html",
-                    token=token,
-                    invalido=False,
-                    solicitud=None,
-                    cuit_fmt=cuit_ok,
-                    completado_pendiente=True,
-                    min_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
-                )
-            except ValueError as exc:
-                key = f"alta_err_{exc}"
-                error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
-            except RuntimeError:
-                error_msg = tr(lg, "alta_err_guardado")
-        sol = obtener_solicitud(token)
-    cuit_fmt = formatear_cuit(str(sol["cuit"])) if sol else ""
-    return render_template(
-        "activar_cuenta.html",
-        token=token,
-        invalido=not sol,
-        solicitud=sol,
-        cuit_fmt=cuit_fmt,
-        error_msg=error_msg,
-        min_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
-    )
+    except Exception as exc:
+        logging.getLogger(__name__).exception(
+            "activar_cuenta falló por completo (token=%s…): %s",
+            (token or "")[:12],
+            exc,
+        )
+        return (
+            render_template(
+                "activar_cuenta.html",
+                token=token,
+                invalido=True,
+                solicitud=None,
+                error_msg=tr(lg, "alta_err_guardado"),
+                min_len=min_len,
+            ),
+            200,
+        )
 
 
 @app.route("/admin/altas-usuarios", methods=["GET", "POST"])
