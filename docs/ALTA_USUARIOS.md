@@ -33,9 +33,10 @@ sequenceDiagram
     participant A as Admin
 
     C->>W: /solicitar-acceso (CUIT + email)
+    W->>A: Email (SMTP) — nueva solicitud
     W->>C: Enlace /activar-cuenta/TOKEN
     C->>W: Elige contraseña
-    W->>A: Email (SMTP) + registro en panel admin
+    W->>A: Email (SMTP) — listo para aprobar
     C->>W: Login con CUIT + contraseña
 ```
 
@@ -44,7 +45,7 @@ sequenceDiagram
 3. Email de contacto (obligatorio)  
 4. Sistema genera enlace válido **72 h** (configurable)  
 5. Cliente abre enlace → define contraseña (mín. 8 caracteres, **bcrypt**)  
-6. Vos recibís aviso por **email** (si configurás SMTP) y ves la alta en **Inicio → Altas de usuarios** (admin)
+6. Vos recibís **dos emails** (si SMTP está configurado): uno al completar el formulario inicial y otro cuando el cliente elige contraseña (para aprobar en el panel)
 
 ## Configuración en Render
 
@@ -58,6 +59,10 @@ SMTP_USER=tu@gmail.com
 SMTP_PASSWORD=contraseña-de-aplicacion
 SMTP_FROM=tu@gmail.com
 ```
+
+Gmail: usá una **contraseña de aplicación** (16 caracteres), no la clave normal de la cuenta. Si el puerto 587 falla en Render, probá `SMTP_PORT=465` y `SMTP_USE_SSL=1`.
+
+Tras una solicitud, en **Logs** de Render buscá `Email enviado a` o errores como `AUTH_ADMIN_NOTIFY_EMAIL no configurado` / `No se pudo enviar email`.
 
 ### WhatsApp
 

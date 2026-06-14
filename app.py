@@ -497,7 +497,7 @@ def solicitar_acceso():
     enlace_activacion = None
     error_msg = None
     if request.method == "POST":
-        from auth_registro import crear_solicitud, formatear_cuit, normalizar_cuit
+        from auth_registro import crear_solicitud, formatear_cuit, normalizar_cuit, notificar_admin_nueva_solicitud
 
         cuit = (request.form.get("cuit") or "").strip()
         email = (request.form.get("email") or "").strip()
@@ -514,6 +514,19 @@ def solicitar_acceso():
             )
             enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
             cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
+            try:
+                notificar_admin_nueva_solicitud(
+                    cuit,
+                    email,
+                    nombre,
+                    telefono_area=telefono_area,
+                    telefono_numero=telefono_numero,
+                    enlace_activacion=enlace_activacion,
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "Solicitud creada pero falló el email al admin: %s", exc
+                )
             flash(
                 tr(
                     lg,
@@ -609,6 +622,7 @@ def admin_altas_usuarios():
     _requiere_admin()
     from auth_registro import (
         aprobar_cuenta,
+        cambiar_contrasena_usuario,
         crear_solicitud,
         crear_usuario_admin,
         formatear_cuit,
@@ -745,6 +759,27 @@ def admin_altas_usuarios():
                     )
                 except ValueError as exc:
                     key = f"alta_err_{exc}"
+                    flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
+                except RuntimeError:
+                    flash(tr(lg, "alta_err_guardado"), "warning")
+        elif accion == "cambiar_contrasena":
+            pwd = request.form.get("password") or ""
+            pwd2 = request.form.get("password2") or ""
+            if pwd != pwd2:
+                flash(tr(lg, "alta_err_password_no_coincide"), "warning")
+            else:
+                try:
+                    cambiar_contrasena_usuario(cuit, pwd)
+                    flash(
+                        tr(
+                            lg,
+                            "admin_gestion_ok_clave",
+                            cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                        ),
+                        "success",
+                    )
+                except ValueError as exc:
+                    key = f"alta_err_{exc}" if str(exc).startswith("password_") else "admin_altas_err_no_encontrada"
                     flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
                 except RuntimeError:
                     flash(tr(lg, "alta_err_guardado"), "warning")

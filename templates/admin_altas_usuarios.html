@@ -51,6 +51,19 @@
       .enlace-box { word-break: break-all; background: var(--enlace-bg); padding: 0.6rem; border-radius: 6px; border: 1px dashed var(--border); }
       .form-grid { display: grid; gap: 0.65rem; }
       @media (min-width: 520px) { .form-grid-2 { grid-template-columns: 1fr 1fr; } }
+      .clave-wrap { display: flex; align-items: center; gap: 0.35rem; }
+      .clave-wrap .clave-input { flex: 1; min-width: 0; box-sizing: border-box; }
+      .clave-toggle-icon {
+        flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+        width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border);
+        border-radius: 4px; background: var(--bg-body); color: var(--text-primary); cursor: pointer;
+      }
+      .clave-toggle-icon svg { width: 1rem; height: 1rem; }
+      .clave-toggle-icon .icon-ocultar { display: none; }
+      .clave-toggle-icon.activo .icon-ver { display: none; }
+      .clave-toggle-icon.activo .icon-ocultar { display: block; }
+      .form-clave-admin { display: flex; flex-direction: column; gap: 0.35rem; min-width: 10.5rem; }
+      .form-clave-admin .clave-input { width: 100%; }
     </style>
   </head>
   <body>
@@ -86,11 +99,24 @@
           <div class="form-grid form-grid-2">
             <div>
               <label>{{ t('admin_alta_directa_password_label') }}</label><br />
-              <input name="password" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+              <div class="clave-wrap">
+                <input name="password" class="clave-input" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+                <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                  <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                </button>
+              </div>
+              <p class="help">{{ t('alta_password_help', min=min_password_len) }}</p>
             </div>
             <div>
               <label>{{ t('alta_password2_label') }}</label><br />
-              <input name="password2" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+              <div class="clave-wrap">
+                <input name="password2" class="clave-input" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+                <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                  <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                </button>
+              </div>
             </div>
           </div>
           <div>
@@ -199,6 +225,7 @@
             <th>{{ t('alta_email_label') }}</th>
             <th>{{ t('admin_gestion_col_vencimiento') }}</th>
             <th>{{ t('admin_gestion_col_dias') }}</th>
+            <th>{{ t('admin_gestion_col_clave') }}</th>
             <th>{{ t('admin_gestion_col_acciones') }}</th>
           </tr>
         </thead>
@@ -223,6 +250,27 @@
               {% elif s.dias_restantes == 1 %}1 día
               {% else %}{{ s.dias_restantes }} días
               {% endif %}
+            </td>
+            <td>
+              <form method="post" class="form-clave-admin">
+                <input type="hidden" name="accion" value="cambiar_contrasena" />
+                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                <div class="clave-wrap">
+                  <input class="clave-input" name="password" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" placeholder="{{ t('admin_gestion_clave_nueva') }}" aria-label="{{ t('admin_gestion_clave_nueva') }}" />
+                  <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                    <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  </button>
+                </div>
+                <div class="clave-wrap">
+                  <input class="clave-input" name="password2" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" placeholder="{{ t('alta_password2_label') }}" aria-label="{{ t('alta_password2_label') }}" />
+                  <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                    <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  </button>
+                </div>
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_clave') }}</button>
+              </form>
             </td>
             <td>
               <div class="acciones-suscripcion">
@@ -279,6 +327,7 @@
       {% endif %}
     </div>
     <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
   </body>
 </html>

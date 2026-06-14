@@ -762,6 +762,32 @@ def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:
     return True
 
 
+def cambiar_contrasena_usuario(cuit: str, nueva_password: str) -> None:
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        raise ValueError("no_encontrada")
+    pwd = nueva_password or ""
+    if len(pwd) < _min_password_len():
+        raise ValueError("password_corta")
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            raise ValueError("no_encontrada")
+        meta = users[u]
+        if not isinstance(meta, dict):
+            raise ValueError("no_encontrada")
+        if meta_es_admin(meta):
+            raise ValueError("no_encontrada")
+        if meta.get("pendiente_aprobacion"):
+            raise ValueError("no_encontrada")
+        meta["password"] = hash_password(pwd)
+        meta["password_cambiada_admin"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+
+
 def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
     u = resolver_clave_overlay(cuit)
     if not u:
@@ -902,6 +928,26 @@ def whatsapp_alta_admin_url(cuit: str, email: str, nombre: str = "") -> str:
     return f"https://wa.me/{tel}?text={quote(msg)}"
 
 
+def whatsapp_solicitud_admin_url(cuit: str, email: str, nombre: str = "") -> str:
+    tel = (os.environ.get("AUTH_ADMIN_WHATSAPP") or "5493513132914").strip()
+    cuit_fmt = formatear_cuit(cuit)
+    nom = f" ({nombre})" if nombre else ""
+    msg = (
+        f"Nueva solicitud de acceso en {APP_NAME}: CUIT {cuit_fmt}{nom}, "
+        f"email {email}. El cliente aún debe elegir contraseña por enlace."
+    )
+    return f"https://wa.me/{tel}?text={quote(msg)}"
+
+
+def _smtp_usar_ssl(port: int) -> bool:
+    flag = (os.environ.get("SMTP_USE_SSL") or "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    if flag in ("0", "false", "no", "off"):
+        return False
+    return port == 465
+
+
 def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     host = (os.environ.get("SMTP_HOST") or "").strip()
     user = (os.environ.get("SMTP_USER") or "").strip()
@@ -928,18 +974,80 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     msg["To"] = destino
     msg.set_content(cuerpo)
     try:
-        with smtplib.SMTP(host, port, timeout=25) as smtp:
-            smtp.ehlo()
-            if port != 25:
-                smtp.starttls()
+        if _smtp_usar_ssl(port):
+            with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+                smtp.login(user, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as smtp:
                 smtp.ehlo()
-            smtp.login(user, password)
-            smtp.send_message(msg)
+                if port != 25:
+                    smtp.starttls()
+                    smtp.ehlo()
+                smtp.login(user, password)
+                smtp.send_message(msg)
         _LOG.info("Email enviado a %s (asunto: %s)", destino, asunto)
         return True
     except Exception as exc:
         _LOG.error("No se pudo enviar email a %s: %s", destino, exc)
         return False
+
+
+def _email_admin_configurado() -> str:
+    return (os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL") or "").strip()
+
+
+def _avisar_admin_por_email(asunto: str, cuerpo: str, *, contexto: str) -> bool:
+    admin_mail = _email_admin_configurado()
+    if not admin_mail:
+        _LOG.warning(
+            "AUTH_ADMIN_NOTIFY_EMAIL no configurado; no se envía email (%s)",
+            contexto,
+        )
+        return False
+    ok = _enviar_email(admin_mail, asunto, cuerpo)
+    if not ok:
+        _LOG.error(
+            "Falló el email (%s) hacia %s (revisá SMTP_* en Render)",
+            contexto,
+            admin_mail,
+        )
+    return ok
+
+
+def notificar_admin_nueva_solicitud(
+    cuit: str,
+    email: str,
+    nombre: str = "",
+    *,
+    telefono_area: str = "",
+    telefono_numero: str = "",
+    enlace_activacion: str = "",
+) -> dict[str, Any]:
+    cuit_fmt = formatear_cuit(cuit)
+    nom_line = f"Nombre: {nombre}\n" if nombre else ""
+    tel_fmt = formatear_telefono(telefono_area, telefono_numero)
+    tel_line = f"Teléfono: {tel_fmt}\n" if tel_fmt else ""
+    enlace_line = f"\nEnlace de activación (para el cliente):\n{enlace_activacion}\n" if enlace_activacion else ""
+    cuerpo = (
+        f"Nueva solicitud de acceso en {APP_NAME}.\n\n"
+        f"CUIT (usuario): {cuit_fmt}\n"
+        f"{nom_line}"
+        f"Email de contacto: {email}\n"
+        f"{tel_line}\n"
+        f"El cliente completó el formulario inicial y debe elegir contraseña con el enlace.\n"
+        f"Cuando lo haga, recibirás otro aviso para aprobarlo en el panel «Altas de usuarios»."
+        f"{enlace_line}"
+    )
+    email_ok = _avisar_admin_por_email(
+        f"[{APP_NAME}] Nueva solicitud de acceso {cuit_fmt}",
+        cuerpo,
+        contexto=f"solicitud {cuit_fmt}",
+    )
+    return {
+        "email_enviado": email_ok,
+        "whatsapp_url": whatsapp_solicitud_admin_url(cuit, email, nombre),
+    }
 
 
 def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, Any]:
@@ -954,25 +1062,11 @@ def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, A
         f"La cuenta queda PENDIENTE hasta que la apruebes en el panel "
         f"«Altas de usuarios» (después de confirmar el pago).\n"
     )
-    admin_mail = (os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL") or "").strip()
-    email_ok = False
-    if not admin_mail:
-        _LOG.warning(
-            "AUTH_ADMIN_NOTIFY_EMAIL no configurado; no se avisa por email del alta de %s",
-            cuit_fmt,
-        )
-    else:
-        email_ok = _enviar_email(
-            admin_mail,
-            f"[{APP_NAME}] Alta de usuario {cuit_fmt}",
-            cuerpo,
-        )
-        if not email_ok:
-            _LOG.error(
-                "Falló el email de alta para %s hacia %s (revisá SMTP_* en Render)",
-                cuit_fmt,
-                admin_mail,
-            )
+    email_ok = _avisar_admin_por_email(
+        f"[{APP_NAME}] Alta de usuario {cuit_fmt}",
+        cuerpo,
+        contexto=f"contraseña definida {cuit_fmt}",
+    )
     return {
         "email_enviado": email_ok,
         "whatsapp_url": whatsapp_alta_admin_url(cuit, email, nombre),
