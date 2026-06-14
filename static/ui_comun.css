@@ -243,6 +243,41 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   max-width: none;
   max-height: none;
 }
+.cabecera--inicio {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 0.15rem 0 1.35rem;
+  --titulo-fs: clamp(1.25rem, 2.8vw, 1.65rem);
+  --subtitulo-fs: clamp(1rem, 2.2vw, 1.2rem);
+}
+.cabecera--inicio h1 {
+  flex: none;
+  width: 100%;
+  font-size: var(--titulo-fs);
+  line-height: 1.25;
+  margin-bottom: 0.35rem;
+}
+.cabecera--inicio .cabecera-subtitulo {
+  flex: none;
+  width: 100%;
+  margin: 0 0 0.5rem;
+  font-size: var(--subtitulo-fs);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-muted, #444);
+}
+.cabecera--inicio .isologo-wrap {
+  width: min(100%, calc(var(--titulo-fs) * 2 * 4.05));
+  line-height: 0;
+  margin-bottom: 0.4rem;
+}
+.cabecera--inicio .isologo-wrap .logo-sistema {
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+}
 .cabecera--login {
   flex-direction: column;
   align-items: center;

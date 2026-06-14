@@ -717,11 +717,13 @@ def admin_altas_usuarios():
         listar_pendientes_aprobacion,
         listar_usuarios_suscripcion,
         normalizar_cuit,
+        probar_email_admin,
         rechazar_cuenta,
         renovar_suscripcion,
         suspender_cuenta,
         reactivar_cuenta,
         actualizar_vencimiento,
+        estado_smtp,
         _dias_suscripcion,
     )
 
@@ -888,6 +890,22 @@ def admin_altas_usuarios():
                     flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
                 except RuntimeError:
                     flash(tr(lg, "alta_err_guardado"), "warning")
+        elif accion == "probar_email":
+            resultado = probar_email_admin()
+            if resultado.get("ok"):
+                flash(
+                    tr(lg, "admin_smtp_ok", destino=resultado.get("destino") or ""),
+                    "success",
+                )
+            else:
+                flash(
+                    tr(
+                        lg,
+                        "admin_smtp_err",
+                        detalle=resultado.get("error") or tr(lg, "admin_smtp_err_generico"),
+                    ),
+                    "warning",
+                )
         return redirect(url_for("admin_altas_usuarios"))
 
     pendientes = listar_pendientes_aprobacion()
@@ -904,6 +922,7 @@ def admin_altas_usuarios():
         dias_suscripcion=_dias_suscripcion(),
         fecha_default_alta=fecha_default_alta,
         min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
+        smtp_estado=estado_smtp(),
     )
 
 

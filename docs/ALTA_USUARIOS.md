@@ -2,6 +2,15 @@
 
 Flujo para que un cliente **solicite acceso**, **elija su contraseña** por enlace y vos recibas aviso **sin enviarle la clave por WhatsApp**.
 
+## Configuración verificada (Render + Neon, jun 2026)
+
+- Persistencia: **`DATABASE_URL`** (Neon). Sin `AUTH_REGISTRATIONS_DIR` ni `AUTH_USERS_JSON` en Render.
+- Duplicados y panel admin: solo blob **`usuarios_registrados`** en Neon (`cuenta_en_registro_altas`, `_cargar_overlay_completo`).
+- Email al admin en **segundo plano** (no bloquea el formulario; evita timeout 500 en Render).
+- Diagnóstico: panel **Altas de usuarios** → «Enviar correo de prueba», o `GET /api/estado-altas?probar_smtp=1`.
+
+Ver también regla Cursor `.cursor/rules/alta-usuarios-web.mdc`.
+
 ## Flujo recomendado (modo casero)
 
 1. Cliente te contacta por **WhatsApp** y abona la suscripción.  
@@ -54,15 +63,16 @@ sequenceDiagram
 ```env
 AUTH_ADMIN_NOTIFY_EMAIL=tu@gmail.com
 SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
+SMTP_PORT=465
+SMTP_USE_SSL=1
 SMTP_USER=tu@gmail.com
 SMTP_PASSWORD=contraseña-de-aplicacion
 SMTP_FROM=tu@gmail.com
 ```
 
-Gmail: usá una **contraseña de aplicación** (16 caracteres), no la clave normal de la cuenta. Si el puerto 587 falla en Render, probá `SMTP_PORT=465` y `SMTP_USE_SSL=1`.
+Gmail: usá una **contraseña de aplicación** (16 caracteres), no la clave normal de la cuenta. En Render suele ir mejor **465 + SSL** que 587.
 
-Tras una solicitud, en **Logs** de Render buscá `Email enviado a` o errores como `AUTH_ADMIN_NOTIFY_EMAIL no configurado` / `No se pudo enviar email`.
+Tras una solicitud, en **Logs** de Render buscá `Email enviado a` o errores como `AUTH_ADMIN_NOTIFY_EMAIL no configurado` / `No se pudo enviar email`. Revisá **spam**. Desde el panel admin podés usar **Enviar correo de prueba**.
 
 ### WhatsApp
 

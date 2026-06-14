@@ -125,6 +125,22 @@
       {% endfor %}
       {% endwith %}
 
+      <details class="admin-acordeon">
+        <summary class="admin-acordeon-cabecera">{{ t('admin_smtp_titulo') }}</summary>
+        <div class="admin-acordeon-cuerpo">
+          <p class="help">{{ t('admin_smtp_help') }}</p>
+          {% if smtp_estado.vars_completas %}
+          <p class="ok">{{ t('admin_smtp_vars_ok') }}</p>
+          {% else %}
+          <p class="warn">{{ t('admin_smtp_vars_faltan') }}</p>
+          {% endif %}
+          <form method="post">
+            <input type="hidden" name="accion" value="probar_email" />
+            <p><button type="submit" class="btn-renovar">{{ t('admin_smtp_btn_probar') }}</button></p>
+          </form>
+        </div>
+      </details>
+
       {% if enlace_generado %}
       <div class="panel">
         <h2>{{ t('admin_altas_enlace_titulo') }}</h2>

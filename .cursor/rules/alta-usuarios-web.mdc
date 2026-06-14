@@ -1,0 +1,66 @@
+---
+description: Configuración verificada de altas de usuarios en la web (Render + Neon)
+alwaysApply: false
+---
+
+# Altas de usuarios — web (Render + Neon)
+
+Configuración **verificada y operativa** (jun 2026). Usar como referencia al tocar altas, SMTP o panel admin.
+
+## Persistencia (Render)
+
+- **`DATABASE_URL`**: PostgreSQL Neon (connection string pooled).
+- **No usar** `AUTH_REGISTRATIONS_DIR` ni `AUTH_USERS_JSON` en Render.
+- Admin **Lucas** en blob `usuarios_registrados` de Neon (`rol: admin`), no en JSON legacy.
+- Blobs: `usuarios_registrados`, `solicitudes_pendientes`, `altas_completadas`.
+
+## Flujo de alta
+
+1. `/solicitar-acceso` → guarda en `solicitudes_pendientes` (Neon).
+2. `/activar-cuenta/<token>` → contraseña bcrypt en `usuarios_registrados` con `pendiente_aprobacion: true`, `activo: false`.
+3. Panel **Altas de usuarios** → lista pendientes **solo después** de definir contraseña.
+4. Aprobar → `activo: true`, suscripción `AUTH_SUBSCRIPTION_DAYS` días.
+
+## Código crítico (no romper)
+
+- `cuenta_en_registro_altas()`: duplicados solo contra Neon, no `AUTH_USERS_JSON`.
+- `_cargar_overlay_completo()` / `_guardar_overlay_completo()`: lectura/escritura del blob.
+- `cargar_usuarios_overlay()` debe usar `_cargar_overlay_completo()` (panel admin).
+- Email al admin: **segundo plano** (`notificar_*_async`); timeout HTTP corto, SMTP background 25 s.
+- `/solicitar-acceso` y `/activar-cuenta`: try/except completo; nunca 500 por fallo de guardado o SMTP.
+
+## Variables Render recomendadas
+
+```env
+DATABASE_URL=postgresql://...
+AUTH_ALTA_PUBLICA=1
+AUTH_ADMIN_USER=Lucas
+AUTH_ADMIN_NOTIFY_EMAIL=tu@gmail.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USE_SSL=1
+SMTP_USER=tu@gmail.com
+SMTP_PASSWORD=contraseña-aplicacion-16-chars
+SMTP_FROM=tu@gmail.com
+```
+
+Gmail: contraseña de **aplicación**, no la clave normal. `SMTP_FROM` = mismo que `SMTP_USER`.
+
+## Diagnóstico
+
+- `GET /api/estado-altas?probar_smtp=1`
+- Panel admin → **Altas de usuarios** → acordeón «Notificación por email» → **Enviar correo de prueba**
+- Logs Render: `Email enviado a` vs `No se pudo enviar email`
+
+## Verificación local
+
+```powershell
+python tools/verificar_alta_usuarios.py
+```
+
+Debe terminar en **TODO OPERATIVO**.
+
+## Compilado (.exe)
+
+- Sin `auth_users.json` si hay `auth_remote.txt` apuntando a `/api/auth-users` + `AUTH_USERS_REMOTE_TOKEN`.
+- Login portable sincroniza desde la web; procesamiento Excel sigue local.

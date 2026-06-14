@@ -8,10 +8,12 @@ import os
 import re
 import secrets
 import smtplib
+import ssl
 import sys
 import tempfile
 import threading
 from datetime import date, datetime, timedelta, timezone
+from email.header import Header
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -1065,13 +1067,27 @@ def _smtp_timeout_sec() -> int:
         return 8
 
 
-def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
+def _smtp_timeout_background() -> int:
+    raw = (os.environ.get("SMTP_TIMEOUT_BACKGROUND_SEC") or "25").strip()
+    try:
+        return max(8, min(int(raw), 60))
+    except ValueError:
+        return 25
+
+
+def _enviar_email(
+    destino: str,
+    asunto: str,
+    cuerpo: str,
+    *,
+    timeout: int | None = None,
+) -> bool:
     host = (os.environ.get("SMTP_HOST") or "").strip()
     user = (os.environ.get("SMTP_USER") or "").strip()
     # Gmail muestra la contraseña de aplicación con espacios; SMTP exige 16 caracteres seguidos.
     password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
     port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
-    timeout = _smtp_timeout_sec()
+    wait = timeout if timeout is not None else _smtp_timeout_sec()
     if not host:
         _LOG.warning("SMTP_HOST no configurado; email no enviado")
         return False
@@ -1087,17 +1103,18 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
         port = 587
     remitente = (os.environ.get("SMTP_FROM") or user or f"noreply@{host}").strip()
     msg = EmailMessage()
-    msg["Subject"] = asunto
+    msg["Subject"] = str(Header(asunto, "utf-8"))
     msg["From"] = remitente
     msg["To"] = destino
-    msg.set_content(cuerpo)
+    msg.set_content(cuerpo, charset="utf-8")
     try:
         if _smtp_usar_ssl(port):
-            with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, timeout=wait, context=ctx) as smtp:
                 smtp.login(user, password)
                 smtp.send_message(msg)
         else:
-            with smtplib.SMTP(host, port, timeout=timeout) as smtp:
+            with smtplib.SMTP(host, port, timeout=wait) as smtp:
                 smtp.ehlo()
                 if port != 25:
                     smtp.starttls()
@@ -1115,7 +1132,13 @@ def _email_admin_configurado() -> str:
     return (os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL") or "").strip()
 
 
-def _avisar_admin_por_email(asunto: str, cuerpo: str, *, contexto: str) -> bool:
+def _avisar_admin_por_email(
+    asunto: str,
+    cuerpo: str,
+    *,
+    contexto: str,
+    timeout: int | None = None,
+) -> bool:
     admin_mail = _email_admin_configurado()
     if not admin_mail:
         _LOG.warning(
@@ -1123,7 +1146,7 @@ def _avisar_admin_por_email(asunto: str, cuerpo: str, *, contexto: str) -> bool:
             contexto,
         )
         return False
-    ok = _enviar_email(admin_mail, asunto, cuerpo)
+    ok = _enviar_email(admin_mail, asunto, cuerpo, timeout=timeout)
     if not ok:
         _LOG.error(
             "Falló el email (%s) hacia %s (revisá SMTP_* en Render)",
@@ -1194,11 +1217,45 @@ def _notificar_en_segundo_plano(fn, *args, **kwargs) -> None:
 
     def _run() -> None:
         try:
-            fn(*args, **kwargs)
+            _LOG.info("Iniciando notificación por email en segundo plano (%s)", fn.__name__)
+            resultado = fn(*args, **kwargs)
+            if isinstance(resultado, dict) and not resultado.get("email_enviado"):
+                _LOG.error(
+                    "Notificación %s: email no enviado (revisá SMTP_* y AUTH_ADMIN_NOTIFY_EMAIL)",
+                    fn.__name__,
+                )
+            else:
+                _LOG.info("Notificación %s completada", fn.__name__)
         except Exception as exc:
-            _LOG.warning("Notificación en segundo plano falló: %s", exc)
+            _LOG.exception("Notificación en segundo plano falló (%s): %s", fn.__name__, exc)
 
-    threading.Thread(target=_run, daemon=True, name="auth-notify").start()
+    threading.Thread(target=_run, daemon=False, name="auth-notify").start()
+
+
+def probar_email_admin() -> dict[str, Any]:
+    """Envía un correo de prueba al admin (panel de diagnóstico)."""
+    admin_mail = _email_admin_configurado()
+    if not admin_mail:
+        return {"ok": False, "error": "AUTH_ADMIN_NOTIFY_EMAIL no configurado"}
+    asunto = f"[{APP_NAME}] Prueba de notificación de altas"
+    cuerpo = (
+        f"Correo de prueba desde {APP_NAME}.\n\n"
+        "Si lo recibís, SMTP y AUTH_ADMIN_NOTIFY_EMAIL están bien configurados.\n"
+        "Revisá también la carpeta de spam."
+    )
+    ok = _enviar_email(
+        admin_mail,
+        asunto,
+        cuerpo,
+        timeout=_smtp_timeout_background(),
+    )
+    if ok:
+        return {"ok": True, "destino": admin_mail}
+    return {
+        "ok": False,
+        "destino": admin_mail,
+        "error": "No se pudo enviar. Revisá SMTP_* en Render y los logs del servicio.",
+    }
 
 
 def notificar_admin_nueva_solicitud(
@@ -1229,6 +1286,7 @@ def notificar_admin_nueva_solicitud(
         f"[{APP_NAME}] Nueva solicitud de acceso {cuit_fmt}",
         cuerpo,
         contexto=f"solicitud {cuit_fmt}",
+        timeout=_smtp_timeout_background(),
     )
     return {
         "email_enviado": email_ok,
@@ -1256,6 +1314,7 @@ def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, A
         f"[{APP_NAME}] Alta de usuario {cuit_fmt}",
         cuerpo,
         contexto=f"contraseña definida {cuit_fmt}",
+        timeout=_smtp_timeout_background(),
     )
     return {
         "email_enviado": email_ok,
