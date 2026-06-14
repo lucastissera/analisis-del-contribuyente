@@ -694,7 +694,8 @@ def whatsapp_alta_admin_url(cuit: str, email: str, nombre: str = "") -> str:
 def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     host = (os.environ.get("SMTP_HOST") or "").strip()
     user = (os.environ.get("SMTP_USER") or "").strip()
-    password = (os.environ.get("SMTP_PASSWORD") or "").strip()
+    # Gmail muestra la contraseña de aplicación con espacios; SMTP exige 16 caracteres seguidos.
+    password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
     port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
     if not host:
         _LOG.warning("SMTP_HOST no configurado; email no enviado")
