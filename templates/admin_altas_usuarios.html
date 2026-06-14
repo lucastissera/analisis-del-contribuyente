@@ -49,6 +49,8 @@
       .acciones-suscripcion { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
       .suspendida { color: var(--color-warn); font-weight: bold; }
       .enlace-box { word-break: break-all; background: var(--enlace-bg); padding: 0.6rem; border-radius: 6px; border: 1px dashed var(--border); }
+      .form-grid { display: grid; gap: 0.65rem; }
+      @media (min-width: 520px) { .form-grid-2 { grid-template-columns: 1fr 1fr; } }
     </style>
   </head>
   <body>
@@ -70,6 +72,48 @@
         <div class="enlace-box"><a href="{{ enlace_generado }}">{{ enlace_generado }}</a></div>
       </div>
       {% endif %}
+
+      <div class="panel">
+        <h2>{{ t('admin_alta_directa_titulo') }}</h2>
+        <p class="help">{{ t('admin_alta_directa_help') }}</p>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="accion" value="alta_directa" />
+          <div>
+            <label>{{ t('admin_alta_directa_usuario_label') }}</label><br />
+            <input name="cuit" required placeholder="Cliente01" autocomplete="off" pattern="[A-Za-z0-9]{3,40}" title="{{ t('admin_alta_directa_usuario_help') }}" />
+            <p class="help">{{ t('admin_alta_directa_usuario_help') }}</p>
+          </div>
+          <div class="form-grid form-grid-2">
+            <div>
+              <label>{{ t('admin_alta_directa_password_label') }}</label><br />
+              <input name="password" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+            </div>
+            <div>
+              <label>{{ t('alta_password2_label') }}</label><br />
+              <input name="password2" type="password" autocomplete="new-password" required minlength="{{ min_password_len }}" />
+            </div>
+          </div>
+          <div>
+            <label>{{ t('admin_alta_directa_vencimiento_label') }}</label><br />
+            <input name="valido_hasta" type="date" required value="{{ fecha_default_alta }}" />
+          </div>
+          <div>
+            <label>{{ t('alta_email_label') }}</label><br />
+            <input name="email" type="email" autocomplete="email" />
+          </div>
+          <div>
+            <label>{{ t('alta_telefono_numero_label') }}</label><br />
+            <input name="telefono_area" type="text" inputmode="numeric" placeholder="351" style="width:5rem" />
+            <input name="telefono_numero" type="text" inputmode="numeric" placeholder="1234567" style="width:8rem" />
+            <p class="help">{{ t('alta_telefono_help') }}</p>
+          </div>
+          <div>
+            <label>{{ t('alta_nombre_label') }}</label><br />
+            <input name="nombre" type="text" autocomplete="name" />
+          </div>
+          <p><button type="submit" class="btn-aprob">{{ t('admin_alta_directa_btn') }}</button></p>
+        </form>
+      </div>
 
       <div class="panel">
         <h2>{{ t('admin_altas_generar_titulo') }}</h2>

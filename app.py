@@ -610,6 +610,7 @@ def admin_altas_usuarios():
     from auth_registro import (
         aprobar_cuenta,
         crear_solicitud,
+        crear_usuario_admin,
         formatear_cuit,
         listar_altas_recientes,
         listar_pendientes_aprobacion,
@@ -712,10 +713,48 @@ def admin_altas_usuarios():
             except ValueError as exc:
                 key = f"alta_err_{exc}"
                 flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
+        elif accion == "alta_directa":
+            pwd = request.form.get("password") or ""
+            pwd2 = request.form.get("password2") or ""
+            valido_hasta = (request.form.get("valido_hasta") or "").strip()
+            email = (request.form.get("email") or "").strip()
+            nombre = (request.form.get("nombre") or "").strip()
+            telefono_area = (request.form.get("telefono_area") or "").strip()
+            telefono_numero = (request.form.get("telefono_numero") or "").strip()
+            if pwd != pwd2:
+                flash(tr(lg, "alta_err_password_no_coincide"), "warning")
+            else:
+                try:
+                    reg = crear_usuario_admin(
+                        cuit=cuit,
+                        password=pwd,
+                        valido_hasta=valido_hasta,
+                        email=email,
+                        nombre=nombre,
+                        telefono_area=telefono_area,
+                        telefono_numero=telefono_numero,
+                    )
+                    flash(
+                        tr(
+                            lg,
+                            "admin_alta_directa_ok",
+                            cuit=reg["cuit_fmt"],
+                            fecha=reg["valido_hasta_fmt"],
+                        ),
+                        "success",
+                    )
+                except ValueError as exc:
+                    key = f"alta_err_{exc}"
+                    flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
+                except RuntimeError:
+                    flash(tr(lg, "alta_err_guardado"), "warning")
         return redirect(url_for("admin_altas_usuarios"))
 
     pendientes = listar_pendientes_aprobacion()
     altas = listar_altas_recientes(40)
+    from datetime import date as _date_cls, timedelta as _td_cls
+
+    fecha_default_alta = (_date_cls.today() + _td_cls(days=_dias_suscripcion())).isoformat()
     return render_template(
         "admin_altas_usuarios.html",
         pendientes=pendientes,
@@ -723,6 +762,8 @@ def admin_altas_usuarios():
         altas=altas,
         enlace_generado=enlace_generado,
         dias_suscripcion=_dias_suscripcion(),
+        fecha_default_alta=fecha_default_alta,
+        min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
     )
 
 

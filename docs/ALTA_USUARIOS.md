@@ -92,6 +92,7 @@ Sin ninguno de los dos, los datos van al disco temporal del contenedor y **se pi
 
 - **Lucas (admin)** con `DATABASE_URL` se guarda en Neon (`usuarios_registrados`, clave `Lucas`, `rol: admin`, contraseña bcrypt). Podés quitar `AUTH_USERS_JSON` de Render.
 - **Clientes nuevos** quedan en el mismo blob con CUIT como clave y contraseña **hasheada**.
+- **Alta directa (admin):** en **Inicio → Altas de usuarios**, sección «Alta directa (CUIT y contraseña)»: definís CUIT, contraseña y fecha de vencimiento; el usuario queda activo al instante y se guarda en Neon (igual que el resto).
 - Los portables sincronizados reciben esos usuarios vía `/api/auth-users` (hashes bcrypt).
 
 ## Recuperación de contraseña

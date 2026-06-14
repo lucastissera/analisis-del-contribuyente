@@ -31,7 +31,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--valido-hasta",
-        default=(os.environ.get("AUTH_ADMIN_VALIDO_HASTA") or "2027-06-08").strip(),
+        default=(os.environ.get("AUTH_ADMIN_VALIDO_HASTA") or "").strip(),
+        help="Fecha YYYY-MM-DD; por defecto ~100 años desde hoy",
     )
     args = parser.parse_args()
 
@@ -46,7 +47,7 @@ def main() -> int:
         return 1
 
     from auth_registro import admin_en_overlay, guardar_admin_sistema
-    from auth_registro import _parse_fecha_local  # noqa: PLC2701
+    from auth_registro import _admin_valido_hasta_default, _parse_fecha_local  # noqa: PLC2701
     from auth_registro_db import enabled, estado_db
 
     if not enabled():
@@ -54,12 +55,12 @@ def main() -> int:
         return 1
 
     previo = admin_en_overlay(args.user)
-    vh = _parse_fecha_local(args.valido_hasta)
+    vh = _parse_fecha_local(args.valido_hasta) if args.valido_hasta else _admin_valido_hasta_default()
     guardar_admin_sistema(args.user, args.password, valido_hasta=vh)
     st = estado_db()
     accion = "actualizado" if previo else "creado"
     print(f"OK: administrador «{args.user}» {accion} en PostgreSQL.")
-    print(f"    Vencimiento: {args.valido_hasta}")
+    print(f"    Vencimiento: {vh.isoformat()}")
     print(f"    Estado DB: {st}")
     print()
     print("Próximo paso en Render:")

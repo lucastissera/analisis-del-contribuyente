@@ -562,6 +562,11 @@ def _resolver_clave_usuario(username: str) -> str:
     if not u:
         return u
     try:
+        from auth_registro import resolver_clave_overlay
+
+        clave = resolver_clave_overlay(u)
+        if clave:
+            return clave
         from auth_registro import normalizar_cuit
 
         nu = normalizar_cuit(u)

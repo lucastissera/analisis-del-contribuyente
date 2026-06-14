@@ -26,6 +26,7 @@ _lock = threading.Lock()
 
 _CUIT_RE = re.compile(r"^\d{11}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_USUARIO_ADMIN_RE = re.compile(r"^[A-Za-z0-9]{3,40}$")
 
 
 def dir_auth_servidor() -> Path:
@@ -112,6 +113,28 @@ def normalizar_cuit(val: str, *, validar_digito: bool = False) -> str | None:
     return digits
 
 
+def normalizar_usuario_admin(val: str) -> str | None:
+    """Usuario de alta directa admin: letras y números (3–40), sin validar CUIT."""
+    s = (val or "").strip()
+    if not _USUARIO_ADMIN_RE.match(s):
+        return None
+    return s
+
+
+def resolver_clave_overlay(val: str) -> str | None:
+    """Clave en usuarios_registrados (usuario libre o CUIT normalizado)."""
+    raw = (val or "").strip()
+    if not raw:
+        return None
+    overlay = cargar_usuarios_overlay()
+    if raw in overlay:
+        return raw
+    u = normalizar_cuit(raw)
+    if u and u in overlay:
+        return u
+    return None
+
+
 def formatear_cuit(cuit: str) -> str:
     d = normalizar_cuit(cuit) or cuit
     if len(d) == 11:
@@ -136,6 +159,14 @@ def admin_en_overlay(username: str | None = None) -> dict[str, Any] | None:
     return None
 
 
+def _admin_valido_hasta_default() -> date:
+    raw = (os.environ.get("AUTH_ADMIN_VALIDO_HASTA") or "").strip()
+    parsed = _parse_fecha_local(raw) if raw else None
+    if parsed:
+        return parsed
+    return date.today() + timedelta(days=365 * 100 + 25)
+
+
 def guardar_admin_sistema(
     username: str,
     password: str,
@@ -146,9 +177,7 @@ def guardar_admin_sistema(
     pwd = password or ""
     if not u or not pwd:
         raise ValueError("admin_invalido")
-    vh = valido_hasta or _parse_fecha_local(
-        (os.environ.get("AUTH_ADMIN_VALIDO_HASTA") or "2027-06-08").strip()
-    ) or date(2027, 6, 8)
+    vh = valido_hasta or _admin_valido_hasta_default()
     with _lock:
         path = _path_usuarios_overlay()
         overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
@@ -309,10 +338,10 @@ def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
 
 
 def _meta_overlay(cuit: str) -> dict[str, Any] | None:
-    u = normalizar_cuit(cuit)
-    if not u:
+    clave = resolver_clave_overlay(cuit)
+    if not clave:
         return None
-    meta = cargar_usuarios_overlay().get(u)
+    meta = cargar_usuarios_overlay().get(clave)
     return meta if isinstance(meta, dict) else None
 
 
@@ -360,17 +389,22 @@ def alta_publica_habilitada() -> bool:
 
 
 def usuario_existe(cuit: str) -> bool:
-    u = normalizar_cuit(cuit)
-    if not u:
+    raw = (cuit or "").strip()
+    if not raw:
         return False
     overlay = cargar_usuarios_overlay()
-    if u in overlay:
+    if raw in overlay:
+        return True
+    u = normalizar_cuit(raw)
+    if u and u in overlay:
         return True
     from auth import _load_cuentas_sin_env_json, _usuarios_desde_env_json
 
     env = _usuarios_desde_env_json()
     base = env if env else _load_cuentas_sin_env_json()
-    return u in base
+    if raw in base:
+        return True
+    return bool(u and u in base)
 
 
 def _cargar_solicitudes() -> dict[str, Any]:
@@ -511,6 +545,76 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
     return registro_alta
 
 
+def crear_usuario_admin(
+    *,
+    cuit: str,
+    password: str,
+    valido_hasta: str,
+    email: str = "",
+    nombre: str = "",
+    telefono_area: str = "",
+    telefono_numero: str = "",
+) -> dict[str, Any]:
+    """Alta manual desde el panel admin: usuario, clave y vencimiento definidos por el administrador."""
+    u = normalizar_usuario_admin(cuit)
+    if not u:
+        raise ValueError("usuario_invalido")
+    pwd = password or ""
+    if len(pwd) < _min_password_len():
+        raise ValueError("password_corta")
+    vh = _parse_fecha_local(valido_hasta)
+    if not vh:
+        raise ValueError("vencimiento_invalido")
+    hoy = date.today()
+    if vh < hoy:
+        raise ValueError("vencimiento_pasado")
+    if usuario_existe(u):
+        raise ValueError("usuario_duplicado")
+
+    em = (email or "").strip().lower()
+    if em and not _EMAIL_RE.match(em):
+        raise ValueError("email_invalido")
+
+    tel_area = ""
+    tel_numero = ""
+    if (telefono_area or "").strip() or (telefono_numero or "").strip():
+        tel = normalizar_telefono(telefono_area, telefono_numero)
+        if not tel:
+            raise ValueError("telefono_invalido")
+        tel_area, tel_numero = tel
+
+    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict):
+            overlay["users"] = {}
+            users = overlay["users"]
+        users[u] = {
+            "password": hash_password(pwd),
+            "email": em,
+            "nombre": (nombre or "").strip(),
+            "telefono_area": tel_area,
+            "telefono_numero": tel_numero,
+            "valido_desde": hoy.isoformat(),
+            "valido_hasta": vh.isoformat(),
+            "activo": True,
+            "pendiente_aprobacion": False,
+            "alta_admin": ahora,
+            "aprobado_en": ahora,
+        }
+        overlay["updated_at"] = ahora
+        _write_store("usuarios_registrados", overlay, path)
+
+    return {
+        "cuit": u,
+        "cuit_fmt": formatear_cuit(u),
+        "valido_hasta": vh.isoformat(),
+        "valido_hasta_fmt": vh.strftime("%d/%m/%Y"),
+    }
+
+
 def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for cuit, meta in cargar_usuarios_overlay().items():
@@ -535,7 +639,7 @@ def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
 
 
 def aprobar_cuenta(cuit: str) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     dias = _dias_suscripcion()
@@ -596,7 +700,7 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
 
 
 def suspender_cuenta(cuit: str) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     with _lock:
@@ -616,7 +720,7 @@ def suspender_cuenta(cuit: str) -> bool:
 
 
 def reactivar_cuenta(cuit: str) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     with _lock:
@@ -637,7 +741,7 @@ def reactivar_cuenta(cuit: str) -> bool:
 
 
 def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     vh = _parse_fecha_local(valido_hasta)
@@ -659,7 +763,7 @@ def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:
 
 
 def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     duracion = dias if dias is not None else _dias_suscripcion()
@@ -748,7 +852,7 @@ def restablecer_contrasena(cuit: str, email: str, nueva_password: str) -> bool:
 
 
 def rechazar_cuenta(cuit: str) -> bool:
-    u = normalizar_cuit(cuit)
+    u = resolver_clave_overlay(cuit)
     if not u:
         return False
     with _lock:
