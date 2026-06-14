@@ -305,37 +305,36 @@ def _escribir_json(path: Path, data: Any) -> None:
 
 
 def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
+    db = False
     try:
         from auth_registro_db import enabled, read_json
 
-        if enabled():
+        db = enabled()
+        if db:
             return read_json(name, default)
     except Exception as exc:
-        _LOG.warning("Lectura PostgreSQL falló (%s), usando disco: %s", name, exc)
+        _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
+        if db:
+            return default
     return _leer_json(_resolve_store_path(name, path), default)
 
 
 def _write_store(name: str, data: Any, path: Path | None = None) -> None:
+    db = False
     try:
         from auth_registro_db import enabled, write_json
 
-        if enabled():
+        db = enabled()
+        if db:
             write_json(name, data)
             return
     except Exception as exc:
         _LOG.error("Escritura PostgreSQL falló (%s): %s", name, exc)
-        try:
-            from auth_registro_db import enabled as db_on
-
-            if db_on():
-                raise RuntimeError(
-                    "DATABASE_URL configurada pero no se pudo escribir en PostgreSQL. "
-                    "Revisá la conexión Neon en Render."
-                ) from exc
-        except RuntimeError:
-            raise
-        except Exception:
-            pass
+        if db:
+            raise RuntimeError(
+                "DATABASE_URL configurada pero no se pudo escribir en PostgreSQL. "
+                "Revisá la conexión Neon en Render."
+            ) from exc
         _LOG.warning("Escritura en disco local como respaldo (%s)", name)
     _escribir_json(_resolve_store_path(name, path), data)
 
@@ -417,19 +416,23 @@ def usuario_existe(cuit: str) -> bool:
     raw = (cuit or "").strip()
     if not raw:
         return False
-    overlay = cargar_usuarios_overlay()
-    if raw in overlay:
-        return True
-    u = normalizar_cuit(raw)
-    if u and u in overlay:
-        return True
-    from auth import _load_cuentas_sin_env_json, _usuarios_desde_env_json
+    try:
+        overlay = cargar_usuarios_overlay()
+        if raw in overlay:
+            return True
+        u = normalizar_cuit(raw)
+        if u and u in overlay:
+            return True
+        from auth import _load_cuentas_sin_env_json, _usuarios_desde_env_json
 
-    env = _usuarios_desde_env_json()
-    base = env if env else _load_cuentas_sin_env_json()
-    if raw in base:
-        return True
-    return bool(u and u in base)
+        env = _usuarios_desde_env_json()
+        base = env if env else _load_cuentas_sin_env_json()
+        if raw in base:
+            return True
+        return bool(u and u in base)
+    except Exception as exc:
+        _LOG.warning("No se pudo verificar si existe el usuario %s: %s", raw, exc)
+        return False
 
 
 def _cargar_solicitudes() -> dict[str, Any]:
@@ -1076,6 +1079,62 @@ def _avisar_admin_por_email(asunto: str, cuerpo: str, *, contexto: str) -> bool:
             admin_mail,
         )
     return ok
+
+
+def estado_smtp(*, probar_conexion: bool = False) -> dict[str, Any]:
+    """Diagnóstico de variables SMTP (sin exponer contraseñas)."""
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
+    notify = _email_admin_configurado()
+    port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    from_addr = (os.environ.get("SMTP_FROM") or user or "").strip()
+    use_ssl = _smtp_usar_ssl(port)
+    vars_presentes = {
+        "AUTH_ADMIN_NOTIFY_EMAIL": bool(notify),
+        "SMTP_HOST": bool(host),
+        "SMTP_USER": bool(user),
+        "SMTP_PASSWORD": bool(password),
+        "SMTP_FROM": bool(from_addr),
+    }
+    out: dict[str, Any] = {
+        "vars_completas": all(vars_presentes.values()),
+        "vars_presentes": vars_presentes,
+        "puerto": port,
+        "use_ssl": use_ssl,
+        "notify_email": notify or None,
+        "smtp_from": from_addr or None,
+        "avisos": [
+            "Gmail: contraseña de aplicación (16 caracteres), no la clave normal.",
+            "En Render, si el puerto 587 falla: SMTP_PORT=465 y SMTP_USE_SSL=1.",
+            "Revisá spam y que SMTP_FROM coincida con SMTP_USER en Gmail.",
+        ],
+    }
+    if probar_conexion:
+        if not (host and user and password):
+            out["conexion_ok"] = False
+            out["conexion_error"] = "Faltan SMTP_HOST, SMTP_USER o SMTP_PASSWORD"
+        else:
+            try:
+                if use_ssl:
+                    with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
+                        smtp.login(user, password)
+                else:
+                    with smtplib.SMTP(host, port, timeout=20) as smtp:
+                        smtp.ehlo()
+                        if port != 25:
+                            smtp.starttls()
+                            smtp.ehlo()
+                        smtp.login(user, password)
+                out["conexion_ok"] = True
+            except Exception as exc:
+                out["conexion_ok"] = False
+                out["conexion_error"] = str(exc)
+    return out
 
 
 def notificar_admin_nueva_solicitud(

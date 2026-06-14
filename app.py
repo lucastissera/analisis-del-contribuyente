@@ -311,6 +311,7 @@ def _session_idle_and_login():
         "desktop_quit",
         "logout",
         "api_auth_users",
+        "api_estado_altas",
         "solicitar_acceso",
         "activar_cuenta",
         "olvide_contrasena",
@@ -489,72 +490,128 @@ def set_lang(code: str):
 def solicitar_acceso():
     from auth_registro import _token_horas, alta_publica_habilitada
 
-    if not alta_publica_habilitada():
-        return redirect(url_for("login"))
-    if session.get("user"):
-        return redirect(url_for("index"))
     lg = normalize_lang(session.get("lang"))
     enlace_activacion = None
     error_msg = None
-    if request.method == "POST":
-        from auth_registro import crear_solicitud, formatear_cuit, normalizar_cuit, notificar_admin_nueva_solicitud
-
-        cuit = (request.form.get("cuit") or "").strip()
-        email = (request.form.get("email") or "").strip()
-        nombre = (request.form.get("nombre") or "").strip()
-        telefono_area = (request.form.get("telefono_area") or "").strip()
-        telefono_numero = (request.form.get("telefono_numero") or "").strip()
-        try:
-            token, _reg = crear_solicitud(
-                cuit=cuit,
-                email=email,
-                nombre=nombre,
-                telefono_area=telefono_area,
-                telefono_numero=telefono_numero,
+    try:
+        if not alta_publica_habilitada():
+            return redirect(url_for("login"))
+        if session.get("user"):
+            return redirect(url_for("index"))
+        if request.method == "POST":
+            from auth_registro import (
+                crear_solicitud,
+                formatear_cuit,
+                normalizar_cuit,
+                notificar_admin_nueva_solicitud,
             )
-            enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
-            cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
+
+            cuit = (request.form.get("cuit") or "").strip()
+            email = (request.form.get("email") or "").strip()
+            nombre = (request.form.get("nombre") or "").strip()
+            telefono_area = (request.form.get("telefono_area") or "").strip()
+            telefono_numero = (request.form.get("telefono_numero") or "").strip()
             try:
-                notificar_admin_nueva_solicitud(
-                    cuit,
-                    email,
-                    nombre,
+                token, _reg = crear_solicitud(
+                    cuit=cuit,
+                    email=email,
+                    nombre=nombre,
                     telefono_area=telefono_area,
                     telefono_numero=telefono_numero,
-                    enlace_activacion=enlace_activacion,
                 )
+                enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
+                cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
+                try:
+                    notificar_admin_nueva_solicitud(
+                        cuit,
+                        email,
+                        nombre,
+                        telefono_area=telefono_area,
+                        telefono_numero=telefono_numero,
+                        enlace_activacion=enlace_activacion,
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "Solicitud creada pero falló el email al admin: %s", exc
+                    )
+                flash(
+                    tr(
+                        lg,
+                        "alta_ok_solicitud",
+                        cuit=cuit_ok,
+                        horas=_token_horas(),
+                    ),
+                    "success",
+                )
+            except ValueError as exc:
+                key = f"alta_err_{exc}"
+                error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+            except RuntimeError:
+                error_msg = tr(lg, "alta_err_solicitud_guardado")
             except Exception as exc:
-                logging.getLogger(__name__).warning(
-                    "Solicitud creada pero falló el email al admin: %s", exc
+                logging.getLogger(__name__).exception(
+                    "Error inesperado al crear solicitud de alta (CUIT=%s): %s",
+                    cuit,
+                    exc,
                 )
-            flash(
-                tr(
-                    lg,
-                    "alta_ok_solicitud",
-                    cuit=cuit_ok,
-                    horas=_token_horas(),
-                ),
-                "success",
-            )
-        except ValueError as exc:
-            key = f"alta_err_{exc}"
-            error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
-        except RuntimeError:
-            error_msg = tr(lg, "alta_err_solicitud_guardado")
-        except Exception as exc:
-            logging.getLogger(__name__).exception(
-                "Error inesperado al crear solicitud de alta (CUIT=%s): %s",
-                cuit,
-                exc,
-            )
-            error_msg = tr(lg, "alta_err_solicitud_guardado")
-    return render_template(
-        "solicitar_acceso.html",
-        enlace_activacion=enlace_activacion,
-        error_msg=error_msg,
-        token_horas=_token_horas(),
-        whatsapp_url=whatsapp_new_user_url(),
+                error_msg = tr(lg, "alta_err_solicitud_guardado")
+        return render_template(
+            "solicitar_acceso.html",
+            enlace_activacion=enlace_activacion,
+            error_msg=error_msg,
+            token_horas=_token_horas(),
+            whatsapp_url=whatsapp_new_user_url(),
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).exception("solicitar_acceso falló por completo: %s", exc)
+        try:
+            horas = _token_horas()
+        except Exception:
+            horas = 72
+        return (
+            render_template(
+                "solicitar_acceso.html",
+                enlace_activacion=None,
+                error_msg=tr(lg, "alta_err_solicitud_guardado"),
+                token_horas=horas,
+                whatsapp_url=whatsapp_new_user_url(),
+            ),
+            200,
+        )
+
+
+@app.route("/api/estado-altas")
+def api_estado_altas():
+    """Diagnóstico rápido de persistencia de altas y SMTP (Render / Neon)."""
+    from auth_registro import estado_smtp
+    from auth_registro_db import enabled, estado_db
+
+    probar_smtp = (request.args.get("probar_smtp") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
+    out: dict[str, object] = {
+        "alta_publica": (os.environ.get("AUTH_ALTA_PUBLICA") or "1").strip().lower()
+        in ("1", "true", "yes", "on"),
+        "database_url_configurada": enabled(),
+        "auth_registrations_dir": (os.environ.get("AUTH_REGISTRATIONS_DIR") or "").strip()
+        or None,
+        "smtp": estado_smtp(probar_conexion=probar_smtp),
+    }
+    if enabled():
+        out["postgresql"] = estado_db()
+    try:
+        from auth_registro import _cargar_solicitudes
+
+        sols = _cargar_solicitudes().get("solicitudes")
+        out["solicitudes_pendientes"] = len(sols) if isinstance(sols, dict) else 0
+        out["ok"] = True
+    except Exception as exc:
+        out["ok"] = False
+        out["error"] = str(exc)
+    return jsonify(out)
 
 
 @app.route("/activar-cuenta/<token>", methods=["GET", "POST"])

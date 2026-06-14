@@ -89,7 +89,7 @@ def read_json(name: str, default: Any) -> Any:
             conn.close()
     except Exception as exc:
         _LOG.warning("No se pudo leer %s desde PostgreSQL: %s", name, exc)
-        raise
+        return default
 
 
 def write_json(name: str, data: Any) -> None:

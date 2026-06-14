@@ -104,24 +104,20 @@ def verificar_variables() -> dict[str, bool]:
 
 
 def verificar_smtp_conexion() -> bool:
-    host = (os.environ.get("SMTP_HOST") or "").strip()
-    user = (os.environ.get("SMTP_USER") or "").strip()
-    password = (os.environ.get("SMTP_PASSWORD") or "").strip()
-    if not (host and user and password):
-        return False
-    try:
-        import smtplib
+    from auth_registro import estado_smtp
 
-        port = int((os.environ.get("SMTP_PORT") or "587").strip())
-        with smtplib.SMTP(host, port, timeout=15) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(user, password)
-        _ok(f"Conexión SMTP a {host}:{port}")
+    st = estado_smtp(probar_conexion=True)
+    if st.get("conexion_ok"):
+        _ok(
+            f"Conexión SMTP OK (puerto {st.get('puerto')}, "
+            f"ssl={'sí' if st.get('use_ssl') else 'no'})"
+        )
         return True
-    except OSError as exc:
-        _warn(f"SMTP no conectó: {exc}")
+    if not st.get("vars_completas"):
+        _warn("SMTP incompleto: faltan variables (ver vars_presentes en estado_smtp)")
         return False
+    _warn(f"SMTP no conectó: {st.get('conexion_error')}")
+    return False
 
 
 def verificar_flujo_integrado() -> None:
