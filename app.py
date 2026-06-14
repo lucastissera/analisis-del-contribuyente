@@ -484,8 +484,16 @@ def solicitar_acceso():
         cuit = (request.form.get("cuit") or "").strip()
         email = (request.form.get("email") or "").strip()
         nombre = (request.form.get("nombre") or "").strip()
+        telefono_area = (request.form.get("telefono_area") or "").strip()
+        telefono_numero = (request.form.get("telefono_numero") or "").strip()
         try:
-            token, _reg = crear_solicitud(cuit=cuit, email=email, nombre=nombre)
+            token, _reg = crear_solicitud(
+                cuit=cuit,
+                email=email,
+                nombre=nombre,
+                telefono_area=telefono_area,
+                telefono_numero=telefono_numero,
+            )
             enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
             cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
             flash(
@@ -581,7 +589,9 @@ def admin_altas_usuarios():
         normalizar_cuit,
         rechazar_cuenta,
         renovar_suscripcion,
-        whatsapp_alta_admin_url,
+        suspender_cuenta,
+        reactivar_cuenta,
+        actualizar_vencimiento,
         _dias_suscripcion,
     )
 
@@ -622,11 +632,49 @@ def admin_altas_usuarios():
                 )
             else:
                 flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "suspender":
+            if suspender_cuenta(cuit):
+                flash(
+                    tr(lg, "admin_gestion_ok_suspendida", cuit=formatear_cuit(normalizar_cuit(cuit) or cuit)),
+                    "success",
+                )
+            else:
+                flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "reactivar":
+            if reactivar_cuenta(cuit):
+                flash(
+                    tr(lg, "admin_gestion_ok_reactivada", cuit=formatear_cuit(normalizar_cuit(cuit) or cuit)),
+                    "success",
+                )
+            else:
+                flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "actualizar_vencimiento":
+            valido_hasta = (request.form.get("valido_hasta") or "").strip()
+            if actualizar_vencimiento(cuit, valido_hasta):
+                flash(
+                    tr(
+                        lg,
+                        "admin_gestion_ok_vencimiento",
+                        cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                        fecha=valido_hasta,
+                    ),
+                    "success",
+                )
+            else:
+                flash(tr(lg, "admin_gestion_err_vencimiento"), "warning")
         elif accion == "generar_enlace":
             email = (request.form.get("email") or "").strip()
             nombre = (request.form.get("nombre") or "").strip()
+            telefono_area = (request.form.get("telefono_area") or "").strip()
+            telefono_numero = (request.form.get("telefono_numero") or "").strip()
             try:
-                token, _reg = crear_solicitud(cuit=cuit, email=email, nombre=nombre)
+                token, _reg = crear_solicitud(
+                    cuit=cuit,
+                    email=email,
+                    nombre=nombre,
+                    telefono_area=telefono_area,
+                    telefono_numero=telefono_numero,
+                )
                 enlace = url_for("activar_cuenta", token=token, _external=True)
                 session["admin_enlace_alta"] = enlace
                 flash(
@@ -639,19 +687,7 @@ def admin_altas_usuarios():
         return redirect(url_for("admin_altas_usuarios"))
 
     pendientes = listar_pendientes_aprobacion()
-    for p in pendientes:
-        p["whatsapp_url"] = whatsapp_alta_admin_url(
-            str(p.get("cuit") or ""),
-            str(p.get("email") or ""),
-            str(p.get("nombre") or ""),
-        )
     altas = listar_altas_recientes(40)
-    for a in altas:
-        a["whatsapp_url"] = whatsapp_alta_admin_url(
-            str(a.get("cuit") or ""),
-            str(a.get("email") or ""),
-            str(a.get("nombre") or ""),
-        )
     return render_template(
         "admin_altas_usuarios.html",
         pendientes=pendientes,
@@ -682,18 +718,24 @@ def login():
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
         lg = normalize_lang(session.get("lang"))
         login_error_pending = motivo == "pending_approval"
+        login_error_suspended = motivo == "suspended"
         return render_template(
             "login.html",
             login_error=motivo == "invalid",
             login_error_expired=motivo in ("expired", "not_yet"),
             login_error_pending=login_error_pending,
+            login_error_suspended=login_error_suspended,
             login_error_msg=(
                 tr(lg, "login_error_pending")
                 if login_error_pending
                 else (
-                    tr(lg, "login_error_expired")
-                    if motivo in ("expired", "not_yet")
-                    else tr(lg, "login_error_bad")
+                    tr(lg, "login_error_suspended")
+                    if login_error_suspended
+                    else (
+                        tr(lg, "login_error_expired")
+                        if motivo in ("expired", "not_yet")
+                        else tr(lg, "login_error_bad")
+                    )
                 )
             ),
             next=next_val,

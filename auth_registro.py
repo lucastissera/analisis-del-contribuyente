@@ -100,6 +100,46 @@ def formatear_cuit(cuit: str) -> str:
     return d
 
 
+def normalizar_telefono(area: str, numero: str) -> tuple[str, str] | None:
+    """Código de área sin 0 inicial; número móvil sin prefijo 15."""
+    a = re.sub(r"\D", "", (area or "").strip())
+    n = re.sub(r"\D", "", (numero or "").strip())
+    while a.startswith("0"):
+        a = a[1:]
+    if n.startswith("15") and len(n) > 6:
+        n = n[2:]
+    if len(a) < 2 or len(a) > 4:
+        return None
+    if len(n) < 6 or len(n) > 8:
+        return None
+    return a, n
+
+
+def formatear_telefono(area: str, numero: str) -> str:
+    a, n = normalizar_telefono(area, numero) or (area, numero)
+    if a and n:
+        return f"{a} {n}"
+    return ""
+
+
+def url_whatsapp_cliente(area: str, numero: str) -> str:
+    par = normalizar_telefono(area, numero)
+    if not par:
+        return ""
+    a, n = par
+    return f"https://wa.me/549{a}{n}"
+
+
+def _telefono_desde_meta(meta: dict[str, Any] | None) -> dict[str, str]:
+    if not isinstance(meta, dict):
+        return {"fmt": "", "url": ""}
+    area = str(meta.get("telefono_area") or "")
+    numero = str(meta.get("telefono_numero") or "")
+    fmt = formatear_telefono(area, numero)
+    url = url_whatsapp_cliente(area, numero) if fmt else ""
+    return {"fmt": fmt, "url": url}
+
+
 def _leer_json(path: Path, default: Any) -> Any:
     if not path.is_file():
         return default
@@ -115,6 +155,29 @@ def _escribir_json(path: Path, data: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+
+def _read_store(name: str, default: Any, path: Path) -> Any:
+    try:
+        from auth_registro_db import enabled, read_json
+
+        if enabled():
+            return read_json(name, default)
+    except Exception as exc:
+        _LOG.warning("Lectura PostgreSQL falló (%s), usando disco: %s", name, exc)
+    return _leer_json(path, default)
+
+
+def _write_store(name: str, data: Any, path: Path) -> None:
+    try:
+        from auth_registro_db import enabled, write_json
+
+        if enabled():
+            write_json(name, data)
+            return
+    except Exception as exc:
+        _LOG.warning("Escritura PostgreSQL falló (%s), usando disco: %s", name, exc)
+    _escribir_json(path, data)
 
 
 def hash_password(password: str) -> str:
@@ -134,7 +197,7 @@ def verificar_password(stored: str, password: str) -> bool:
 
 
 def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
-    data = _leer_json(_path_usuarios_overlay(), {"users": {}})
+    data = _read_store("usuarios_registrados", {"users": {}}, _path_usuarios_overlay())
     users = data.get("users") if isinstance(data, dict) else {}
     return users if isinstance(users, dict) else {}
 
@@ -151,9 +214,16 @@ def cuenta_pendiente_aprobacion(cuit: str) -> dict[str, Any] | None:
     meta = _meta_overlay(cuit)
     if not meta:
         return None
-    if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+    if meta.get("pendiente_aprobacion"):
         return meta
     return None
+
+
+def cuenta_suspendida(cuit: str) -> bool:
+    meta = _meta_overlay(cuit)
+    if not meta:
+        return False
+    return meta.get("activo") is False and not meta.get("pendiente_aprobacion")
 
 
 def verificar_acceso_overlay(cuit: str, password: str) -> str | None:
@@ -163,6 +233,18 @@ def verificar_acceso_overlay(cuit: str, password: str) -> str | None:
         return None
     if verificar_password(str(meta.get("password") or ""), password):
         return "pending_approval"
+    return "invalid"
+
+
+def verificar_suspendido(cuit: str, password: str) -> str | None:
+    """None = no suspendida; 'suspended' | 'invalid'."""
+    if not cuenta_suspendida(cuit):
+        return None
+    meta = _meta_overlay(cuit)
+    if not meta:
+        return None
+    if verificar_password(str(meta.get("password") or ""), password):
+        return "suspended"
     return "invalid"
 
 
@@ -186,7 +268,7 @@ def usuario_existe(cuit: str) -> bool:
 
 
 def _cargar_solicitudes() -> dict[str, Any]:
-    data = _leer_json(_path_solicitudes(), {"solicitudes": {}})
+    data = _read_store("solicitudes_pendientes", {"solicitudes": {}}, _path_solicitudes())
     if not isinstance(data, dict):
         return {"solicitudes": {}}
     if "solicitudes" not in data or not isinstance(data["solicitudes"], dict):
@@ -199,6 +281,8 @@ def crear_solicitud(
     cuit: str,
     email: str,
     nombre: str = "",
+    telefono_area: str = "",
+    telefono_numero: str = "",
 ) -> tuple[str, dict[str, Any]]:
     u = normalizar_cuit(cuit)
     if not u:
@@ -206,9 +290,13 @@ def crear_solicitud(
     em = (email or "").strip().lower()
     if not _EMAIL_RE.match(em):
         raise ValueError("email_invalido")
+    tel = normalizar_telefono(telefono_area, telefono_numero)
+    if not tel:
+        raise ValueError("telefono_invalido")
     if usuario_existe(u):
         raise ValueError("cuit_duplicado")
 
+    tel_area, tel_numero = tel
     token = secrets.token_urlsafe(32)
     ahora = datetime.now(timezone.utc)
     expira = ahora + timedelta(hours=_token_horas())
@@ -216,6 +304,8 @@ def crear_solicitud(
         "cuit": u,
         "email": em,
         "nombre": (nombre or "").strip(),
+        "telefono_area": tel_area,
+        "telefono_numero": tel_numero,
         "creado": ahora.isoformat(timespec="seconds"),
         "expira": expira.isoformat(timespec="seconds"),
         "usado": False,
@@ -235,7 +325,7 @@ def crear_solicitud(
                 except ValueError:
                     del data["solicitudes"][tok]
         data["solicitudes"][token] = registro
-        _escribir_json(_path_solicitudes(), data)
+        _write_store("solicitudes_pendientes", data, _path_solicitudes())
 
     return token, registro
 
@@ -272,20 +362,22 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
             raise ValueError("cuit_duplicado")
 
         overlay_path = _path_usuarios_overlay()
-        overlay = _leer_json(overlay_path, {"version": 1, "users": {}})
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, overlay_path)
         if not isinstance(overlay.get("users"), dict):
             overlay["users"] = {}
         overlay["users"][cuit] = {
             "password": hash_password(pwd),
             "email": sol.get("email"),
             "nombre": sol.get("nombre") or "",
-            "valido_desde": datetime.now(timezone.utc).date().isoformat(),
+            "telefono_area": sol.get("telefono_area") or "",
+            "telefono_numero": sol.get("telefono_numero") or "",
+            "valido_desde": date.today().isoformat(),
             "activo": False,
             "pendiente_aprobacion": True,
             "password_definida": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _escribir_json(overlay_path, overlay)
+        _write_store("usuarios_registrados", overlay, overlay_path)
 
         data = _cargar_solicitudes()
         if tok in data.get("solicitudes", {}):
@@ -293,7 +385,7 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
             data["solicitudes"][tok]["activado"] = datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
             )
-            _escribir_json(_path_solicitudes(), data)
+            _write_store("solicitudes_pendientes", data, _path_solicitudes())
 
     registro_alta = {
         "cuit": cuit,
@@ -311,7 +403,7 @@ def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
     for cuit, meta in cargar_usuarios_overlay().items():
         if not isinstance(meta, dict):
             continue
-        if not (meta.get("pendiente_aprobacion") or meta.get("activo") is False):
+        if not meta.get("pendiente_aprobacion"):
             continue
         out.append(
             {
@@ -320,6 +412,7 @@ def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
                 "email": meta.get("email") or "",
                 "nombre": meta.get("nombre") or "",
                 "password_definida": meta.get("password_definida") or "",
+                **_telefono_desde_meta(meta),
             }
         )
     out.sort(key=lambda x: x.get("password_definida") or "", reverse=True)
@@ -331,11 +424,11 @@ def aprobar_cuenta(cuit: str) -> bool:
     if not u:
         return False
     dias = _dias_suscripcion()
-    hoy = datetime.now(timezone.utc).date()
+    hoy = date.today()
     valido_hasta = hoy + timedelta(days=dias)
     with _lock:
         path = _path_usuarios_overlay()
-        overlay = _leer_json(path, {"version": 1, "users": {}})
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return False
@@ -345,7 +438,7 @@ def aprobar_cuenta(cuit: str) -> bool:
         users[u]["valido_hasta"] = valido_hasta.isoformat()
         users[u]["aprobado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _escribir_json(path, overlay)
+        _write_store("usuarios_registrados", overlay, path)
     return True
 
 
@@ -355,8 +448,9 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
     for cuit, meta in cargar_usuarios_overlay().items():
         if not isinstance(meta, dict):
             continue
-        if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+        if meta.get("pendiente_aprobacion"):
             continue
+        suspendida = meta.get("activo") is False
         vh = _parse_fecha_local(meta.get("valido_hasta"))
         dias = (vh - hoy).days if vh else None
         out.append(
@@ -367,12 +461,84 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
                 "nombre": meta.get("nombre") or "",
                 "valido_hasta": vh.isoformat() if vh else "",
                 "valido_hasta_fmt": vh.strftime("%d/%m/%Y") if vh else "—",
+                "valido_hasta_input": vh.isoformat() if vh else "",
                 "dias_restantes": dias,
-                "vencida": dias is not None and dias < 0,
+                "vencida": not suspendida and dias is not None and dias < 0,
+                "suspendida": suspendida,
+                **_telefono_desde_meta(meta),
             }
         )
-    out.sort(key=lambda x: (x.get("dias_restantes") is None, x.get("dias_restantes") or 0))
+    out.sort(
+        key=lambda x: (
+            not x.get("suspendida"),
+            x.get("dias_restantes") is None,
+            x.get("dias_restantes") or 0,
+        )
+    )
     return out
+
+
+def suspender_cuenta(cuit: str) -> bool:
+    u = normalizar_cuit(cuit)
+    if not u:
+        return False
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+            return False
+        meta["activo"] = False
+        meta["suspendido_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
+
+
+def reactivar_cuenta(cuit: str) -> bool:
+    u = normalizar_cuit(cuit)
+    if not u:
+        return False
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if meta.get("pendiente_aprobacion") or meta.get("activo") is not False:
+            return False
+        meta["activo"] = True
+        meta.pop("suspendido_en", None)
+        meta["reactivado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
+
+
+def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:
+    u = normalizar_cuit(cuit)
+    if not u:
+        return False
+    vh = _parse_fecha_local(valido_hasta)
+    if not vh:
+        return False
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if meta.get("pendiente_aprobacion"):
+            return False
+        meta["valido_hasta"] = vh.isoformat()
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
 
 
 def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
@@ -385,12 +551,14 @@ def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
     hoy = date.today()
     with _lock:
         path = _path_usuarios_overlay()
-        overlay = _leer_json(path, {"version": 1, "users": {}})
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return False
         meta = users[u]
-        if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+        if meta.get("pendiente_aprobacion"):
+            return False
+        if meta.get("activo") is False:
             return False
         vh_actual = _parse_fecha_local(meta.get("valido_hasta"))
         base = max(hoy, vh_actual) if vh_actual else hoy
@@ -400,7 +568,7 @@ def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
         meta["valido_hasta"] = nueva_hasta.isoformat()
         meta["renovado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _escribir_json(path, overlay)
+        _write_store("usuarios_registrados", overlay, path)
     return True
 
 
@@ -429,31 +597,31 @@ def rechazar_cuenta(cuit: str) -> bool:
         return False
     with _lock:
         path = _path_usuarios_overlay()
-        overlay = _leer_json(path, {"version": 1, "users": {}})
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return False
         meta = users[u]
-        if not (meta.get("pendiente_aprobacion") or meta.get("activo") is False):
+        if not meta.get("pendiente_aprobacion"):
             return False
         del users[u]
         overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _escribir_json(path, overlay)
+        _write_store("usuarios_registrados", overlay, path)
     return True
 
 
 def _registrar_alta_log(entry: dict[str, Any]) -> None:
     path = _path_log_altas()
-    data = _leer_json(path, {"altas": []})
+    data = _read_store("altas_completadas", {"altas": []}, path)
     if not isinstance(data.get("altas"), list):
         data["altas"] = []
     data["altas"].insert(0, entry)
     data["altas"] = data["altas"][:200]
-    _escribir_json(path, data)
+    _write_store("altas_completadas", data, path)
 
 
 def listar_altas_recientes(limit: int = 30) -> list[dict[str, Any]]:
-    data = _leer_json(_path_log_altas(), {"altas": []})
+    data = _read_store("altas_completadas", {"altas": []}, _path_log_altas())
     altas = data.get("altas") if isinstance(data, dict) else []
     if not isinstance(altas, list):
         return []
@@ -466,8 +634,7 @@ def whatsapp_alta_admin_url(cuit: str, email: str, nombre: str = "") -> str:
     nom = f" ({nombre})" if nombre else ""
     msg = (
         f"Solicitud de alta en {APP_NAME}: CUIT {cuit_fmt}{nom}, "
-        f"email {email}. El usuario ya definió contraseña. "
-        f"Pendiente de tu aprobación (¿pagó?)."
+        f"email {email}. Ya se ha generado Usuario/Contraseña"
     )
     return f"https://wa.me/{tel}?text={quote(msg)}"
 

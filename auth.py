@@ -565,7 +565,7 @@ def _resolver_clave_usuario(username: str) -> str:
 
 def verificar_acceso(username: str, password: str) -> str | None:
     """Devuelve None si válido; si no: invalid, expired, not_yet, pending_approval."""
-    from auth_registro import verificar_acceso_overlay, verificar_password
+    from auth_registro import verificar_acceso_overlay, verificar_password, verificar_suspendido
 
     u = _resolver_clave_usuario(username)
     pwd = (password or "").strip()
@@ -575,6 +575,11 @@ def verificar_acceso(username: str, password: str) -> str | None:
     if pendiente == "pending_approval":
         return "pending_approval"
     if pendiente == "invalid":
+        return "invalid"
+    suspendido = verificar_suspendido(u, pwd)
+    if suspendido == "suspended":
+        return "suspended"
+    if suspendido == "invalid":
         return "invalid"
     cuenta = _load_cuentas().get(u)
     if cuenta is None or not verificar_password(cuenta.password, pwd):

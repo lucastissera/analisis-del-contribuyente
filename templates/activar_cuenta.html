@@ -23,6 +23,26 @@
       .field { margin-bottom: 0.85rem; }
       .field label { display: block; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.25rem; }
       .field input { width: 100%; box-sizing: border-box; padding: 0.45rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-body); color: var(--text-primary); }
+      .clave-wrap { display: flex; align-items: center; gap: 0.35rem; }
+      .clave-wrap .clave-input { flex: 1; min-width: 0; width: auto; }
+      .clave-toggle-icon {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.25rem;
+        height: 2.25rem;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+      .clave-toggle-icon svg { width: 1.15rem; height: 1.15rem; }
+      .clave-toggle-icon .icon-ocultar { display: none; }
+      .clave-toggle-icon.activo .icon-ver { display: none; }
+      .clave-toggle-icon.activo .icon-ocultar { display: block; }
       .error { color: var(--color-error); margin-bottom: 0.75rem; }
       .help { font-size: 0.85rem; color: var(--text-muted); }
       button { padding: 0.55rem 1rem; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); border-radius: 6px; cursor: pointer; }
@@ -52,18 +72,45 @@
         <form method="post">
           <div class="field">
             <label for="password">{{ t('alta_password_label') }}</label>
-            <input id="password" name="password" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+            <div class="clave-wrap">
+              <input id="password" class="clave-input" name="password" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+              <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            </div>
             <p class="help">{{ t('alta_password_help', min=min_len) }}</p>
           </div>
           <div class="field">
             <label for="password2">{{ t('alta_password2_label') }}</label>
-            <input id="password2" name="password2" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+            <div class="clave-wrap">
+              <input id="password2" class="clave-input" name="password2" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+              <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            </div>
           </div>
           <button type="submit">{{ t('alta_btn_activar') }}</button>
         </form>
         {% endif %}
       </div>
     </div>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
   </body>
 </html>

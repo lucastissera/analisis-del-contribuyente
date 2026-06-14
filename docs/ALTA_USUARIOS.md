@@ -69,14 +69,17 @@ AUTH_ADMIN_WHATSAPP=5493513132914
 
 ### Persistencia (Render)
 
-Los usuarios nuevos se guardan en disco del servidor:
-
-- Por defecto: `%TEMP%/aic_auth_data/` (Render)
-- Recomendado producción: disco persistente
+**Recomendado (plan gratis):** PostgreSQL en [Neon](https://neon.tech). Guía: `docs/AUTH_DATABASE_NEON.md`.
 
 ```env
-AUTH_REGISTRATIONS_DIR=/var/data/aic_auth
+DATABASE_URL=postgresql://usuario:clave@ep-xxxx.neon.tech/neondb?sslmode=require
 ```
+
+Con `DATABASE_URL`, las altas **sobreviven redeploys** de Render.
+
+**Alternativa de pago en Render:** disco persistente + `AUTH_REGISTRATIONS_DIR=/var/data/aic_auth`.
+
+Sin ninguno de los dos, los datos van al disco temporal del contenedor y **se pierden** al redeployar.
 
 ### Opcionales
 

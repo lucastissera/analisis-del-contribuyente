@@ -17,6 +17,13 @@
     if (!inp) return;
     var show = inp.type === "password";
     inp.type = show ? "text" : "password";
+    if (btn.classList.contains("clave-toggle-icon")) {
+      btn.classList.toggle("activo", show);
+      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      var txt = show ? labelOcultar(btn) : labelMostrar(btn);
+      btn.setAttribute("aria-label", txt);
+      return;
+    }
     var txt = show ? labelOcultar(btn) : labelMostrar(btn);
     btn.textContent = txt;
     btn.setAttribute("aria-label", txt);
@@ -29,8 +36,12 @@
       var btn = wrap.querySelector(".clave-toggle");
       if (inp) inp.type = "password";
       if (btn) {
+        btn.classList.remove("activo");
+        btn.setAttribute("aria-pressed", "false");
         var ver = labelMostrar(btn);
-        btn.textContent = ver;
+        if (!btn.classList.contains("clave-toggle-icon")) {
+          btn.textContent = ver;
+        }
         btn.setAttribute("aria-label", ver);
       }
     });

@@ -41,6 +41,13 @@
       .btn-aprob { background: var(--color-ok); color: #fff; border: none; }
       .btn-rech { background: var(--color-error); color: #fff; border: none; }
       .btn-renovar { background: var(--btn-bg); color: var(--btn-text); border: 1px solid var(--btn-border); }
+      .btn-suspender { background: var(--color-error); color: #fff; border: none; }
+      .btn-reactivar { background: var(--color-ok); color: #fff; border: none; }
+      .btn-guardar { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); font-size: 0.85rem; }
+      .form-venc { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+      .form-venc input[type="date"] { font-size: 0.85rem; }
+      .acciones-suscripcion { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+      .suspendida { color: var(--color-warn); font-weight: bold; }
       .enlace-box { word-break: break-all; background: var(--enlace-bg); padding: 0.6rem; border-radius: 6px; border: 1px dashed var(--border); }
     </style>
   </head>
@@ -78,6 +85,12 @@
             <input name="email" type="email" required />
           </div>
           <div>
+            <label>{{ t('alta_telefono_numero_label') }}</label><br />
+            <input name="telefono_area" type="text" inputmode="numeric" required placeholder="351" style="width:5rem" />
+            <input name="telefono_numero" type="text" inputmode="numeric" required placeholder="1234567" style="width:8rem" />
+            <p class="help">{{ t('alta_telefono_help') }}</p>
+          </div>
+          <div>
             <label>{{ t('alta_nombre_label') }}</label><br />
             <input name="nombre" type="text" />
           </div>
@@ -94,6 +107,7 @@
           <tr>
             <th>{{ t('alta_cuit_label') }}</th>
             <th>{{ t('alta_email_label') }}</th>
+            <th>{{ t('admin_altas_col_telefono') }}</th>
             <th>{{ t('admin_altas_col_clave') }}</th>
             <th></th>
           </tr>
@@ -103,6 +117,13 @@
           <tr>
             <td>{{ p.cuit_fmt or p.cuit }}</td>
             <td>{{ p.email or '—' }}</td>
+            <td>
+              {% if p.url %}
+              <a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.fmt or '—' }}</a>
+              {% else %}
+              {{ p.fmt or '—' }}
+              {% endif %}
+            </td>
             <td>{{ p.password_definida or '—' }}</td>
             <td>
               <form method="post" style="display:inline">
@@ -115,7 +136,6 @@
                 <input type="hidden" name="cuit" value="{{ p.cuit }}" />
                 <button type="submit" class="btn-rech">{{ t('admin_altas_btn_rechazar') }}</button>
               </form>
-              <a href="{{ p.whatsapp_url }}" target="_blank" rel="noopener">WhatsApp</a>
             </td>
           </tr>
           {% endfor %}
@@ -135,17 +155,25 @@
             <th>{{ t('alta_email_label') }}</th>
             <th>{{ t('admin_gestion_col_vencimiento') }}</th>
             <th>{{ t('admin_gestion_col_dias') }}</th>
-            <th></th>
+            <th>{{ t('admin_gestion_col_acciones') }}</th>
           </tr>
         </thead>
         <tbody>
           {% for s in suscriptores %}
-          <tr>
+          <tr class="{{ 'fila-suspendida' if s.suspendida else '' }}">
             <td>{{ s.cuit_fmt or s.cuit }}</td>
             <td>{{ s.email or '—' }}</td>
-            <td>{{ s.valido_hasta_fmt }}</td>
-            <td class="{{ 'vencida' if s.vencida else '' }}">
-              {% if s.dias_restantes is none %}—
+            <td>
+              <form method="post" class="form-venc">
+                <input type="hidden" name="accion" value="actualizar_vencimiento" />
+                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                <input type="date" name="valido_hasta" value="{{ s.valido_hasta_input }}" required />
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_venc') }}</button>
+              </form>
+            </td>
+            <td class="{{ 'vencida' if s.vencida else ('suspendida' if s.suspendida else '') }}">
+              {% if s.suspendida %}{{ t('admin_gestion_estado_suspendida') }}
+              {% elif s.dias_restantes is none %}—
               {% elif s.vencida %}{{ t('admin_gestion_estado_vencida') }} ({{ s.dias_restantes * -1 }} d.)
               {% elif s.dias_restantes == 0 %}{{ t('admin_gestion_estado_activa') }} (hoy)
               {% elif s.dias_restantes == 1 %}1 día
@@ -153,11 +181,26 @@
               {% endif %}
             </td>
             <td>
-              <form method="post" style="display:inline">
-                <input type="hidden" name="accion" value="renovar" />
-                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
-                <button type="submit" class="btn-renovar">{{ t('admin_gestion_btn_renovar', dias=dias_suscripcion) }}</button>
-              </form>
+              <div class="acciones-suscripcion">
+                {% if not s.suspendida %}
+                <form method="post" style="display:inline">
+                  <input type="hidden" name="accion" value="renovar" />
+                  <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                  <button type="submit" class="btn-renovar">{{ t('admin_gestion_btn_renovar', dias=dias_suscripcion) }}</button>
+                </form>
+                <form method="post" style="display:inline">
+                  <input type="hidden" name="accion" value="suspender" />
+                  <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                  <button type="submit" class="btn-suspender">{{ t('admin_gestion_btn_suspender') }}</button>
+                </form>
+                {% else %}
+                <form method="post" style="display:inline">
+                  <input type="hidden" name="accion" value="reactivar" />
+                  <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                  <button type="submit" class="btn-reactivar">{{ t('admin_gestion_btn_reactivar') }}</button>
+                </form>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}
