@@ -41,7 +41,6 @@ def dir_auth_servidor() -> Path:
         p = _dir_datos_usuario()
     else:
         p = Path(tempfile.gettempdir()) / "aic_auth_data"
-    p.mkdir(parents=True, exist_ok=True)
     return p
 
 
@@ -55,6 +54,29 @@ def _path_usuarios_overlay() -> Path:
 
 def _path_log_altas() -> Path:
     return dir_auth_servidor() / "altas_completadas.json"
+
+
+_STORE_FILES: dict[str, str] = {
+    "usuarios_registrados": "usuarios_registrados.json",
+    "solicitudes_pendientes": "solicitudes_pendientes.json",
+    "altas_completadas": "altas_completadas.json",
+}
+
+
+def _disk_path(name: str) -> Path:
+    filename = _STORE_FILES.get(name)
+    if not filename:
+        raise ValueError(f"store desconocido: {name}")
+    base = dir_auth_servidor()
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _LOG.warning("No se pudo crear directorio auth %s: %s", base, exc)
+    return base / filename
+
+
+def _resolve_store_path(name: str, path: Path | None) -> Path:
+    return path if path is not None else _disk_path(name)
 
 
 def _token_horas() -> int:
@@ -273,13 +295,16 @@ def _leer_json(path: Path, default: Any) -> Any:
 
 
 def _escribir_json(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        raise RuntimeError(f"No se pudo guardar en {path}: {exc}") from exc
 
 
-def _read_store(name: str, default: Any, path: Path) -> Any:
+def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
     try:
         from auth_registro_db import enabled, read_json
 
@@ -287,10 +312,10 @@ def _read_store(name: str, default: Any, path: Path) -> Any:
             return read_json(name, default)
     except Exception as exc:
         _LOG.warning("Lectura PostgreSQL falló (%s), usando disco: %s", name, exc)
-    return _leer_json(path, default)
+    return _leer_json(_resolve_store_path(name, path), default)
 
 
-def _write_store(name: str, data: Any, path: Path) -> None:
+def _write_store(name: str, data: Any, path: Path | None = None) -> None:
     try:
         from auth_registro_db import enabled, write_json
 
@@ -312,7 +337,7 @@ def _write_store(name: str, data: Any, path: Path) -> None:
         except Exception:
             pass
         _LOG.warning("Escritura en disco local como respaldo (%s)", name)
-    _escribir_json(path, data)
+    _escribir_json(_resolve_store_path(name, path), data)
 
 
 def hash_password(password: str) -> str:
@@ -332,7 +357,7 @@ def verificar_password(stored: str, password: str) -> bool:
 
 
 def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
-    data = _read_store("usuarios_registrados", {"users": {}}, _path_usuarios_overlay())
+    data = _read_store("usuarios_registrados", {"users": {}})
     users = data.get("users") if isinstance(data, dict) else {}
     return users if isinstance(users, dict) else {}
 
@@ -408,7 +433,7 @@ def usuario_existe(cuit: str) -> bool:
 
 
 def _cargar_solicitudes() -> dict[str, Any]:
-    data = _read_store("solicitudes_pendientes", {"solicitudes": {}}, _path_solicitudes())
+    data = _read_store("solicitudes_pendientes", {"solicitudes": {}})
     if not isinstance(data, dict):
         return {"solicitudes": {}}
     if "solicitudes" not in data or not isinstance(data["solicitudes"], dict):
@@ -465,7 +490,7 @@ def crear_solicitud(
                 except ValueError:
                     del data["solicitudes"][tok]
         data["solicitudes"][token] = registro
-        _write_store("solicitudes_pendientes", data, _path_solicitudes())
+        _write_store("solicitudes_pendientes", data)
 
     return token, registro
 
@@ -526,7 +551,7 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
                 timespec="seconds"
             )
             try:
-                _write_store("solicitudes_pendientes", data, _path_solicitudes())
+                _write_store("solicitudes_pendientes", data)
             except RuntimeError as exc:
                 _LOG.error(
                     "Contraseña de %s guardada, pero no se pudo marcar el enlace como usado: %s",
@@ -948,7 +973,7 @@ def _registrar_alta_log(entry: dict[str, Any]) -> None:
 
 
 def listar_altas_recientes(limit: int = 30) -> list[dict[str, Any]]:
-    data = _read_store("altas_completadas", {"altas": []}, _path_log_altas())
+    data = _read_store("altas_completadas", {"altas": []})
     altas = data.get("altas") if isinstance(data, dict) else []
     if not isinstance(altas, list):
         return []

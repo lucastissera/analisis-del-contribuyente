@@ -540,7 +540,14 @@ def solicitar_acceso():
             key = f"alta_err_{exc}"
             error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
         except RuntimeError:
-            error_msg = tr(lg, "alta_err_guardado")
+            error_msg = tr(lg, "alta_err_solicitud_guardado")
+        except Exception as exc:
+            logging.getLogger(__name__).exception(
+                "Error inesperado al crear solicitud de alta (CUIT=%s): %s",
+                cuit,
+                exc,
+            )
+            error_msg = tr(lg, "alta_err_solicitud_guardado")
     return render_template(
         "solicitar_acceso.html",
         enlace_activacion=enlace_activacion,

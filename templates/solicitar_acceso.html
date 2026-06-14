@@ -33,6 +33,9 @@
       .ok { color: var(--color-ok); margin-bottom: 0.75rem; }
       .enlace-box { word-break: break-all; background: var(--bg-body); border: 1px dashed var(--border); padding: 0.65rem; border-radius: 6px; font-size: 0.88rem; margin: 0.75rem 0; }
       button { padding: 0.55rem 1rem; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); border-radius: 6px; cursor: pointer; }
+      button:disabled { opacity: 0.65; cursor: wait; }
+      .form-procesando { display: none; margin-top: 0.65rem; font-size: 0.9rem; color: var(--text-muted); }
+      .form-procesando.visible { display: block; }
       .links { margin-top: 1rem; font-size: 0.92rem; }
     </style>
     <script>
@@ -61,7 +64,7 @@
         <div class="enlace-box"><a href="{{ enlace_activacion }}">{{ enlace_activacion }}</a></div>
         <p class="help">{{ t('alta_enlace_help', horas=token_horas) }}</p>
         {% else %}
-        <form method="post">
+        <form id="form-solicitar-acceso" method="post">
           <div class="field">
             <label for="cuit">{{ t('alta_cuit_label') }}</label>
             <input id="cuit" name="cuit" type="text" inputmode="numeric" autocomplete="off" required placeholder="20-12345678-9" />
@@ -103,7 +106,8 @@
             <label for="nombre">{{ t('alta_nombre_label') }}</label>
             <input id="nombre" name="nombre" type="text" autocomplete="name" />
           </div>
-          <button type="submit">{{ t('alta_btn_solicitar') }}</button>
+          <button type="submit" id="btn-solicitar-acceso">{{ t('alta_btn_solicitar') }}</button>
+          <p id="solicitar-validando" class="form-procesando" role="status" aria-live="polite">{{ t('alta_solicitar_validando') }}</p>
         </form>
         {% endif %}
 
@@ -115,5 +119,17 @@
       </div>
     </div>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    <script>
+      (function () {
+        var form = document.getElementById("form-solicitar-acceso");
+        if (!form) return;
+        form.addEventListener("submit", function () {
+          var btn = document.getElementById("btn-solicitar-acceso");
+          var msg = document.getElementById("solicitar-validando");
+          if (btn) btn.disabled = true;
+          if (msg) msg.classList.add("visible");
+        });
+      })();
+    </script>
   </body>
 </html>
