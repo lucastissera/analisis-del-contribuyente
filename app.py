@@ -90,10 +90,12 @@ except Exception:
     pass
 
 try:
+    from auth_registro import asegurar_admin_en_db
     from auth_registro_db import enabled, estado_db, migrar_disco_a_db_si_vacio
 
     if enabled():
         migrar_disco_a_db_si_vacio()
+        asegurar_admin_en_db()
         st = estado_db()
         logging.getLogger(__name__).info("Persistencia altas (PostgreSQL): %s", st)
 except Exception as exc:
@@ -388,24 +390,28 @@ def _inject_suscripcion():
         return {
             "suscripcion_dias_restantes": None,
             "suscripcion_vencimiento_fmt": None,
+            "suscripcion_cuit_fmt": None,
         }
     try:
-        from auth_registro import info_suscripcion_usuario
+        from auth_registro import formatear_cuit, info_suscripcion_usuario
 
         info = info_suscripcion_usuario(user)
         if not info:
             return {
                 "suscripcion_dias_restantes": None,
                 "suscripcion_vencimiento_fmt": None,
+                "suscripcion_cuit_fmt": None,
             }
         return {
             "suscripcion_dias_restantes": info["dias_restantes"],
             "suscripcion_vencimiento_fmt": info["valido_hasta_fmt"],
+            "suscripcion_cuit_fmt": formatear_cuit(str(user)),
         }
     except Exception:
         return {
             "suscripcion_dias_restantes": None,
             "suscripcion_vencimiento_fmt": None,
+            "suscripcion_cuit_fmt": None,
         }
 
 
@@ -560,11 +566,16 @@ def activar_cuenta(token: str):
         else:
             try:
                 reg = registro_activar(token, pwd)
-                notificar_admin_alta(
-                    reg["cuit"],
-                    str(reg.get("email") or ""),
-                    str(reg.get("nombre") or ""),
-                )
+                try:
+                    notificar_admin_alta(
+                        reg["cuit"],
+                        str(reg.get("email") or ""),
+                        str(reg.get("nombre") or ""),
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "Alta guardada pero falló la notificación al admin: %s", exc
+                    )
                 cuit_ok = formatear_cuit(str(reg["cuit"]))
                 return render_template(
                     "activar_cuenta.html",

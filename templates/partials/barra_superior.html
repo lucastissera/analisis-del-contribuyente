@@ -60,11 +60,11 @@
       {% if suscripcion_dias_restantes is not none %}
       <div class="barra-suscripcion{% if suscripcion_dias_restantes < 0 %} barra-suscripcion-vencida{% endif %}">
         {% if suscripcion_dias_restantes < 0 %}
-        {{ t('suscripcion_vencida') }}
+        {{ t('suscripcion_vencida', cuit=suscripcion_cuit_fmt) }}
         {% elif suscripcion_dias_restantes == 1 %}
-        {{ t('suscripcion_dia_restante', fecha=suscripcion_vencimiento_fmt) }}
+        {{ t('suscripcion_dia_restante', cuit=suscripcion_cuit_fmt, fecha=suscripcion_vencimiento_fmt) }}
         {% else %}
-        {{ t('suscripcion_dias_restantes', dias=suscripcion_dias_restantes, fecha=suscripcion_vencimiento_fmt) }}
+        {{ t('suscripcion_dias_restantes', cuit=suscripcion_cuit_fmt, dias=suscripcion_dias_restantes, fecha=suscripcion_vencimiento_fmt) }}
         {% endif %}
       </div>
       {% endif %}

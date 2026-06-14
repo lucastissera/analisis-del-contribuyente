@@ -63,9 +63,9 @@ else:
         _ADMIN_PASS = os.environ.get("AUTH_ADMIN_PASSWORD") or ""
 
 # CUIT de prueba (válido checksum AFIP simplificado: 20-00000000-0 no válido)
-# Usar 20-10432984-7 — ejemplo común de test
-_TEST_CUIT = "20104329847"
-_TEST_CUIT_FMT = "20-10432984-7"
+# Usar CUIT de prueba con dígito verificador válido (20-12345678-6)
+_TEST_CUIT = "20123456786"
+_TEST_CUIT_FMT = "20-12345678-6"
 _TEST_EMAIL = "alta.test@example.com"
 _TEST_PASS = "ClaveSegura123!"
 

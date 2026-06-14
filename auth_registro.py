@@ -86,9 +86,28 @@ def _parse_fecha_local(val: Any) -> date | None:
     return _parse_fecha(val)
 
 
-def normalizar_cuit(val: str) -> str | None:
+_CUIT_MULTIPLIERS = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+
+
+def cuit_digito_verificador_valido(digits: str) -> bool:
+    if not _CUIT_RE.match(digits):
+        return False
+    total = sum(int(digits[i]) * _CUIT_MULTIPLIERS[i] for i in range(10))
+    mod = 11 - (total % 11)
+    if mod == 11:
+        esperado = 0
+    elif mod == 10:
+        esperado = 9
+    else:
+        esperado = mod
+    return int(digits[10]) == esperado
+
+
+def normalizar_cuit(val: str, *, validar_digito: bool = False) -> str | None:
     digits = re.sub(r"\D", "", (val or "").strip())
     if not _CUIT_RE.match(digits):
+        return None
+    if validar_digito and not cuit_digito_verificador_valido(digits):
         return None
     return digits
 
@@ -98,6 +117,80 @@ def formatear_cuit(cuit: str) -> str:
     if len(d) == 11:
         return f"{d[:2]}-{d[2:10]}-{d[10]}"
     return d
+
+
+def meta_es_admin(meta: dict[str, Any] | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    rol = str(meta.get("rol") or "").strip().lower()
+    return rol == "admin" or meta.get("es_admin") is True or meta.get("admin") is True
+
+
+def admin_en_overlay(username: str | None = None) -> dict[str, Any] | None:
+    buscado = (username or os.environ.get("AUTH_ADMIN_USER") or "Lucas").strip()
+    for clave, meta in cargar_usuarios_overlay().items():
+        if not isinstance(meta, dict) or not meta_es_admin(meta):
+            continue
+        if not buscado or clave == buscado:
+            return meta
+    return None
+
+
+def guardar_admin_sistema(
+    username: str,
+    password: str,
+    *,
+    valido_hasta: date | None = None,
+) -> None:
+    u = (username or "").strip()
+    pwd = password or ""
+    if not u or not pwd:
+        raise ValueError("admin_invalido")
+    vh = valido_hasta or _parse_fecha_local(
+        (os.environ.get("AUTH_ADMIN_VALIDO_HASTA") or "2027-06-08").strip()
+    ) or date(2027, 6, 8)
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict):
+            overlay["users"] = {}
+            users = overlay["users"]
+        users[u] = {
+            "password": hash_password(pwd),
+            "rol": "admin",
+            "activo": True,
+            "pendiente_aprobacion": False,
+            "valido_hasta": vh.isoformat(),
+            "creado_en": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+
+
+def asegurar_admin_en_db() -> bool:
+    """Crea el admin en PostgreSQL si falta (usa AUTH_ADMIN_USER / AUTH_ADMIN_PASSWORD)."""
+    try:
+        from auth_registro_db import enabled
+
+        if not enabled():
+            return False
+    except Exception:
+        return False
+    user = (os.environ.get("AUTH_ADMIN_USER") or "Lucas").strip()
+    if admin_en_overlay(user):
+        return False
+    pwd = (os.environ.get("AUTH_ADMIN_PASSWORD") or "").strip()
+    if not pwd:
+        _LOG.warning(
+            "Administrador %s no está en PostgreSQL y AUTH_ADMIN_PASSWORD está vacío; "
+            "definilo en Render o ejecutá tools/init_admin_neon.py",
+            user,
+        )
+        return False
+    guardar_admin_sistema(user, pwd)
+    _LOG.info("Administrador %s guardado en PostgreSQL (usuarios_registrados)", user)
+    return True
 
 
 def normalizar_telefono(area: str, numero: str) -> tuple[str, str] | None:
@@ -297,7 +390,7 @@ def crear_solicitud(
     telefono_area: str = "",
     telefono_numero: str = "",
 ) -> tuple[str, dict[str, Any]]:
-    u = normalizar_cuit(cuit)
+    u = normalizar_cuit(cuit, validar_digito=True)
     if not u:
         raise ValueError("cuit_invalido")
     em = (email or "").strip().lower()
@@ -398,7 +491,14 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
             data["solicitudes"][tok]["activado"] = datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
             )
-            _write_store("solicitudes_pendientes", data, _path_solicitudes())
+            try:
+                _write_store("solicitudes_pendientes", data, _path_solicitudes())
+            except RuntimeError as exc:
+                _LOG.error(
+                    "Contraseña de %s guardada, pero no se pudo marcar el enlace como usado: %s",
+                    cuit,
+                    exc,
+                )
 
     registro_alta = {
         "cuit": cuit,
@@ -415,6 +515,8 @@ def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for cuit, meta in cargar_usuarios_overlay().items():
         if not isinstance(meta, dict):
+            continue
+        if meta_es_admin(meta):
             continue
         if not meta.get("pendiente_aprobacion"):
             continue
@@ -460,6 +562,8 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for cuit, meta in cargar_usuarios_overlay().items():
         if not isinstance(meta, dict):
+            continue
+        if meta_es_admin(meta):
             continue
         if meta.get("pendiente_aprobacion"):
             continue
@@ -729,7 +833,7 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
             smtp.send_message(msg)
         _LOG.info("Email enviado a %s (asunto: %s)", destino, asunto)
         return True
-    except OSError as exc:
+    except Exception as exc:
         _LOG.error("No se pudo enviar email a %s: %s", destino, exc)
         return False
 

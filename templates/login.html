@@ -107,6 +107,19 @@
       .login-actions button:hover {
         filter: brightness(1.08);
       }
+      .login-actions button:disabled {
+        opacity: 0.65;
+        cursor: wait;
+      }
+      .login-validando {
+        display: none;
+        margin-top: 0.65rem;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+      }
+      .login-validando.visible {
+        display: block;
+      }
       .error {
         color: var(--color-error);
         margin-bottom: 0.75rem;
@@ -159,7 +172,7 @@
         <p class="{{ 'ok' if cat == 'success' else 'error' }}" role="alert">{{ msg }}</p>
         {% endfor %}
         {% endwith %}
-        <form method="post" action="{{ url_for('login') }}" autocomplete="on">
+        <form id="form-login" method="post" action="{{ url_for('login') }}" autocomplete="on">
           <input type="hidden" name="next" value="{{ next or '' }}" />
           <div class="login-field">
             <label for="usuario">{{ t('login_user_label') }}</label>
@@ -173,7 +186,8 @@
             <a href="{{ url_for('olvide_contrasena') }}">{{ t('login_forgot_password') }}</a>
           </p>
           <div class="login-actions">
-            <button type="submit">{{ t('login_submit') }}</button>
+            <button type="submit" id="btn-login">{{ t('login_submit') }}</button>
+            <p id="login-validando" class="login-validando" role="status" aria-live="polite">{{ t('login_validando') }}</p>
           </div>
         </form>
         <p class="login-nuevo">
@@ -190,5 +204,17 @@
 
     <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    <script>
+      (function () {
+        var form = document.getElementById("form-login");
+        if (!form) return;
+        form.addEventListener("submit", function () {
+          var btn = document.getElementById("btn-login");
+          var msg = document.getElementById("login-validando");
+          if (btn) btn.disabled = true;
+          if (msg) msg.classList.add("visible");
+        });
+      })();
+    </script>
   </body>
 </html>

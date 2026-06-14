@@ -90,8 +90,8 @@ Sin ninguno de los dos, los datos van al disco temporal del contenedor y **se pi
 
 ## Usuarios admin vs altas
 
-- **Lucas (admin)** sigue en `AUTH_USERS_JSON` en Render.  
-- **Clientes nuevos** quedan en `usuarios_registrados.json` (overlay) con contraseña **hasheada**.  
+- **Lucas (admin)** con `DATABASE_URL` se guarda en Neon (`usuarios_registrados`, clave `Lucas`, `rol: admin`, contraseña bcrypt). Podés quitar `AUTH_USERS_JSON` de Render.
+- **Clientes nuevos** quedan en el mismo blob con CUIT como clave y contraseña **hasheada**.
 - Los portables sincronizados reciben esos usuarios vía `/api/auth-users` (hashes bcrypt).
 
 ## Recuperación de contraseña

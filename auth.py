@@ -374,16 +374,19 @@ def export_users_payload() -> dict[str, Any]:
             "users": {u: c.a_dict() for u, c in cuentas.items()},
         }
     try:
-        from auth_registro import cargar_usuarios_overlay
+        from auth_registro import cargar_usuarios_overlay, meta_es_admin
 
         overlay = cargar_usuarios_overlay()
         if overlay:
             users = payload.setdefault("users", {})
             if isinstance(users, dict):
                 for u, meta in overlay.items():
-                    if u not in users and isinstance(meta, dict):
-                        if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+                    if not isinstance(meta, dict):
+                        continue
+                    if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+                        if not meta_es_admin(meta):
                             continue
+                    if u not in users or meta_es_admin(meta):
                         users[u] = meta
     except Exception:
         pass
@@ -527,13 +530,19 @@ def _load_cuentas() -> dict[str, CuentaUsuario]:
     env_cuentas = _usuarios_desde_env_json()
     base = env_cuentas if env_cuentas else _load_cuentas_sin_env_json()
     try:
-        from auth_registro import cargar_usuarios_overlay
+        from auth_registro import cargar_usuarios_overlay, meta_es_admin
 
         overlay = cargar_usuarios_overlay()
         if overlay:
-            for u, c in _parse_cuentas(overlay).items():
-                if u not in base:
-                    base[u] = c
+            for u, meta in overlay.items():
+                if not isinstance(meta, dict):
+                    continue
+                parsed = _parse_cuentas({u: meta})
+                cuenta = parsed.get(u)
+                if not cuenta:
+                    continue
+                if u not in base or meta_es_admin(meta):
+                    base[u] = cuenta
     except Exception:
         _LOG.debug("Overlay de usuarios registrados no disponible", exc_info=True)
     return base
