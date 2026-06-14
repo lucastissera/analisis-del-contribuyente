@@ -481,7 +481,7 @@ def set_lang(code: str):
 
 @app.route("/solicitar-acceso", methods=["GET", "POST"])
 def solicitar_acceso():
-    from auth_registro import alta_publica_habilitada
+    from auth_registro import _token_horas, alta_publica_habilitada
 
     if not alta_publica_habilitada():
         return redirect(url_for("login"))
@@ -513,17 +513,20 @@ def solicitar_acceso():
                     lg,
                     "alta_ok_solicitud",
                     cuit=cuit_ok,
-                    horas=os.environ.get("AUTH_ALTA_TOKEN_HORAS", "72"),
+                    horas=_token_horas(),
                 ),
                 "success",
             )
         except ValueError as exc:
             key = f"alta_err_{exc}"
             error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+        except RuntimeError:
+            error_msg = tr(lg, "alta_err_guardado")
     return render_template(
         "solicitar_acceso.html",
         enlace_activacion=enlace_activacion,
         error_msg=error_msg,
+        token_horas=_token_horas(),
         whatsapp_url=whatsapp_new_user_url(),
     )
 
@@ -575,6 +578,8 @@ def activar_cuenta(token: str):
             except ValueError as exc:
                 key = f"alta_err_{exc}"
                 error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+            except RuntimeError:
+                error_msg = tr(lg, "alta_err_guardado")
         sol = obtener_solicitud(token)
     cuit_fmt = formatear_cuit(str(sol["cuit"])) if sol else ""
     return render_template(
@@ -769,6 +774,8 @@ def olvide_contrasena():
                 except ValueError as exc:
                     key = f"alta_err_{exc}" if str(exc).startswith("password_") else f"reset_err_{exc}"
                     error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+                except RuntimeError:
+                    error_msg = tr(lg, "alta_err_guardado")
 
     return render_template(
         "olvide_contrasena.html",

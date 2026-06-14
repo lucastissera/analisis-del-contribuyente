@@ -59,7 +59,7 @@
         {% if enlace_activacion %}
         <p class="ok">{{ t('alta_enlace_generado') }}</p>
         <div class="enlace-box"><a href="{{ enlace_activacion }}">{{ enlace_activacion }}</a></div>
-        <p class="help">{{ t('alta_enlace_help') }}</p>
+        <p class="help">{{ t('alta_enlace_help', horas=token_horas) }}</p>
         {% else %}
         <form method="post">
           <div class="field">

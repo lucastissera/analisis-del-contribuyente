@@ -663,13 +663,16 @@ def rechazar_cuenta(cuit: str) -> bool:
 
 
 def _registrar_alta_log(entry: dict[str, Any]) -> None:
-    path = _path_log_altas()
-    data = _read_store("altas_completadas", {"altas": []}, path)
-    if not isinstance(data.get("altas"), list):
-        data["altas"] = []
-    data["altas"].insert(0, entry)
-    data["altas"] = data["altas"][:200]
-    _write_store("altas_completadas", data, path)
+    try:
+        path = _path_log_altas()
+        data = _read_store("altas_completadas", {"altas": []}, path)
+        if not isinstance(data.get("altas"), list):
+            data["altas"] = []
+        data["altas"].insert(0, entry)
+        data["altas"] = data["altas"][:200]
+        _write_store("altas_completadas", data, path)
+    except RuntimeError as exc:
+        _LOG.error("No se pudo registrar alta en historial (la contraseña sí se guardó): %s", exc)
 
 
 def listar_altas_recientes(limit: int = 30) -> list[dict[str, Any]]:
