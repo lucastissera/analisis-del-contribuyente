@@ -64,6 +64,53 @@
       .clave-toggle-icon.activo .icon-ocultar { display: block; }
       .form-clave-admin { display: flex; flex-direction: column; gap: 0.35rem; min-width: 10.5rem; }
       .form-clave-admin .clave-input { width: 100%; }
+      .form-eliminar-cuenta { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.35rem; min-width: 11rem; }
+      .form-eliminar-cuenta .clave-input { width: 100%; box-sizing: border-box; }
+      .btn-eliminar { background: #5d0000; color: #fff; border: none; font-size: 0.85rem; }
+      html.modo-oscuro .btn-eliminar { background: #8b0000; }
+      .admin-acordeon {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-panel);
+        margin-bottom: 1.2rem;
+        min-width: 0;
+      }
+      .admin-acordeon-cabecera {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.85rem 1rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        margin: 0;
+      }
+      .admin-acordeon-cabecera::-webkit-details-marker,
+      .admin-acordeon-cabecera::marker { display: none; }
+      .admin-acordeon-cabecera::before {
+        content: "";
+        display: inline-block;
+        width: 0.4em;
+        height: 0.4em;
+        border: solid var(--text-muted);
+        border-width: 0 0.14em 0.14em 0;
+        transform: rotate(-45deg);
+        transition: transform 0.2s ease;
+        flex-shrink: 0;
+        margin-top: 0.1em;
+      }
+      .admin-acordeon[open] .admin-acordeon-cabecera::before {
+        transform: rotate(45deg);
+        margin-top: 0.05em;
+      }
+      .admin-acordeon-cuerpo {
+        padding: 0 1rem 1rem 1rem;
+        border-top: 1px solid var(--border);
+      }
+      .admin-acordeon-cuerpo .help:first-child { margin-top: 0.75rem; }
     </style>
   </head>
   <body>
@@ -86,8 +133,9 @@
       </div>
       {% endif %}
 
-      <div class="panel">
-        <h2>{{ t('admin_alta_directa_titulo') }}</h2>
+      <details class="admin-acordeon" id="acordeon-alta-directa">
+        <summary class="admin-acordeon-cabecera">{{ t('admin_alta_directa_titulo') }}</summary>
+        <div class="admin-acordeon-cuerpo">
         <p class="help">{{ t('admin_alta_directa_help') }}</p>
         <form method="post" class="form-grid">
           <input type="hidden" name="accion" value="alta_directa" />
@@ -139,10 +187,12 @@
           </div>
           <p><button type="submit" class="btn-aprob">{{ t('admin_alta_directa_btn') }}</button></p>
         </form>
-      </div>
+        </div>
+      </details>
 
-      <div class="panel">
-        <h2>{{ t('admin_altas_generar_titulo') }}</h2>
+      <details class="admin-acordeon" id="acordeon-cliente-pago"{% if enlace_generado %} open{% endif %}>
+        <summary class="admin-acordeon-cabecera">{{ t('admin_altas_generar_titulo') }}</summary>
+        <div class="admin-acordeon-cuerpo">
         <p class="help">{{ t('admin_altas_generar_help') }}</p>
         <form method="post">
           <input type="hidden" name="accion" value="generar_enlace" />
@@ -166,7 +216,8 @@
           </div>
           <p><button type="submit" class="btn-renovar">{{ t('admin_altas_btn_generar') }}</button></p>
         </form>
-      </div>
+        </div>
+      </details>
 
       <h2>{{ t('admin_altas_pendientes_titulo') }}</h2>
       {% if not pendientes %}
@@ -290,6 +341,19 @@
                   <input type="hidden" name="accion" value="reactivar" />
                   <input type="hidden" name="cuit" value="{{ s.cuit }}" />
                   <button type="submit" class="btn-reactivar">{{ t('admin_gestion_btn_reactivar') }}</button>
+                </form>
+                <form method="post" class="form-eliminar-cuenta" onsubmit="return confirm({{ t('admin_gestion_confirm_eliminar')|tojson }});">
+                  <input type="hidden" name="accion" value="eliminar_cuenta" />
+                  <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                  <p class="help">{{ t('admin_gestion_eliminar_help') }}</p>
+                  <div class="clave-wrap">
+                    <input class="clave-input" name="admin_password" type="password" autocomplete="current-password" required placeholder="{{ t('admin_gestion_clave_admin') }}" aria-label="{{ t('admin_gestion_clave_admin') }}" />
+                    <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                      <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                      <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                  </div>
+                  <button type="submit" class="btn-eliminar">{{ t('admin_gestion_btn_eliminar') }}</button>
                 </form>
                 {% endif %}
               </div>

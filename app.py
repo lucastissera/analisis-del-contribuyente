@@ -625,6 +625,7 @@ def admin_altas_usuarios():
         cambiar_contrasena_usuario,
         crear_solicitud,
         crear_usuario_admin,
+        eliminar_cuenta,
         formatear_cuit,
         listar_altas_recientes,
         listar_pendientes_aprobacion,
@@ -691,6 +692,24 @@ def admin_altas_usuarios():
                 )
             else:
                 flash(tr(lg, "admin_altas_err_no_encontrada"), "warning")
+        elif accion == "eliminar_cuenta":
+            from auth import verify_credentials
+
+            admin_pwd = request.form.get("admin_password") or ""
+            admin_user = session.get("user") or ""
+            if not verify_credentials(admin_user, admin_pwd):
+                flash(tr(lg, "admin_gestion_err_clave_admin"), "warning")
+            elif eliminar_cuenta(cuit):
+                flash(
+                    tr(
+                        lg,
+                        "admin_gestion_ok_eliminada",
+                        cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                    ),
+                    "success",
+                )
+            else:
+                flash(tr(lg, "admin_gestion_err_eliminar"), "warning")
         elif accion == "actualizar_vencimiento":
             valido_hasta = (request.form.get("valido_hasta") or "").strip()
             if actualizar_vencimiento(cuit, valido_hasta):

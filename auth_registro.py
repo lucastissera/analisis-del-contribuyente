@@ -740,6 +740,44 @@ def reactivar_cuenta(cuit: str) -> bool:
     return True
 
 
+def eliminar_cuenta(cuit: str) -> bool:
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        return False
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if not isinstance(meta, dict):
+            return False
+        if meta_es_admin(meta):
+            return False
+        if meta.get("pendiente_aprobacion"):
+            return False
+        if meta.get("activo") is not False:
+            return False
+        del users[u]
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+        sol_data = _cargar_solicitudes()
+        sols = sol_data.get("solicitudes")
+        if isinstance(sols, dict) and u in sols:
+            del sols[u]
+            _write_store("solicitudes_pendientes", sol_data, _path_solicitudes())
+    _registrar_alta_log(
+        {
+            "cuit": formatear_cuit(u),
+            "email": meta.get("email") or "",
+            "activado": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "estado": "eliminada",
+        }
+    )
+    return True
+
+
 def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:
     u = resolver_clave_overlay(cuit)
     if not u:
