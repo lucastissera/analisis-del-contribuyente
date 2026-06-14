@@ -250,10 +250,13 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   margin: 0.15rem 0 1.35rem;
   --titulo-fs: clamp(1.25rem, 2.8vw, 1.65rem);
   --subtitulo-fs: clamp(1rem, 2.2vw, 1.2rem);
+  --cabecera-ancho: min(100%, 32rem);
 }
 .cabecera--inicio h1 {
   flex: none;
   width: 100%;
+  max-width: var(--cabecera-ancho);
+  margin-inline: auto;
   font-size: var(--titulo-fs);
   line-height: 1.25;
   margin-bottom: 0.35rem;
@@ -261,6 +264,8 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
 .cabecera--inicio .cabecera-subtitulo {
   flex: none;
   width: 100%;
+  max-width: var(--cabecera-ancho);
+  margin-inline: auto;
   margin: 0 0 0.5rem;
   font-size: var(--subtitulo-fs);
   font-weight: 600;
@@ -268,15 +273,19 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   color: var(--text-muted, #444);
 }
 .cabecera--inicio .isologo-wrap {
-  width: min(100%, calc(var(--titulo-fs) * 2 * 4.05));
+  width: var(--cabecera-ancho);
+  max-width: 100%;
+  margin-inline: auto;
   line-height: 0;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.65rem;
 }
 .cabecera--inicio .isologo-wrap .logo-sistema {
+  display: block;
   width: 100%;
   height: auto;
   max-width: none;
   max-height: none;
+  margin-inline: auto;
 }
 .cabecera--login {
   flex-direction: column;
