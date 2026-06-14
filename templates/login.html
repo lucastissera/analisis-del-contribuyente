@@ -185,7 +185,7 @@
       {% with mostrar_volver=false, mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
 
       <div class="login-card">
-        {% with titulo=t('login_heading'), variante='login' %}
+        {% with titulo=t('page_title'), subtitulo=t('login_heading'), variante='login' %}
         {% include 'partials/cabecera_isologo.html' %}
         {% endwith %}
         {% if login_error_msg %}

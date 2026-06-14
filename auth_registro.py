@@ -1057,12 +1057,21 @@ def _smtp_usar_ssl(port: int) -> bool:
     return port == 465
 
 
+def _smtp_timeout_sec() -> int:
+    raw = (os.environ.get("SMTP_TIMEOUT_SEC") or "8").strip()
+    try:
+        return max(3, min(int(raw), 30))
+    except ValueError:
+        return 8
+
+
 def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     host = (os.environ.get("SMTP_HOST") or "").strip()
     user = (os.environ.get("SMTP_USER") or "").strip()
     # Gmail muestra la contraseña de aplicación con espacios; SMTP exige 16 caracteres seguidos.
     password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
     port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
+    timeout = _smtp_timeout_sec()
     if not host:
         _LOG.warning("SMTP_HOST no configurado; email no enviado")
         return False
@@ -1084,11 +1093,11 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     msg.set_content(cuerpo)
     try:
         if _smtp_usar_ssl(port):
-            with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+            with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
                 smtp.login(user, password)
                 smtp.send_message(msg)
         else:
-            with smtplib.SMTP(host, port, timeout=30) as smtp:
+            with smtplib.SMTP(host, port, timeout=timeout) as smtp:
                 smtp.ehlo()
                 if port != 25:
                     smtp.starttls()
@@ -1180,6 +1189,18 @@ def estado_smtp(*, probar_conexion: bool = False) -> dict[str, Any]:
     return out
 
 
+def _notificar_en_segundo_plano(fn, *args, **kwargs) -> None:
+    """No bloquea la respuesta HTTP (evita timeout en Render si SMTP tarda)."""
+
+    def _run() -> None:
+        try:
+            fn(*args, **kwargs)
+        except Exception as exc:
+            _LOG.warning("Notificación en segundo plano falló: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="auth-notify").start()
+
+
 def notificar_admin_nueva_solicitud(
     cuit: str,
     email: str,
@@ -1215,6 +1236,10 @@ def notificar_admin_nueva_solicitud(
     }
 
 
+def notificar_admin_nueva_solicitud_async(**kwargs) -> None:
+    _notificar_en_segundo_plano(notificar_admin_nueva_solicitud, **kwargs)
+
+
 def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, Any]:
     cuit_fmt = formatear_cuit(cuit)
     nom_line = f"Nombre: {nombre}\n" if nombre else ""
@@ -1236,3 +1261,7 @@ def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, A
         "email_enviado": email_ok,
         "whatsapp_url": whatsapp_alta_admin_url(cuit, email, nombre),
     }
+
+
+def notificar_admin_alta_async(cuit: str, email: str, nombre: str = "") -> None:
+    _notificar_en_segundo_plano(notificar_admin_alta, cuit, email, nombre)

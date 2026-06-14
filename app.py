@@ -503,7 +503,7 @@ def solicitar_acceso():
                 crear_solicitud,
                 formatear_cuit,
                 normalizar_cuit,
-                notificar_admin_nueva_solicitud,
+                notificar_admin_nueva_solicitud_async,
             )
 
             cuit = (request.form.get("cuit") or "").strip()
@@ -521,19 +521,14 @@ def solicitar_acceso():
                 )
                 enlace_activacion = url_for("activar_cuenta", token=token, _external=True)
                 cuit_ok = formatear_cuit(normalizar_cuit(cuit) or cuit)
-                try:
-                    notificar_admin_nueva_solicitud(
-                        cuit,
-                        email,
-                        nombre,
-                        telefono_area=telefono_area,
-                        telefono_numero=telefono_numero,
-                        enlace_activacion=enlace_activacion,
-                    )
-                except Exception as exc:
-                    logging.getLogger(__name__).warning(
-                        "Solicitud creada pero falló el email al admin: %s", exc
-                    )
+                notificar_admin_nueva_solicitud_async(
+                    cuit=cuit,
+                    email=email,
+                    nombre=nombre,
+                    telefono_area=telefono_area,
+                    telefono_numero=telefono_numero,
+                    enlace_activacion=enlace_activacion,
+                )
                 flash(
                     tr(
                         lg,
@@ -620,7 +615,7 @@ def activar_cuenta(token: str):
     from auth_registro import (
         activar_cuenta as registro_activar,
         formatear_cuit,
-        notificar_admin_alta,
+        notificar_admin_alta_async,
         obtener_solicitud,
         _min_password_len,
     )
@@ -650,16 +645,11 @@ def activar_cuenta(token: str):
             else:
                 try:
                     reg = registro_activar(token, pwd)
-                    try:
-                        notificar_admin_alta(
-                            reg["cuit"],
-                            str(reg.get("email") or ""),
-                            str(reg.get("nombre") or ""),
-                        )
-                    except Exception as exc:
-                        logging.getLogger(__name__).warning(
-                            "Alta guardada pero falló la notificación al admin: %s", exc
-                        )
+                    notificar_admin_alta_async(
+                        str(reg["cuit"]),
+                        str(reg.get("email") or ""),
+                        str(reg.get("nombre") or ""),
+                    )
                     cuit_ok = formatear_cuit(str(reg["cuit"]))
                     return render_template(
                         "activar_cuenta.html",
