@@ -23,6 +23,9 @@ def database_url() -> str:
     raw = (os.environ.get("DATABASE_URL") or os.environ.get("AUTH_DATABASE_URL") or "").strip()
     if raw.startswith("postgres://"):
         raw = "postgresql://" + raw[len("postgres://") :]
+    if raw and "sslmode=" not in raw:
+        sep = "&" if "?" in raw else "?"
+        raw = f"{raw}{sep}sslmode=require"
     return raw
 
 
@@ -33,7 +36,7 @@ def enabled() -> bool:
 def _connect():
     import psycopg2
 
-    return psycopg2.connect(database_url())
+    return psycopg2.connect(database_url(), connect_timeout=15)
 
 
 def _ensure_schema(conn) -> None:
@@ -69,51 +72,60 @@ def init_db() -> None:
 def read_json(name: str, default: Any) -> Any:
     if name not in _BLOBS:
         raise ValueError(f"blob desconocido: {name}")
-    init_db()
-    conn = _connect()
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT data FROM auth_registro_blob WHERE name = %s", (name,))
-            row = cur.fetchone()
-        if not row:
-            return default
-        data = row[0]
-        if isinstance(data, str):
-            return json.loads(data)
-        return data
+        init_db()
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT data FROM auth_registro_blob WHERE name = %s", (name,))
+                row = cur.fetchone()
+            if not row:
+                return default
+            data = row[0]
+            if isinstance(data, str):
+                return json.loads(data)
+            return data
+        finally:
+            conn.close()
     except Exception as exc:
         _LOG.warning("No se pudo leer %s desde PostgreSQL: %s", name, exc)
-        return default
-    finally:
-        conn.close()
+        raise
 
 
 def write_json(name: str, data: Any) -> None:
     if name not in _BLOBS:
         raise ValueError(f"blob desconocido: {name}")
-    init_db()
-    payload = json.dumps(data, ensure_ascii=False)
-    conn = _connect()
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO auth_registro_blob (name, data, updated_at)
-                VALUES (%s, %s::jsonb, NOW())
-                ON CONFLICT (name) DO UPDATE
-                SET data = EXCLUDED.data, updated_at = NOW()
-                """,
-                (name, payload),
-            )
-        conn.commit()
-    finally:
-        conn.close()
+        init_db()
+        payload = json.dumps(data, ensure_ascii=False)
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO auth_registro_blob (name, data, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (name) DO UPDATE
+                    SET data = EXCLUDED.data, updated_at = NOW()
+                    """,
+                    (name, payload),
+                )
+            conn.commit()
+            _LOG.info("PostgreSQL: guardado blob %s", name)
+        finally:
+            conn.close()
+    except Exception as exc:
+        _LOG.error("No se pudo escribir %s en PostgreSQL: %s", name, exc)
+        raise
 
 
 def estado_db() -> dict[str, Any]:
     if not enabled():
         return {"activo": False, "url_configurada": False}
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:
+        return {"activo": False, "url_configurada": True, "error": str(exc)}
     out: dict[str, Any] = {"activo": True, "url_configurada": True, "blobs": {}}
     conn = _connect()
     try:
@@ -129,3 +141,43 @@ def estado_db() -> dict[str, Any]:
     finally:
         conn.close()
     return out
+
+
+def contar_usuarios_registrados() -> int:
+    try:
+        data = read_json("usuarios_registrados", {"users": {}})
+        users = data.get("users") if isinstance(data, dict) else {}
+        return len(users) if isinstance(users, dict) else 0
+    except Exception:
+        return 0
+
+
+def migrar_disco_a_db_si_vacio() -> int:
+    """Copia JSON locales a PostgreSQL si la base está vacía (útil tras activar DATABASE_URL)."""
+    if not enabled():
+        return 0
+    try:
+        if contar_usuarios_registrados() > 0:
+            return 0
+    except Exception:
+        pass
+    from auth_registro import dir_auth_servidor
+
+    base = dir_auth_servidor()
+    archivos = {
+        "usuarios_registrados": base / "usuarios_registrados.json",
+        "solicitudes_pendientes": base / "solicitudes_pendientes.json",
+        "altas_completadas": base / "altas_completadas.json",
+    }
+    migrados = 0
+    for name, path in archivos.items():
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            write_json(name, data)
+            migrados += 1
+            _LOG.info("Migrado %s desde disco a PostgreSQL", name)
+        except Exception as exc:
+            _LOG.warning("No se pudo migrar %s: %s", name, exc)
+    return migrados

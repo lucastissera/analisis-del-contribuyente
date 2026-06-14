@@ -77,3 +77,29 @@ Desde Neon podés exportar/dumpear la base periódicamente desde el dashboard o 
 
 - **Local sin `DATABASE_URL`:** archivos en `%TEMP%/aic_auth_data` o `AUTH_REGISTRATIONS_DIR`.
 - **Portable (.exe):** sincroniza usuarios aprobados vía `/api/auth-users`; las altas nuevas se gestionan en el servidor web con Neon.
+
+---
+
+## Si el usuario desaparece tras un deploy
+
+1. **`DATABASE_URL` no estaba activa cuando aprobaste** → quedó en disco temporal de Render y se borró. Configurá Neon y volvé a dar de alta al cliente.
+2. **Connection string incorrecta** → revisá logs en Render: `Persistencia altas (PostgreSQL)` o errores `No se pudo escribir ... PostgreSQL`.
+3. **Datos viejos** → usuarios aprobados antes de configurar Neon no están en la base. Solo persisten los nuevos tras tener `DATABASE_URL` bien configurada.
+4. En Neon → **Tables** → `auth_registro_blob` → fila `usuarios_registrados` debe contener el JSON de clientes.
+
+Usá la URL **Pooled** de Neon. La app agrega `sslmode=require` si falta en la URL.
+
+---
+
+## Email de alta al administrador
+
+El correo **solo se envía cuando el cliente elige contraseña**, no al completar el formulario inicial.
+
+En Render → **Logs**, después de una activación, buscá:
+
+- `Email enviado a ...` → enviado (revisá spam)
+- `AUTH_ADMIN_NOTIFY_EMAIL no configurado`
+- `SMTP_USER o SMTP_PASSWORD faltante`
+- `No se pudo enviar email` → revisar contraseña de aplicación de Gmail
+
+Variables: `AUTH_ADMIN_NOTIFY_EMAIL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`.

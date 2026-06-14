@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import sys
 import threading
@@ -87,6 +88,16 @@ try:
     iniciar_sincronizacion_usuarios()
 except Exception:
     pass
+
+try:
+    from auth_registro_db import enabled, estado_db, migrar_disco_a_db_si_vacio
+
+    if enabled():
+        migrar_disco_a_db_si_vacio()
+        st = estado_db()
+        logging.getLogger(__name__).info("Persistencia altas (PostgreSQL): %s", st)
+except Exception as exc:
+    logging.getLogger(__name__).warning("No se pudo inicializar PostgreSQL de altas: %s", exc)
 from cuit_en_arca import ArcaProcesoError, CancelacionUsuarioError, ejecutar_lote_arca
 from cuit_en_arca.planilla_lote import (
     leer_planilla_lote_con_errores,
@@ -300,6 +311,7 @@ def _session_idle_and_login():
         "api_auth_users",
         "solicitar_acceso",
         "activar_cuenta",
+        "olvide_contrasena",
         None,
     ):
         return None
@@ -698,8 +710,79 @@ def admin_altas_usuarios():
     )
 
 
+@app.route("/olvide-contrasena", methods=["GET", "POST"])
+def olvide_contrasena():
+    if session.get("user"):
+        return redirect(url_for("index"))
+    from auth_registro import (
+        formatear_cuit,
+        normalizar_cuit,
+        restablecer_contrasena,
+        verificar_identidad_recuperacion,
+    )
+
+    lg = normalize_lang(session.get("lang"))
+    error_msg = None
+    paso = "identificar"
+    cuit_fmt = ""
+    min_len = os.environ.get("AUTH_MIN_PASSWORD_LEN", "8")
+
+    if request.method == "GET":
+        if session.get("reset_cuit"):
+            paso = "nueva_clave"
+            cuit_fmt = formatear_cuit(str(session["reset_cuit"]))
+        else:
+            session.pop("reset_email", None)
+
+    if request.method == "POST":
+        accion = (request.form.get("paso") or "identificar").strip()
+        if accion == "identificar":
+            cuit = (request.form.get("cuit") or "").strip()
+            email = (request.form.get("email") or "").strip()
+            if verificar_identidad_recuperacion(cuit, email):
+                u = normalizar_cuit(cuit) or cuit
+                session["reset_cuit"] = u
+                session["reset_email"] = email.strip().lower()
+                session.modified = True
+                paso = "nueva_clave"
+                cuit_fmt = formatear_cuit(u)
+            else:
+                error_msg = tr(lg, "reset_err_no_coincide")
+        elif accion == "nueva_clave":
+            u = session.get("reset_cuit") or ""
+            em = session.get("reset_email") or ""
+            pwd = request.form.get("password") or ""
+            pwd2 = request.form.get("password2") or ""
+            cuit_fmt = formatear_cuit(str(u)) if u else ""
+            paso = "nueva_clave"
+            if not u or not em:
+                return redirect(url_for("olvide_contrasena"))
+            if pwd != pwd2:
+                error_msg = tr(lg, "alta_err_password_no_coincide")
+            else:
+                try:
+                    restablecer_contrasena(str(u), str(em), pwd)
+                    session.pop("reset_cuit", None)
+                    session.pop("reset_email", None)
+                    flash(tr(lg, "reset_ok"), "success")
+                    return redirect(url_for("login"))
+                except ValueError as exc:
+                    key = f"alta_err_{exc}" if str(exc).startswith("password_") else f"reset_err_{exc}"
+                    error_msg = tr(lg, key) if tr(lg, key) != key else str(exc)
+
+    return render_template(
+        "olvide_contrasena.html",
+        paso=paso,
+        cuit_fmt=cuit_fmt,
+        error_msg=error_msg,
+        min_len=min_len,
+    )
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    from auth_registro import alta_publica_habilitada
+
     if session.get("user"):
         return redirect(_safe_internal_path(request.args.get("next")))
     if request.method == "POST":
@@ -743,7 +826,6 @@ def login():
             alta_publica=alta_publica_habilitada(),
         )
     next_val = (request.args.get("next") or "").strip()
-    from auth_registro import alta_publica_habilitada
 
     return render_template(
         "login.html",

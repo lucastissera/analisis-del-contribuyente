@@ -176,7 +176,20 @@ def _write_store(name: str, data: Any, path: Path) -> None:
             write_json(name, data)
             return
     except Exception as exc:
-        _LOG.warning("Escritura PostgreSQL falló (%s), usando disco: %s", name, exc)
+        _LOG.error("Escritura PostgreSQL falló (%s): %s", name, exc)
+        try:
+            from auth_registro_db import enabled as db_on
+
+            if db_on():
+                raise RuntimeError(
+                    "DATABASE_URL configurada pero no se pudo escribir en PostgreSQL. "
+                    "Revisá la conexión Neon en Render."
+                ) from exc
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+        _LOG.warning("Escritura en disco local como respaldo (%s)", name)
     _escribir_json(path, data)
 
 
@@ -591,6 +604,45 @@ def info_suscripcion_usuario(username: str) -> dict[str, Any] | None:
     }
 
 
+def verificar_identidad_recuperacion(cuit: str, email: str) -> bool:
+    u = normalizar_cuit(cuit)
+    em = (email or "").strip().lower()
+    if not u or not _EMAIL_RE.match(em):
+        return False
+    meta = cargar_usuarios_overlay().get(u)
+    if not isinstance(meta, dict):
+        return False
+    stored = str(meta.get("email") or "").strip().lower()
+    return bool(stored and stored == em)
+
+
+def restablecer_contrasena(cuit: str, email: str, nueva_password: str) -> bool:
+    u = normalizar_cuit(cuit)
+    em = (email or "").strip().lower()
+    pwd = nueva_password or ""
+    if not u or not _EMAIL_RE.match(em):
+        raise ValueError("reset_no_coincide")
+    if len(pwd) < _min_password_len():
+        raise ValueError("password_corta")
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            raise ValueError("reset_no_coincide")
+        meta = users[u]
+        if not isinstance(meta, dict):
+            raise ValueError("reset_no_coincide")
+        stored = str(meta.get("email") or "").strip().lower()
+        if stored != em:
+            raise ValueError("reset_no_coincide")
+        meta["password"] = hash_password(pwd)
+        meta["password_restablecida"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
+
+
 def rechazar_cuenta(cuit: str) -> bool:
     u = normalizar_cuit(cuit)
     if not u:
@@ -644,7 +696,14 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     user = (os.environ.get("SMTP_USER") or "").strip()
     password = (os.environ.get("SMTP_PASSWORD") or "").strip()
     port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
-    if not host or not destino:
+    if not host:
+        _LOG.warning("SMTP_HOST no configurado; email no enviado")
+        return False
+    if not destino:
+        _LOG.warning("Destino de email vacío; no enviado")
+        return False
+    if not user or not password:
+        _LOG.warning("SMTP_USER o SMTP_PASSWORD faltante; email a %s no enviado", destino)
         return False
     try:
         port = int(port_raw)
@@ -657,15 +716,17 @@ def _enviar_email(destino: str, asunto: str, cuerpo: str) -> bool:
     msg["To"] = destino
     msg.set_content(cuerpo)
     try:
-        with smtplib.SMTP(host, port, timeout=20) as smtp:
+        with smtplib.SMTP(host, port, timeout=25) as smtp:
+            smtp.ehlo()
             if port != 25:
                 smtp.starttls()
-            if user and password:
-                smtp.login(user, password)
+                smtp.ehlo()
+            smtp.login(user, password)
             smtp.send_message(msg)
+        _LOG.info("Email enviado a %s (asunto: %s)", destino, asunto)
         return True
     except OSError as exc:
-        _LOG.warning("No se pudo enviar email a %s: %s", destino, exc)
+        _LOG.error("No se pudo enviar email a %s: %s", destino, exc)
         return False
 
 
@@ -683,12 +744,23 @@ def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, A
     )
     admin_mail = (os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL") or "").strip()
     email_ok = False
-    if admin_mail:
+    if not admin_mail:
+        _LOG.warning(
+            "AUTH_ADMIN_NOTIFY_EMAIL no configurado; no se avisa por email del alta de %s",
+            cuit_fmt,
+        )
+    else:
         email_ok = _enviar_email(
             admin_mail,
             f"[{APP_NAME}] Alta de usuario {cuit_fmt}",
             cuerpo,
         )
+        if not email_ok:
+            _LOG.error(
+                "Falló el email de alta para %s hacia %s (revisá SMTP_* en Render)",
+                cuit_fmt,
+                admin_mail,
+            )
     return {
         "email_enviado": email_ok,
         "whatsapp_url": whatsapp_alta_admin_url(cuit, email, nombre),

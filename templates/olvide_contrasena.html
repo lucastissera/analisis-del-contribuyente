@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('reset_title') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" />
+    <style>
+      :root {
+        --bg-body: #fff; --bg-panel: #fafafa; --text-primary: #1a1a1a;
+        --text-muted: #444; --border: #bbb; --color-error: #b00020;
+        --color-link: #1565c0; --btn-bg: #111; --btn-text: #fff; --btn-border: #333;
+      }
+      html.modo-oscuro {
+        --bg-body: #0f1014; --bg-panel: #1a1c22; --text-primary: #eceef3;
+        --text-muted: #aeb4c0; --border: #3d424d; --color-error: #ff8a95;
+        --color-link: #8ab4ff; --btn-bg: #3d7dd9; --btn-text: #0c1118; --btn-border: #5b93e8;
+      }
+      body { font-family: Arial, sans-serif; margin: 1rem; background: var(--bg-body); color: var(--text-primary); }
+      a { color: var(--color-link); }
+      .pagina { max-width: 420px; margin: 0 auto; }
+      .card { border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; background: var(--bg-panel); }
+      .field { margin-bottom: 0.85rem; }
+      .field label { display: block; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.25rem; }
+      .field input { width: 100%; box-sizing: border-box; padding: 0.45rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-body); color: var(--text-primary); }
+      .error { color: var(--color-error); margin-bottom: 0.75rem; }
+      .help { font-size: 0.85rem; color: var(--text-muted); }
+      button { padding: 0.55rem 1rem; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-text); border-radius: 6px; cursor: pointer; }
+      .volver { margin-top: 1rem; font-size: 0.92rem; }
+      .clave-wrap { display: flex; align-items: center; gap: 0.35rem; }
+      .clave-wrap .clave-input { flex: 1; min-width: 0; width: auto; }
+      .clave-toggle-icon {
+        flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+        width: 2.25rem; height: 2.25rem; padding: 0; border: 1px solid var(--border);
+        border-radius: 6px; background: var(--bg-body); color: var(--text-primary); cursor: pointer;
+      }
+      .clave-toggle-icon svg { width: 1.15rem; height: 1.15rem; }
+      .clave-toggle-icon .icon-ocultar { display: none; }
+      .clave-toggle-icon.activo .icon-ver { display: none; }
+      .clave-toggle-icon.activo .icon-ocultar { display: block; }
+    </style>
+    <script>
+      try { if (localStorage.getItem("tema") === "oscuro") document.documentElement.classList.add("modo-oscuro"); } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div class="pagina">
+      {% with mostrar_volver=true, volver_url=url_for('login'), volver_texto=t('reset_volver_login'), mostrar_logout=false %}{% include 'partials/barra_superior.html' %}{% endwith %}
+      <div class="card">
+        {% with titulo=t('reset_heading'), variante='login' %}{% include 'partials/cabecera_isologo.html' %}{% endwith %}
+
+        {% if paso == 'identificar' %}
+        <p class="help">{{ t('reset_intro') }}</p>
+        {% if error_msg %}
+        <p class="error">{{ error_msg }}</p>
+        {% endif %}
+        <form method="post">
+          <input type="hidden" name="paso" value="identificar" />
+          <div class="field">
+            <label for="cuit">{{ t('alta_cuit_label') }}</label>
+            <input id="cuit" name="cuit" type="text" inputmode="numeric" autocomplete="username" required placeholder="20-12345678-9" />
+          </div>
+          <div class="field">
+            <label for="email">{{ t('alta_email_label') }}</label>
+            <input id="email" name="email" type="email" autocomplete="email" required />
+          </div>
+          <button type="submit">{{ t('reset_btn_verificar') }}</button>
+        </form>
+        {% else %}
+        <p class="help">{{ t('reset_nueva_intro', cuit=cuit_fmt) }}</p>
+        {% if error_msg %}
+        <p class="error">{{ error_msg }}</p>
+        {% endif %}
+        <form method="post">
+          <input type="hidden" name="paso" value="nueva_clave" />
+          <div class="field">
+            <label for="password">{{ t('alta_password_label') }}</label>
+            <div class="clave-wrap">
+              <input id="password" class="clave-input" name="password" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+              <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              </button>
+            </div>
+            <p class="help">{{ t('alta_password_help', min=min_len) }}</p>
+          </div>
+          <div class="field">
+            <label for="password2">{{ t('alta_password2_label') }}</label>
+            <div class="clave-wrap">
+              <input id="password2" class="clave-input" name="password2" type="password" autocomplete="new-password" required minlength="{{ min_len }}" />
+              <button type="button" class="clave-toggle clave-toggle-icon" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}" aria-pressed="false">
+                <svg class="icon-ver" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="icon-ocultar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              </button>
+            </div>
+          </div>
+          <button type="submit">{{ t('reset_btn_guardar') }}</button>
+        </form>
+        {% endif %}
+        <p class="volver"><a href="{{ url_for('login') }}">{{ t('reset_volver_login') }}</a></p>
+      </div>
+    </div>
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

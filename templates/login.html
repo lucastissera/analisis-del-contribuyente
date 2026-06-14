@@ -169,6 +169,9 @@
             <label for="password">{{ t('login_password_label') }}</label>
             <input id="password" name="password" type="password" autocomplete="current-password" required />
           </div>
+          <p class="login-nuevo" style="margin-top: 0; margin-bottom: 0.75rem;">
+            <a href="{{ url_for('olvide_contrasena') }}">{{ t('login_forgot_password') }}</a>
+          </p>
           <div class="login-actions">
             <button type="submit">{{ t('login_submit') }}</button>
           </div>
