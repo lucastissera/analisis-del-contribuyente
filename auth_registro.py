@@ -1051,12 +1051,92 @@ def whatsapp_solicitud_admin_url(cuit: str, email: str, nombre: str = "") -> str
 
 
 def _smtp_usar_ssl(port: int) -> bool:
+    """True = conexión SMTP_SSL (típico puerto 465). False = SMTP + STARTTLS (587)."""
+    if port == 465:
+        return True
+    if port in (587, 25):
+        return False
     flag = (os.environ.get("SMTP_USE_SSL") or "").strip().lower()
     if flag in ("1", "true", "yes", "on"):
         return True
     if flag in ("0", "false", "no", "off"):
         return False
     return port == 465
+
+
+def _smtp_credenciales() -> tuple[str, str, str, int, bool, str]:
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
+    port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 587
+    use_ssl = _smtp_usar_ssl(port)
+    remitente = (os.environ.get("SMTP_FROM") or user or f"noreply@{host}").strip()
+    return host, user, password, port, use_ssl, remitente
+
+
+def _smtp_error_legible(exc: BaseException) -> str:
+    raw = str(exc).strip() or exc.__class__.__name__
+    lower = raw.lower()
+    if "535" in raw or "username and password not accepted" in lower:
+        return (
+            "Gmail rechazó usuario o contraseña. Usá contraseña de aplicación "
+            "(16 caracteres), no la clave normal. Detalle: " + raw
+        )
+    if "534" in raw or "application-specific password" in lower:
+        return "Gmail exige contraseña de aplicación. Detalle: " + raw
+    if "timed out" in lower or "timeout" in lower:
+        return (
+            "Tiempo de espera agotado al conectar con SMTP. "
+            "Probá SMTP_PORT=465 y SMTP_USE_SSL=1. Detalle: " + raw
+        )
+    if "connection refused" in lower or "connect error" in lower:
+        return (
+            "No se pudo conectar al servidor SMTP (host/puerto). "
+            "En Render probá 465+SSL. Detalle: " + raw
+        )
+    if "550" in raw or "553" in raw or "sender" in lower:
+        return (
+            "Problema con el remitente (SMTP_FROM debe coincidir con SMTP_USER en Gmail). "
+            "Detalle: " + raw
+        )
+    return raw
+
+
+def _smtp_ejecutar(
+    *,
+    host: str,
+    user: str,
+    password: str,
+    port: int,
+    use_ssl: bool,
+    timeout: int,
+    enviar: EmailMessage | None = None,
+) -> tuple[bool, str | None]:
+    try:
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx) as smtp:
+                smtp.login(user, password)
+                if enviar is not None:
+                    smtp.send_message(enviar)
+        else:
+            with smtplib.SMTP(host, port, timeout=timeout) as smtp:
+                smtp.ehlo()
+                if port != 25:
+                    smtp.starttls(context=ssl.create_default_context())
+                    smtp.ehlo()
+                smtp.login(user, password)
+                if enviar is not None:
+                    smtp.send_message(enviar)
+        return True, None
+    except Exception as exc:
+        msg = _smtp_error_legible(exc)
+        _LOG.error("SMTP falló (%s:%s ssl=%s): %s", host, port, use_ssl, msg)
+        return False, msg
 
 
 def _smtp_timeout_sec() -> int:
@@ -1081,51 +1161,41 @@ def _enviar_email(
     cuerpo: str,
     *,
     timeout: int | None = None,
-) -> bool:
-    host = (os.environ.get("SMTP_HOST") or "").strip()
-    user = (os.environ.get("SMTP_USER") or "").strip()
-    # Gmail muestra la contraseña de aplicación con espacios; SMTP exige 16 caracteres seguidos.
-    password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
-    port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
+) -> tuple[bool, str | None]:
+    host, user, password, port, use_ssl, remitente = _smtp_credenciales()
     wait = timeout if timeout is not None else _smtp_timeout_sec()
     if not host:
-        _LOG.warning("SMTP_HOST no configurado; email no enviado")
-        return False
+        return False, "SMTP_HOST no configurado"
     if not destino:
-        _LOG.warning("Destino de email vacío; no enviado")
-        return False
+        return False, "Destino de email vacío"
     if not user or not password:
-        _LOG.warning("SMTP_USER o SMTP_PASSWORD faltante; email a %s no enviado", destino)
-        return False
-    try:
-        port = int(port_raw)
-    except ValueError:
-        port = 587
-    remitente = (os.environ.get("SMTP_FROM") or user or f"noreply@{host}").strip()
+        return False, "SMTP_USER o SMTP_PASSWORD faltante"
+    if (
+        "gmail.com" in host.lower()
+        and (os.environ.get("SMTP_FROM") or user).strip().lower() != user.lower()
+    ):
+        return (
+            False,
+            "Con Gmail, SMTP_FROM debe ser igual a SMTP_USER "
+            f"(ahora FROM={(os.environ.get('SMTP_FROM') or '').strip() or '—'}, USER={user}).",
+        )
     msg = EmailMessage()
     msg["Subject"] = str(Header(asunto, "utf-8"))
     msg["From"] = remitente
     msg["To"] = destino
     msg.set_content(cuerpo, charset="utf-8")
-    try:
-        if _smtp_usar_ssl(port):
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP_SSL(host, port, timeout=wait, context=ctx) as smtp:
-                smtp.login(user, password)
-                smtp.send_message(msg)
-        else:
-            with smtplib.SMTP(host, port, timeout=wait) as smtp:
-                smtp.ehlo()
-                if port != 25:
-                    smtp.starttls()
-                    smtp.ehlo()
-                smtp.login(user, password)
-                smtp.send_message(msg)
+    ok, err = _smtp_ejecutar(
+        host=host,
+        user=user,
+        password=password,
+        port=port,
+        use_ssl=use_ssl,
+        timeout=wait,
+        enviar=msg,
+    )
+    if ok:
         _LOG.info("Email enviado a %s (asunto: %s)", destino, asunto)
-        return True
-    except Exception as exc:
-        _LOG.error("No se pudo enviar email a %s: %s", destino, exc)
-        return False
+    return ok, err
 
 
 def _email_admin_configurado() -> str:
@@ -1146,29 +1216,21 @@ def _avisar_admin_por_email(
             contexto,
         )
         return False
-    ok = _enviar_email(admin_mail, asunto, cuerpo, timeout=timeout)
+    ok, err = _enviar_email(admin_mail, asunto, cuerpo, timeout=timeout)
     if not ok:
         _LOG.error(
-            "Falló el email (%s) hacia %s (revisá SMTP_* en Render)",
+            "Falló el email (%s) hacia %s: %s",
             contexto,
             admin_mail,
+            err or "error desconocido",
         )
     return ok
 
 
 def estado_smtp(*, probar_conexion: bool = False) -> dict[str, Any]:
     """Diagnóstico de variables SMTP (sin exponer contraseñas)."""
-    host = (os.environ.get("SMTP_HOST") or "").strip()
-    user = (os.environ.get("SMTP_USER") or "").strip()
-    password = re.sub(r"\s+", "", (os.environ.get("SMTP_PASSWORD") or ""))
+    host, user, password, port, use_ssl, from_addr = _smtp_credenciales()
     notify = _email_admin_configurado()
-    port_raw = (os.environ.get("SMTP_PORT") or "587").strip()
-    try:
-        port = int(port_raw)
-    except ValueError:
-        port = 587
-    from_addr = (os.environ.get("SMTP_FROM") or user or "").strip()
-    use_ssl = _smtp_usar_ssl(port)
     vars_presentes = {
         "AUTH_ADMIN_NOTIFY_EMAIL": bool(notify),
         "SMTP_HOST": bool(host),
@@ -1176,39 +1238,50 @@ def estado_smtp(*, probar_conexion: bool = False) -> dict[str, Any]:
         "SMTP_PASSWORD": bool(password),
         "SMTP_FROM": bool(from_addr),
     }
+    gmail_from_ok = True
+    gmail_from_nota = None
+    if host and "gmail.com" in host.lower() and user:
+        gmail_from_ok = from_addr.lower() == user.lower()
+        if not gmail_from_ok:
+            gmail_from_nota = "SMTP_FROM debe ser igual a SMTP_USER para Gmail."
     out: dict[str, Any] = {
         "vars_completas": all(vars_presentes.values()),
         "vars_presentes": vars_presentes,
+        "host": host or None,
         "puerto": port,
         "use_ssl": use_ssl,
+        "modo": "SSL" if use_ssl else "STARTTLS",
         "notify_email": notify or None,
         "smtp_from": from_addr or None,
+        "gmail_from_ok": gmail_from_ok,
+        "gmail_from_nota": gmail_from_nota,
         "avisos": [
             "Gmail: contraseña de aplicación (16 caracteres), no la clave normal.",
-            "En Render, si el puerto 587 falla: SMTP_PORT=465 y SMTP_USE_SSL=1.",
-            "Revisá spam y que SMTP_FROM coincida con SMTP_USER en Gmail.",
+            "En Render: SMTP_HOST=smtp.gmail.com, SMTP_PORT=465, SMTP_USE_SSL=1.",
+            "SMTP_FROM y SMTP_USER deben ser el mismo correo en Gmail.",
+            "Revisá spam en AUTH_ADMIN_NOTIFY_EMAIL.",
         ],
     }
     if probar_conexion:
         if not (host and user and password):
             out["conexion_ok"] = False
             out["conexion_error"] = "Faltan SMTP_HOST, SMTP_USER o SMTP_PASSWORD"
+        elif not gmail_from_ok:
+            out["conexion_ok"] = False
+            out["conexion_error"] = gmail_from_nota
         else:
-            try:
-                if use_ssl:
-                    with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
-                        smtp.login(user, password)
-                else:
-                    with smtplib.SMTP(host, port, timeout=20) as smtp:
-                        smtp.ehlo()
-                        if port != 25:
-                            smtp.starttls()
-                            smtp.ehlo()
-                        smtp.login(user, password)
-                out["conexion_ok"] = True
-            except Exception as exc:
-                out["conexion_ok"] = False
-                out["conexion_error"] = str(exc)
+            ok, err = _smtp_ejecutar(
+                host=host,
+                user=user,
+                password=password,
+                port=port,
+                use_ssl=use_ssl,
+                timeout=20,
+                enviar=None,
+            )
+            out["conexion_ok"] = ok
+            if err:
+                out["conexion_error"] = err
     return out
 
 
@@ -1243,7 +1316,7 @@ def probar_email_admin() -> dict[str, Any]:
         "Si lo recibís, SMTP y AUTH_ADMIN_NOTIFY_EMAIL están bien configurados.\n"
         "Revisá también la carpeta de spam."
     )
-    ok = _enviar_email(
+    ok, err = _enviar_email(
         admin_mail,
         asunto,
         cuerpo,
@@ -1254,7 +1327,7 @@ def probar_email_admin() -> dict[str, Any]:
     return {
         "ok": False,
         "destino": admin_mail,
-        "error": "No se pudo enviar. Revisá SMTP_* en Render y los logs del servicio.",
+        "error": err or "No se pudo enviar. Revisá SMTP_* en Render y los logs del servicio.",
     }
 
 

@@ -134,6 +134,12 @@
           {% else %}
           <p class="warn">{{ t('admin_smtp_vars_faltan') }}</p>
           {% endif %}
+          {% if smtp_estado.host %}
+          <p class="help">{{ t('admin_smtp_resumen', host=smtp_estado.host, puerto=smtp_estado.puerto, modo=smtp_estado.modo, notify=smtp_estado.notify_email or '—', from_addr=smtp_estado.smtp_from or '—') }}</p>
+          {% endif %}
+          {% if smtp_estado.gmail_from_nota %}
+          <p class="warn">{{ smtp_estado.gmail_from_nota }}</p>
+          {% endif %}
           <form method="post">
             <input type="hidden" name="accion" value="probar_email" />
             <p><button type="submit" class="btn-renovar">{{ t('admin_smtp_btn_probar') }}</button></p>

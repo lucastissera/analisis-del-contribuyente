@@ -282,6 +282,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin_smtp_help": "Variables en Render: AUTH_ADMIN_NOTIFY_EMAIL, SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM. En Render suele funcionar SMTP_PORT=465 y SMTP_USE_SSL=1. Revisá también spam.",
         "admin_smtp_vars_ok": "Variables SMTP completas",
         "admin_smtp_vars_faltan": "Faltan variables SMTP (el alta funciona, pero no llegará email)",
+        "admin_smtp_resumen": "Servidor: {host} · puerto {puerto} ({modo}) · destino avisos: {notify} · remitente: {from_addr}",
         "admin_smtp_btn_probar": "Enviar correo de prueba",
         "admin_smtp_ok": "Correo de prueba enviado a {destino}. Revisá bandeja y spam.",
         "admin_smtp_err": "No se pudo enviar el correo de prueba: {detalle}",
