@@ -60,6 +60,18 @@ sequenceDiagram
 
 ### Notificación por email (recomendado)
 
+**Render plan gratis:** bloquea SMTP (puertos 465/587). Error típico: `[Errno 101] Network is unreachable`. Usá **Resend** (HTTPS):
+
+```env
+AUTH_ADMIN_NOTIFY_EMAIL=tu@gmail.com
+RESEND_API_KEY=re_xxxxxxxx
+RESEND_FROM=onboarding@resend.dev
+```
+
+Creá cuenta en [resend.com](https://resend.com), generá API key. Para pruebas, `RESEND_FROM=onboarding@resend.dev` solo envía al email de tu cuenta Resend. Para producción, verificá tu dominio.
+
+**Alternativa:** plan **pago** de Render → Gmail SMTP vuelve a funcionar:
+
 ```env
 AUTH_ADMIN_NOTIFY_EMAIL=tu@gmail.com
 SMTP_HOST=smtp.gmail.com
@@ -70,9 +82,7 @@ SMTP_PASSWORD=contraseña-de-aplicacion
 SMTP_FROM=tu@gmail.com
 ```
 
-Gmail: usá una **contraseña de aplicación** (16 caracteres), no la clave normal de la cuenta. En Render suele ir mejor **465 + SSL** que 587.
-
-Tras una solicitud, en **Logs** de Render buscá `Email enviado a` o errores como `AUTH_ADMIN_NOTIFY_EMAIL no configurado` / `No se pudo enviar email`. Revisá **spam**. Desde el panel admin podés usar **Enviar correo de prueba**.
+Tras una solicitud, en **Logs** buscá `Email enviado` o errores. Revisá **spam**. Panel admin → **Enviar correo de prueba**.
 
 ### WhatsApp
 

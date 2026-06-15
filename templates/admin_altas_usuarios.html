@@ -129,13 +129,21 @@
         <summary class="admin-acordeon-cabecera">{{ t('admin_smtp_titulo') }}</summary>
         <div class="admin-acordeon-cuerpo">
           <p class="help">{{ t('admin_smtp_help') }}</p>
+          {% if smtp_estado.render_smtp_bloqueado %}
+          <p class="warn">{{ t('admin_smtp_render_bloqueo') }}</p>
+          {% endif %}
           {% if smtp_estado.vars_completas %}
           <p class="ok">{{ t('admin_smtp_vars_ok') }}</p>
           {% else %}
           <p class="warn">{{ t('admin_smtp_vars_faltan') }}</p>
           {% endif %}
+          {% if smtp_estado.modo %}
+          <p class="help">{{ t('admin_smtp_transporte', modo=smtp_estado.modo) }}</p>
+          {% endif %}
           {% if smtp_estado.host %}
           <p class="help">{{ t('admin_smtp_resumen', host=smtp_estado.host, puerto=smtp_estado.puerto, modo=smtp_estado.modo, notify=smtp_estado.notify_email or '—', from_addr=smtp_estado.smtp_from or '—') }}</p>
+          {% elif smtp_estado.smtp_from %}
+          <p class="help">Remitente: {{ smtp_estado.smtp_from }} · Destino avisos: {{ smtp_estado.notify_email or '—' }}</p>
           {% endif %}
           {% if smtp_estado.gmail_from_nota %}
           <p class="warn">{{ smtp_estado.gmail_from_nota }}</p>

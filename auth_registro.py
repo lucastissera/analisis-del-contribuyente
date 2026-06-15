@@ -17,7 +17,9 @@ from email.header import Header
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 import bcrypt
 
@@ -1098,6 +1100,12 @@ def _smtp_error_legible(exc: BaseException) -> str:
             "No se pudo conectar al servidor SMTP (host/puerto). "
             "En Render probá 465+SSL. Detalle: " + raw
         )
+    if "network is unreachable" in lower or "errno 101" in lower:
+        return (
+            "Render plan gratis bloquea SMTP (puertos 25, 465 y 587). "
+            "Configurá RESEND_API_KEY + RESEND_FROM (https://resend.com, envío por HTTPS) "
+            "o actualizá a un plan pago de Render. Detalle: " + raw
+        )
     if "550" in raw or "553" in raw or "sender" in lower:
         return (
             "Problema con el remitente (SMTP_FROM debe coincidir con SMTP_USER en Gmail). "
@@ -1139,6 +1147,104 @@ def _smtp_ejecutar(
         return False, msg
 
 
+def _en_render_host() -> bool:
+    return (os.environ.get("RENDER") or "").strip().lower() in ("true", "1", "yes", "on")
+
+
+def _resend_api_key() -> str:
+    return (os.environ.get("RESEND_API_KEY") or "").strip()
+
+
+def _resend_from() -> str:
+    return (
+        (os.environ.get("RESEND_FROM") or "").strip()
+        or (os.environ.get("SMTP_FROM") or "").strip()
+        or (os.environ.get("SMTP_USER") or "").strip()
+    )
+
+
+def _email_transport() -> str:
+    if _resend_api_key():
+        return "resend"
+    host, user, password, *_ = _smtp_credenciales()
+    if host and user and password:
+        return "smtp"
+    return "none"
+
+
+def _enviar_email_resend(
+    destino: str,
+    asunto: str,
+    cuerpo: str,
+    *,
+    timeout: int = 20,
+) -> tuple[bool, str | None]:
+    api_key = _resend_api_key()
+    if not api_key:
+        return False, "RESEND_API_KEY no configurado"
+    remitente = _resend_from()
+    if not remitente:
+        return False, "RESEND_FROM (o SMTP_FROM) no configurado"
+    payload = json.dumps(
+        {
+            "from": remitente,
+            "to": [destino],
+            "subject": asunto,
+            "text": cuerpo,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": f"{APP_NAME}/email",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            if 200 <= resp.status < 300:
+                _LOG.info("Email enviado vía Resend a %s", destino)
+                return True, None
+            body = resp.read().decode("utf-8", errors="replace")
+            return False, f"Resend HTTP {resp.status}: {body[:350]}"
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        return False, f"Resend HTTP {exc.code}: {body[:350]}"
+    except URLError as exc:
+        return False, _smtp_error_legible(exc.reason if exc.reason else exc)
+    except Exception as exc:
+        return False, _smtp_error_legible(exc)
+
+
+def _resend_probar_api(timeout: int = 15) -> tuple[bool, str | None]:
+    api_key = _resend_api_key()
+    if not api_key:
+        return False, "RESEND_API_KEY no configurado"
+    req = Request(
+        "https://api.resend.com/domains",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": f"{APP_NAME}/email",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            if 200 <= resp.status < 300:
+                return True, None
+            body = resp.read().decode("utf-8", errors="replace")
+            return False, f"Resend HTTP {resp.status}: {body[:350]}"
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        return False, f"Resend HTTP {exc.code}: {body[:350]}"
+    except Exception as exc:
+        return False, _smtp_error_legible(exc)
+
+
 def _smtp_timeout_sec() -> int:
     raw = (os.environ.get("SMTP_TIMEOUT_SEC") or "8").strip()
     try:
@@ -1162,12 +1268,21 @@ def _enviar_email(
     *,
     timeout: int | None = None,
 ) -> tuple[bool, str | None]:
-    host, user, password, port, use_ssl, remitente = _smtp_credenciales()
-    wait = timeout if timeout is not None else _smtp_timeout_sec()
-    if not host:
-        return False, "SMTP_HOST no configurado"
     if not destino:
         return False, "Destino de email vacío"
+    wait = timeout if timeout is not None else _smtp_timeout_sec()
+    if _resend_api_key():
+        return _enviar_email_resend(destino, asunto, cuerpo, timeout=max(wait, 15))
+
+    host, user, password, port, use_ssl, remitente = _smtp_credenciales()
+    if not host:
+        hint = (
+            "Configurá RESEND_API_KEY + RESEND_FROM (Render gratis bloquea SMTP) "
+            "o SMTP_HOST + SMTP_USER + SMTP_PASSWORD."
+        )
+        if _en_render_host():
+            return False, hint
+        return False, "SMTP_HOST no configurado"
     if not user or not password:
         return False, "SMTP_USER o SMTP_PASSWORD faltante"
     if (
@@ -1228,44 +1343,76 @@ def _avisar_admin_por_email(
 
 
 def estado_smtp(*, probar_conexion: bool = False) -> dict[str, Any]:
-    """Diagnóstico de variables SMTP (sin exponer contraseñas)."""
-    host, user, password, port, use_ssl, from_addr = _smtp_credenciales()
+    """Diagnóstico de email (SMTP o Resend HTTPS), sin exponer secretos."""
+    host, user, password, port, use_ssl, smtp_from = _smtp_credenciales()
     notify = _email_admin_configurado()
-    vars_presentes = {
-        "AUTH_ADMIN_NOTIFY_EMAIL": bool(notify),
-        "SMTP_HOST": bool(host),
-        "SMTP_USER": bool(user),
-        "SMTP_PASSWORD": bool(password),
-        "SMTP_FROM": bool(from_addr),
-    }
+    resend_key = _resend_api_key()
+    resend_from = _resend_from()
+    transport = _email_transport()
     gmail_from_ok = True
     gmail_from_nota = None
     if host and "gmail.com" in host.lower() and user:
-        gmail_from_ok = from_addr.lower() == user.lower()
+        gmail_from_ok = smtp_from.lower() == user.lower()
         if not gmail_from_ok:
             gmail_from_nota = "SMTP_FROM debe ser igual a SMTP_USER para Gmail."
+
+    if transport == "resend":
+        vars_presentes = {
+            "AUTH_ADMIN_NOTIFY_EMAIL": bool(notify),
+            "RESEND_API_KEY": bool(resend_key),
+            "RESEND_FROM": bool(resend_from),
+        }
+        vars_completas = all(vars_presentes.values())
+    else:
+        vars_presentes = {
+            "AUTH_ADMIN_NOTIFY_EMAIL": bool(notify),
+            "SMTP_HOST": bool(host),
+            "SMTP_USER": bool(user),
+            "SMTP_PASSWORD": bool(password),
+            "SMTP_FROM": bool(smtp_from),
+        }
+        vars_completas = all(vars_presentes.values())
+
+    avisos = [
+        "Render plan gratis: SMTP (puertos 465/587) bloqueado → usá RESEND_API_KEY.",
+        "Resend: https://resend.com — prueba con FROM=onboarding@resend.dev (solo a tu email).",
+        "Alternativa: plan pago Render (SMTP Gmail vuelve a funcionar).",
+        "Revisá spam en AUTH_ADMIN_NOTIFY_EMAIL.",
+    ]
+    if transport == "smtp":
+        avisos = [
+            "Gmail SMTP: contraseña de aplicación (16 caracteres).",
+            "En Render gratis SMTP no funciona (Network unreachable).",
+            "SMTP_FROM = SMTP_USER en Gmail.",
+            "Revisá spam en AUTH_ADMIN_NOTIFY_EMAIL.",
+        ]
+
     out: dict[str, Any] = {
-        "vars_completas": all(vars_presentes.values()),
+        "transporte": transport,
+        "vars_completas": vars_completas,
         "vars_presentes": vars_presentes,
         "host": host or None,
-        "puerto": port,
-        "use_ssl": use_ssl,
-        "modo": "SSL" if use_ssl else "STARTTLS",
+        "puerto": port if transport == "smtp" else None,
+        "use_ssl": use_ssl if transport == "smtp" else None,
+        "modo": "HTTPS (Resend)" if transport == "resend" else ("SSL" if use_ssl else "STARTTLS"),
         "notify_email": notify or None,
-        "smtp_from": from_addr or None,
+        "smtp_from": resend_from if transport == "resend" else (smtp_from or None),
         "gmail_from_ok": gmail_from_ok,
         "gmail_from_nota": gmail_from_nota,
-        "avisos": [
-            "Gmail: contraseña de aplicación (16 caracteres), no la clave normal.",
-            "En Render: SMTP_HOST=smtp.gmail.com, SMTP_PORT=465, SMTP_USE_SSL=1.",
-            "SMTP_FROM y SMTP_USER deben ser el mismo correo en Gmail.",
-            "Revisá spam en AUTH_ADMIN_NOTIFY_EMAIL.",
-        ],
+        "render_host": _en_render_host(),
+        "render_smtp_bloqueado": _en_render_host() and transport == "smtp",
+        "avisos": avisos,
     }
     if probar_conexion:
-        if not (host and user and password):
+        if not vars_completas:
+            faltan = [k for k, v in vars_presentes.items() if not v]
             out["conexion_ok"] = False
-            out["conexion_error"] = "Faltan SMTP_HOST, SMTP_USER o SMTP_PASSWORD"
+            out["conexion_error"] = f"Faltan variables: {', '.join(faltan)}"
+        elif transport == "resend":
+            ok, err = _resend_probar_api(timeout=20)
+            out["conexion_ok"] = ok
+            if err:
+                out["conexion_error"] = err
         elif not gmail_from_ok:
             out["conexion_ok"] = False
             out["conexion_error"] = gmail_from_nota
@@ -1313,7 +1460,7 @@ def probar_email_admin() -> dict[str, Any]:
     asunto = f"[{APP_NAME}] Prueba de notificación de altas"
     cuerpo = (
         f"Correo de prueba desde {APP_NAME}.\n\n"
-        "Si lo recibís, SMTP y AUTH_ADMIN_NOTIFY_EMAIL están bien configurados.\n"
+        "Si lo recibís, la notificación por email está bien configurada.\n"
         "Revisá también la carpeta de spam."
     )
     ok, err = _enviar_email(
