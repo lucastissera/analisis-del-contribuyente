@@ -1,39 +1,37 @@
-"""Genera el Excel resumen por CUIT con tabla dinámica nativa.
+"""Genera el Excel resumen por CUIT con tabla plana e hipervínculos al detalle mensual.
 
-Estrategia (recomendada para openpyxl, que no crea dinámicas desde cero):
-se parte de una plantilla `static/plantilla_resumen_cuit.xlsx` creada una vez
-con Excel (tabla dinámica + `refreshOnLoad`). En runtime sólo se reemplazan los
-datos de la hoja «Datos» y se ajusta el rango de la tabla; Excel recalcula la
-dinámica al abrir el archivo. El drill-down (doble clic en un valor) abre una
-hoja nueva con el detalle —incluye la clasificación por mes— sin que el sistema
-tenga que generarla.
+Hoja «Resumen»: una fila por CUIT con columnas MCE y MCR en secuencia.
+Cada importe enlaza a una hoja de detalle con la composición mensual del valor.
 """
 
 from __future__ import annotations
 
 import io
 import re
-import sys
-import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
-from xml.sax.saxutils import escape
 
-HEADERS = [
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+
+RESUMEN_HEADERS = [
     "CUIT",
     "Razón Social",
-    "Tipo",
-    "Mes",
-    "Neto Gravado Total",
-    "Ingresos no grav. y exentos",
-    "Total IVA",
-    "Imp. Total",
+    "Neto gravado total (MCE)",
+    "No gravado + exento (MCE)",
+    "Total IVA (MCE)",
+    "Total (MCE)",
+    "Neto gravado total (MCR)",
+    "Total IVA (MCR)",
+    "Total (MCR)",
 ]
 
 NOMBRE_SALIDA = "Resumen por CUIT.xlsx"
-_PLANTILLA = "plantilla_resumen_cuit.xlsx"
-_HOJA_DATOS = "xl/worksheets/sheet1.xml"
-_TABLA = "xl/tables/table1.xml"
+
+_FORMATO_CONTABILIDAD = (
+    r'_ * #,##0.00_ ;_ * (#,##0.00)_ ;_ * "-"??_ ;_ @_ '
+)
+_FONT_HIPERVINCULO = Font(color="0563C1", underline="single")
 
 
 @dataclass
@@ -54,6 +52,15 @@ class _AcumTipo:
         acc[1] += no_grav_exento
         acc[2] += iva
         acc[3] += total
+
+    def totales(self) -> tuple[float, float, float, float]:
+        neto = no_grav = iva = total = 0.0
+        for vals in self.por_mes.values():
+            neto += vals[0]
+            no_grav += vals[1]
+            iva += vals[2]
+            total += vals[3]
+        return neto, no_grav, iva, total
 
 
 @dataclass
@@ -97,120 +104,195 @@ class ResumenCuitAcumulador:
             for ac in self._cuits.values()
         )
 
-    def filas_datos(self) -> list[tuple[str, str, str, str, float, float, float, float]]:
-        filas: list[tuple[str, str, str, str, float, float, float, float]] = []
-        for cuit in sorted(self._cuits):
-            ac = self._cuits[cuit]
-            for tipo_nombre, tipo_acc in (
-                ("Emitidos", ac.emitidos),
-                ("Recibidos", ac.recibidos),
-            ):
-                for mes in sorted(tipo_acc.por_mes):
-                    neto, no_grav_exento, iva, total = tipo_acc.por_mes[mes]
-                    filas.append(
-                        (
-                            cuit,
-                            ac.razon_social or cuit,
-                            tipo_nombre,
-                            mes,
-                            neto,
-                            no_grav_exento,
-                            iva,
-                            total,
-                        )
-                    )
-        return filas
+    def cuits_ordenados(self) -> list[_AcumCuit]:
+        return [self._cuits[cuit] for cuit in sorted(self._cuits)]
 
 
-def _dir_static() -> Path:
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
-    else:
-        base = Path(__file__).resolve().parents[1]
-    return base / "static"
+def _formatear_cuit(cuit: str) -> str:
+    digitos = re.sub(r"\D", "", cuit)
+    if len(digitos) == 11:
+        return f"{digitos[:2]}-{digitos[2:10]}-{digitos[10]}"
+    return str(cuit)
 
 
-def _ruta_plantilla() -> Path | None:
-    p = _dir_static() / _PLANTILLA
-    return p if p.is_file() else None
+def _nombre_hoja_detalle(cuit: str) -> str:
+    digitos = re.sub(r"\D", "", cuit) or cuit
+    return f"Det {digitos}"[:31]
 
 
-# Estilo 2 en la plantilla = formato contabilidad (numFmtId 164).
-_ESTILO_CONTABILIDAD = "2"
+def _aplicar_contabilidad(celda) -> None:
+    celda.number_format = _FORMATO_CONTABILIDAD
 
 
-def _celda_num(ref: str, valor: float) -> str:
-    return f'<c r="{ref}" s="{_ESTILO_CONTABILIDAD}"><v>{valor:.2f}</v></c>'
+def _escribir_fila_mensual(
+    ws,
+    row: int,
+    mes: str,
+    valores: list[float],
+    *,
+    col_inicio: int = 1,
+) -> None:
+    ws.cell(row, col_inicio, mes)
+    for offset, valor in enumerate(valores, start=1):
+        celda = ws.cell(row, col_inicio + offset, round(float(valor), 2))
+        _aplicar_contabilidad(celda)
 
 
-def _celda_txt(ref: str, texto: str) -> str:
-    return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{escape(texto)}</t></is></c>'
-
-
-def _col(idx: int) -> str:
-    return chr(ord("A") + idx)
-
-
-def _construir_sheet_data(filas) -> tuple[str, int]:
-    rows = []
-    encab = "".join(_celda_txt(f"{_col(j)}1", h) for j, h in enumerate(HEADERS))
-    rows.append(f'<row r="1" spans="1:8">{encab}</row>')
-
-    r = 2
-    for (cuit, razon, tipo, mes, neto, no_grav_exento, iva, total) in filas:
-        try:
-            cuit_cell = f'<c r="A{r}"><v>{int(cuit)}</v></c>'
-        except (ValueError, TypeError):
-            cuit_cell = _celda_txt(f"A{r}", str(cuit))
-        celdas = (
-            cuit_cell
-            + _celda_txt(f"B{r}", str(razon))
-            + _celda_txt(f"C{r}", str(tipo))
-            + _celda_txt(f"D{r}", str(mes))
-            + _celda_num(f"E{r}", float(neto))
-            + _celda_num(f"F{r}", float(no_grav_exento))
-            + _celda_num(f"G{r}", float(iva))
-            + _celda_num(f"H{r}", float(total))
+def _escribir_total_seccion(
+    ws,
+    row: int,
+    first_data_row: int,
+    last_data_row: int,
+    *,
+    col_inicio: int,
+    n_columnas: int,
+) -> None:
+    if last_data_row < first_data_row:
+        return
+    ws.cell(row, col_inicio, "Total")
+    for offset in range(1, n_columnas + 1):
+        col = col_inicio + offset
+        col_l = get_column_letter(col)
+        celda = ws.cell(
+            row,
+            col,
+            f"=SUM({col_l}{first_data_row}:{col_l}{last_data_row})",
         )
-        rows.append(f'<row r="{r}" spans="1:8">{celdas}</row>')
-        r += 1
-    return "<sheetData>" + "".join(rows) + "</sheetData>", r - 1
+        _aplicar_contabilidad(celda)
+
+
+def _escribir_hoja_detalle(ws, ac: _AcumCuit) -> dict[str, str]:
+    """Detalle mensual del CUIT. Devuelve celdas destino para hipervínculos."""
+    anchors: dict[str, str] = {}
+    titulo = _formatear_cuit(ac.cuit)
+    if ac.razon_social:
+        titulo = f"{titulo} — {ac.razon_social}"
+    ws["A1"] = titulo
+
+    row = 3
+    ws.cell(row, 1, "Mis Comprobantes Emitidos")
+    row += 1
+    headers_emitidos = [
+        "Mes",
+        "Neto Gravado Total",
+        "Ingresos no grav. y exentos",
+        "Total IVA",
+        "Imp. Total",
+    ]
+    for j, encab in enumerate(headers_emitidos, start=1):
+        ws.cell(row, j, encab)
+    header_emitidos = row
+    row += 1
+    first_emitidos = row
+    for mes in sorted(ac.emitidos.por_mes):
+        neto, no_grav, iva, total = ac.emitidos.por_mes[mes]
+        _escribir_fila_mensual(ws, row, mes, [neto, no_grav, iva, total])
+        row += 1
+    if row > first_emitidos:
+        _escribir_total_seccion(
+            ws,
+            row,
+            first_emitidos,
+            row - 1,
+            col_inicio=1,
+            n_columnas=4,
+        )
+        row += 1
+
+    anchors["mce_neto"] = f"B{header_emitidos}"
+    anchors["mce_no_grav"] = f"C{header_emitidos}"
+    anchors["mce_iva"] = f"D{header_emitidos}"
+    anchors["mce_total"] = f"E{header_emitidos}"
+
+    row += 1
+    ws.cell(row, 1, "Mis Comprobantes Recibidos")
+    row += 1
+    headers_recibidos = ["Mes", "Neto Gravado Total", "Total IVA", "Imp. Total"]
+    for j, encab in enumerate(headers_recibidos, start=1):
+        ws.cell(row, j, encab)
+    header_recibidos = row
+    row += 1
+    first_recibidos = row
+    for mes in sorted(ac.recibidos.por_mes):
+        neto, _no_grav, iva, total = ac.recibidos.por_mes[mes]
+        _escribir_fila_mensual(ws, row, mes, [neto, iva, total])
+        row += 1
+    if row > first_recibidos:
+        _escribir_total_seccion(
+            ws,
+            row,
+            first_recibidos,
+            row - 1,
+            col_inicio=1,
+            n_columnas=3,
+        )
+
+    anchors["mcr_neto"] = f"B{header_recibidos}"
+    anchors["mcr_iva"] = f"C{header_recibidos}"
+    anchors["mcr_total"] = f"D{header_recibidos}"
+    return anchors
+
+
+def _celda_resumen_con_detalle(
+    ws,
+    row: int,
+    col: int,
+    valor: float,
+    hoja_detalle: str,
+    celda_detalle: str,
+) -> None:
+    celda = ws.cell(row, col, round(float(valor), 2))
+    _aplicar_contabilidad(celda)
+    destino = f"'{hoja_detalle}'!{celda_detalle}"
+    celda.hyperlink = f"#{destino}"
+    celda.font = _FONT_HIPERVINCULO
 
 
 def construir_resumen_cuit_xlsx(acumulador: ResumenCuitAcumulador) -> bytes | None:
-    """Devuelve el xlsx resumen (bytes) o None si no hay plantilla/datos."""
+    """Devuelve el xlsx resumen (bytes) o None si no hay datos."""
     if not acumulador.tiene_datos():
         return None
-    plantilla = _ruta_plantilla()
-    if plantilla is None:
-        return None
 
-    filas = acumulador.filas_datos()
-    sheet_data, n_filas = _construir_sheet_data(filas)
-    ref = f"A1:H{n_filas}"
+    wb = Workbook()
+    ws_resumen = wb.active
+    ws_resumen.title = "Resumen"
 
-    base = plantilla.read_bytes()
+    for col, encab in enumerate(RESUMEN_HEADERS, start=1):
+        ws_resumen.cell(1, col, encab)
+
+    fila = 2
+    for ac in acumulador.cuits_ordenados():
+        hoja_det = _nombre_hoja_detalle(ac.cuit)
+        ws_det = wb.create_sheet(hoja_det)
+        anchors = _escribir_hoja_detalle(ws_det, ac)
+
+        neto_e, no_grav_e, iva_e, total_e = ac.emitidos.totales()
+        neto_r, _no_grav_r, iva_r, total_r = ac.recibidos.totales()
+
+        ws_resumen.cell(fila, 1, _formatear_cuit(ac.cuit))
+        ws_resumen.cell(fila, 2, ac.razon_social or _formatear_cuit(ac.cuit))
+
+        columnas_valores = (
+            (3, neto_e, "mce_neto"),
+            (4, no_grav_e, "mce_no_grav"),
+            (5, iva_e, "mce_iva"),
+            (6, total_e, "mce_total"),
+            (7, neto_r, "mcr_neto"),
+            (8, iva_r, "mcr_iva"),
+            (9, total_r, "mcr_total"),
+        )
+        for col, valor, clave in columnas_valores:
+            destino = anchors.get(clave)
+            if destino:
+                _celda_resumen_con_detalle(
+                    ws_resumen, fila, col, valor, hoja_det, destino
+                )
+            else:
+                celda = ws_resumen.cell(fila, col, round(float(valor), 2))
+                _aplicar_contabilidad(celda)
+
+        fila += 1
+
     salida = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(base)) as zin, zipfile.ZipFile(
-        salida, "w", zipfile.ZIP_DEFLATED
-    ) as zout:
-        for item in zin.infolist():
-            data = zin.read(item.filename)
-            if item.filename == _HOJA_DATOS:
-                txt = data.decode("utf-8")
-                txt = re.sub(r"<sheetData>.*?</sheetData>", sheet_data, txt, flags=re.S)
-                txt = re.sub(
-                    r'<dimension ref="[^"]*"/>',
-                    f'<dimension ref="{ref}"/>',
-                    txt,
-                )
-                data = txt.encode("utf-8")
-            elif item.filename == _TABLA:
-                txt = data.decode("utf-8")
-                txt = re.sub(r'(<table[^>]*\sref=")[^"]*(")', rf"\g<1>{ref}\g<2>", txt)
-                txt = re.sub(
-                    r'(<autoFilter\s+ref=")[^"]*(")', rf"\g<1>{ref}\g<2>", txt
-                )
-                data = txt.encode("utf-8")
-            zout.writestr(item, data)
+    wb.save(salida)
     return salida.getvalue()

@@ -838,6 +838,10 @@ def _nuevo_contexto_stealth(playwright, *, headless: bool):
     return browser, context
 
 
+def _mensaje_clave_fiscal_incorrecta(cuit: str) -> str:
+    return f"La clave fiscal ingresada para el CUIT {cuit} es incorrecta."
+
+
 def _detectar_fallo_login(page, cuit: str) -> None:
     pausa_humana(0.5, 1.0)
     try:
@@ -845,21 +849,24 @@ def _detectar_fallo_login(page, cuit: str) -> None:
     except Exception:
         cuerpo = ""
     if any(f in cuerpo for f in _FRASES_ERROR_LOGIN):
-        raise LoginArcaError(
-            f"No se pudo ingresar a ARCA con CUIT {cuit} (clave o CUIT incorrectos)."
-        )
+        raise LoginArcaError(_mensaje_clave_fiscal_incorrecta(cuit))
     url = page.url.lower()
     if "login" in url or "auth.afip" in url:
         pwd = page.locator('input[type="password"]')
         try:
             if pwd.count() and pwd.first.is_visible(timeout=2000):
-                raise LoginArcaError(
-                    f"No se pudo ingresar a ARCA con CUIT {cuit} (clave o CUIT incorrectos)."
-                )
+                raise LoginArcaError(_mensaje_clave_fiscal_incorrecta(cuit))
         except LoginArcaError:
             raise
         except Exception:
             pass
+
+
+def _exigir_login_exitoso(page, cuit: str) -> None:
+    """Tras el login: mensaje explícito de AFIP o pantalla de ingreso persistente."""
+    _detectar_fallo_login(page, cuit)
+    if _pagina_es_login_afip(page):
+        raise LoginArcaError(_mensaje_clave_fiscal_incorrecta(cuit))
 
 
 def _llenar_cuit_y_avanzar(page, cuit: str) -> None:
@@ -935,11 +942,14 @@ def _login_clave_fiscal(page, clave: str, cuit: str) -> None:
     _esperar_pagina(page, timeout=63_000)
     _detectar_fallo_login(page, cuit)
     _esperar_post_login(page, timeout_sec=35)
+    _exigir_login_exitoso(page, cuit)
 
 
-def _abrir_mis_comprobantes(page):
+def _abrir_mis_comprobantes(page, *, cuit_login: str | None = None):
     pausa_humana(ESPERA_CORTA_SEC * 0.8, ESPERA_CORTA_SEC * 1.4)
     _esperar_post_login(page)
+    if cuit_login:
+        _exigir_login_exitoso(page, cuit_login)
     _esperar_pagina(page, timeout=42_000)
 
     # IMPORTANTE: entrar por URL directa a fes.afip.gob.ar/mcmp NO autentica
@@ -978,6 +988,8 @@ def _abrir_mis_comprobantes(page):
         pausa_humana(0.8, 1.6)
 
     _volcar_diagnostico(page, "no_abrio_mis_comprobantes")
+    if cuit_login:
+        _exigir_login_exitoso(page, cuit_login)
     raise AutomatizacionArcaError(
         "No se pudo abrir Mis Comprobantes tras el login "
         "(enlace en el portal, buscador y URL directa fallaron). "
@@ -1882,7 +1894,7 @@ def _ejecutar_descarga_mis_comprobantes_impl(
         _log(on_log, "Sesión iniciada.")
         _paso(on_paso, "mis_comprobantes", "en_curso")
         _log(on_log, "Abriendo Mis Comprobantes…")
-        mc = _abrir_mis_comprobantes(page)
+        mc = _abrir_mis_comprobantes(page, cuit_login=cred.cuit_login)
         _paso(on_paso, "mis_comprobantes", "ok")
         _log(on_log, f"Período: {fd} – {fh}.")
         return _flujo_post_login(

@@ -1,11 +1,9 @@
-"""Genera (una sola vez) la plantilla con tabla dinámica nativa para el
-resumen por CUIT: static/plantilla_resumen_cuit.xlsx
+"""OBSOLETO: el resumen por CUIT se genera con openpyxl en resumen_cuit.py.
 
-Requiere Microsoft Excel instalado + pywin32 (solo entorno de desarrollo).
-El portable NO necesita Excel: en runtime se inyectan los datos en esta
-plantilla con openpyxl/zip y la tabla dinámica se refresca al abrir.
+Este script conservaba la plantilla con tabla dinámica (static/plantilla_resumen_cuit.xlsx).
+Ya no se usa en runtime. Se mantiene solo por referencia histórica.
 
-Uso:  python tools/crear_plantilla_resumen.py
+Uso (opcional):  python tools/crear_plantilla_resumen.py
 """
 
 from __future__ import annotations
