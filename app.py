@@ -315,6 +315,7 @@ def _session_idle_and_login():
         "solicitar_acceso",
         "activar_cuenta",
         "olvide_contrasena",
+        "guia_usuario",
         None,
     ):
         return None
@@ -484,6 +485,60 @@ def set_lang(code: str):
     if isinstance(nxt, str) and nxt.startswith("/") and not nxt.startswith("//"):
         return redirect(nxt)
     return redirect(url_for("index"))
+
+
+_GUIA_USUARIO_SECCIONES: tuple[dict[str, object], ...] = (
+    {
+        "num": 1,
+        "titulo_key": "guia_sec1_title",
+        "cuerpo_key": "guia_sec1_body",
+        "imagen": "1-menu-principal.jpg",
+    },
+    {
+        "num": 2,
+        "titulo_key": "guia_sec2_title",
+        "cuerpo_key": "guia_sec2_body",
+        "imagen": "2-imputacion-contable.jpg",
+    },
+    {
+        "num": 3,
+        "titulo_key": "guia_sec3_title",
+        "cuerpo_key": "guia_sec3_body",
+        "imagen": "3-descarga-procesamiento-automatico.jpg",
+    },
+    {
+        "num": 4,
+        "titulo_key": "guia_sec4_title",
+        "cuerpo_key": "guia_sec4_body",
+        "imagen": "4-procesamiento-comprobantes.jpg",
+    },
+    {
+        "num": 5,
+        "titulo_key": "guia_sec5_title",
+        "cuerpo_key": "guia_sec5_body",
+        "imagen": "5-dfe.jpg",
+    },
+    {
+        "num": 6,
+        "titulo_key": "guia_sec6_title",
+        "cuerpo_key": "guia_sec6_body",
+        "imagen": "5-1-nuestra-parte.jpg",
+    },
+    {
+        "num": 7,
+        "titulo_key": "guia_sec7_title",
+        "cuerpo_key": "guia_sec7_body",
+        "imagen": "6-analisis-programado.jpg",
+    },
+)
+
+
+@app.route("/guia-usuario")
+def guia_usuario():
+    return render_template(
+        "guia_usuario.html",
+        secciones=_GUIA_USUARIO_SECCIONES,
+    )
 
 
 @app.route("/solicitar-acceso", methods=["GET", "POST"])

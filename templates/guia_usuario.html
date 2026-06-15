@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('guia_page_title') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" />
+    <script>
+      try {
+        if (localStorage.getItem("tema") === "oscuro") document.documentElement.classList.add("modo-oscuro");
+      } catch (e) {}
+    </script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      a { color: var(--color-link); }
+      .pagina-guia {
+        max-width: 52rem;
+        margin: 0 auto;
+      }
+      .guia-cabecera {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .guia-cabecera h1 {
+        font-size: clamp(1.35rem, 3vw, 1.85rem);
+        margin: 0 0 0.5rem;
+        line-height: 1.25;
+      }
+      .guia-cabecera p {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 1rem;
+        line-height: 1.45;
+      }
+      .guia-seccion {
+        margin-bottom: 2.25rem;
+        padding-bottom: 2rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .guia-seccion:last-of-type {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+      .guia-seccion h2 {
+        font-size: 1.15rem;
+        margin: 0 0 0.65rem;
+        line-height: 1.3;
+      }
+      .guia-seccion h2 .guia-num {
+        color: var(--color-link);
+        margin-right: 0.35rem;
+      }
+      .guia-seccion p {
+        margin: 0 0 1rem;
+        line-height: 1.55;
+        color: var(--text-primary);
+      }
+      .guia-captura {
+        margin: 0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: var(--bg-panel);
+      }
+      .guia-captura img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .guia-volver {
+        margin: 0 0 1.5rem;
+        font-size: 0.92rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pagina-guia">
+      {% with mostrar_volver=false, mostrar_logout=session.get('user') %}
+      {% include 'partials/barra_superior.html' %}
+      {% endwith %}
+
+      <p class="guia-volver">
+        {% if session.get('user') %}
+        <a href="{{ url_for('index') }}">{{ t('guia_volver_inicio') }}</a>
+        {% else %}
+        <a href="{{ url_for('login') }}">{{ t('guia_volver_login') }}</a>
+        {% endif %}
+      </p>
+
+      <header class="guia-cabecera">
+        <h1>{{ t('guia_heading') }}</h1>
+        <p>{{ t('guia_intro') }}</p>
+      </header>
+
+      {% for sec in secciones %}
+      <section class="guia-seccion" id="seccion-{{ sec.num }}">
+        <h2><span class="guia-num">{{ sec.num }}.</span> {{ t(sec.titulo_key) }}</h2>
+        <p>{{ t(sec.cuerpo_key) }}</p>
+        <figure class="guia-captura">
+          <img
+            src="{{ url_for('static', filename='instructivo/' ~ sec.imagen) }}"
+            alt="{{ t(sec.titulo_key) }}"
+            loading="lazy"
+          />
+        </figure>
+      </section>
+      {% endfor %}
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

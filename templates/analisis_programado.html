@@ -209,7 +209,7 @@
           <p class="help" style="margin:0">{{ t('ap_carpeta_destino') }}: <code id="carpeta-label" class="ruta">—</code></p>
           {% if not modo_escritorio %}
           <p class="help" style="margin:0.35rem 0 0">{{ t('ap_carpeta_modo_web') }}</p>
-          <p class="help" style="margin:0.35rem 0 0">{{ t('ap_carpeta_permiso_navegador') }}</p>
+          <p class="help" style="margin:0.35rem 0 0">{{ t('ap_carpeta_permiso_navegador')|safe }}</p>
           {% endif %}
           <button type="button" class="btn-sec" id="btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
           <button type="button" class="btn-sec btn-cancelar-descarga" id="ap-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>

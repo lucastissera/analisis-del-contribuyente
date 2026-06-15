@@ -327,7 +327,7 @@
         <div class="carpeta-row">
           <p class="help" style="margin:0">{{ t('carpeta_destino_label') }}: <code id="dfe-carpeta-label" class="ruta">—</code></p>
           {% if not modo_escritorio %}
-          <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_modo_web') }}</p>
+          <p class="help" style="margin:0.35rem 0 0">{{ t('dfe_carpeta_modo_web') }}</p>
           <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_permiso_navegador')|safe }}</p>
           {% endif %}
           <button type="button" class="btn-sec" id="dfe-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
@@ -370,7 +370,7 @@
         working: {{ t('dfe_working')|tojson }},
         quitar: {{ t('dfe_manual_quitar')|tojson }},
         carpetaTitulo: {{ t('carpeta_elegir_titulo')|tojson }},
-        carpetaModoWeb: {{ t('carpeta_modo_web')|tojson }},
+        carpetaModoWeb: {{ t('dfe_carpeta_modo_web')|tojson }},
         errCarpetaWebApi: {{ t('err_carpeta_web_api')|tojson }},
         errCarpetaRestringida: {{ t('err_carpeta_restringida')|tojson }},
         errCarpetaPermisoDenegado: {{ t('err_carpeta_permiso_denegado')|tojson }},

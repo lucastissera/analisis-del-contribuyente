@@ -87,7 +87,7 @@ html.modo-oscuro .btn-tema .icono-sol {
   font-weight: 600;
 }
 .pie-legal {
-  margin-top: 3rem;
+  margin-top: 0;
   padding-top: 1.25rem;
   border-top: 1px solid var(--border-divider, var(--border));
   text-align: right;
@@ -109,6 +109,21 @@ html.modo-oscuro .btn-tema .icono-sol {
   max-width: 38rem;
 }
 .pie-desktop-quit a {
+  font-weight: 600;
+  color: var(--color-link);
+}
+.pie-guia-enlace {
+  margin-top: 3rem;
+  text-align: right;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.pie-guia-enlace p {
+  margin: 0 0 0.75rem 0;
+  margin-left: auto;
+  max-width: 38rem;
+}
+.pie-guia-enlace a {
   font-weight: 600;
   color: var(--color-link);
 }
@@ -251,6 +266,7 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   --titulo-fs: clamp(1.25rem, 2.8vw, 1.65rem);
   --subtitulo-fs: clamp(1rem, 2.2vw, 1.2rem);
   --cabecera-ancho: min(100%, 32rem);
+  --logo-ancho: min(100%, 64rem);
 }
 .cabecera--inicio h1 {
   flex: none;
@@ -273,7 +289,7 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   color: var(--text-muted, #444);
 }
 .cabecera--inicio .isologo-wrap {
-  width: var(--cabecera-ancho);
+  width: var(--logo-ancho);
   max-width: 100%;
   margin-inline: auto;
   line-height: 0;
