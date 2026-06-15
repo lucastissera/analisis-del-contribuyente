@@ -40,15 +40,16 @@ HEADERS = [
     "Tipo",
     "Mes",
     "Neto Gravado Total",
+    "Ingresos no grav. y exentos",
     "Total IVA",
     "Imp. Total",
 ]
 
 # Filas de muestra (necesarias para construir la dinámica; se sobreescriben en runtime)
 MUESTRA = [
-    ["20000000001", "EJEMPLO SA", "Emitidos", "2025-01", 1000.0, 210.0, 1210.0],
-    ["20000000001", "EJEMPLO SA", "Recibidos", "2025-01", 500.0, 105.0, 605.0],
-    ["20000000002", "OTRO EJEMPLO SRL", "Emitidos", "2025-02", 2000.0, 420.0, 2420.0],
+    ["20000000001", "EJEMPLO SA", "Emitidos", "2025-01", 1000.0, 150.0, 210.0, 1210.0],
+    ["20000000001", "EJEMPLO SA", "Recibidos", "2025-01", 500.0, 80.0, 105.0, 605.0],
+    ["20000000002", "OTRO EJEMPLO SRL", "Emitidos", "2025-02", 2000.0, 200.0, 420.0, 2420.0],
 ]
 
 
@@ -83,7 +84,7 @@ def _corregir_formato_contabilidad(ruta: Path) -> None:
 
 def main() -> int:
     SALIDA.parent.mkdir(parents=True, exist_ok=True)
-    excel = win32.gencache.EnsureDispatch("Excel.Application")
+    excel = win32.Dispatch("Excel.Application")
     excel.Visible = False
     excel.DisplayAlerts = False
     wb = excel.Workbooks.Add()
@@ -130,12 +131,17 @@ def main() -> int:
         f_cuit.Subtotals = sin_subtotales
         f_razon.Subtotals = sin_subtotales
 
-        for medida in ("Neto Gravado Total", "Total IVA", "Imp. Total"):
+        for medida in (
+            "Neto Gravado Total",
+            "Ingresos no grav. y exentos",
+            "Total IVA",
+            "Imp. Total",
+        ):
             campo = pt.AddDataField(pt.PivotFields(medida), f"Σ {medida}", xlSum)
             campo.NumberFormat = FORMATO_CONTABILIDAD
 
         # Columnas de importes en la hoja de origen también en contabilidad.
-        ws.Columns("E:G").NumberFormat = FORMATO_CONTABILIDAD
+        ws.Columns("E:H").NumberFormat = FORMATO_CONTABILIDAD
 
         # Layout tabular + repetir etiquetas (CUIT y Razón Social en columnas propias)
         pt.RowAxisLayout(xlTabularRow)

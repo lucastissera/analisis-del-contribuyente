@@ -50,3 +50,16 @@ def verificar_cancelacion(job_id: str | None = None, *, ap: bool = False) -> Non
         return
     if job_id and cancelacion_solicitada(job_id):
         raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+
+
+def cupo_consumible_tras_cuit(
+    job_id: str | None = None,
+    *,
+    modo_ap: bool = False,
+) -> bool:
+    """False si el usuario canceló: el CUIT en curso no debe descontar cupo."""
+    if modo_ap and cancelacion_solicitada_ap():
+        return False
+    if job_id and cancelacion_solicitada(job_id):
+        return False
+    return True

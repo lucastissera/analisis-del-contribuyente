@@ -93,6 +93,7 @@ class ConfigAnalisisProgramado:
     filas: list[dict[str, Any]] = field(default_factory=list)
     ultima_ejecucion: str | None = None
     ultimo_resultado: dict[str, Any] | None = None
+    usuario_cupo: str = ""
 
     def a_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -139,6 +140,7 @@ def cargar_config() -> ConfigAnalisisProgramado:
             filas=list(data.get("filas") or []),
             ultima_ejecucion=data.get("ultima_ejecucion"),
             ultimo_resultado=data.get("ultimo_resultado"),
+            usuario_cupo=str(data.get("usuario_cupo") or ""),
         )
     except Exception:
         return ConfigAnalisisProgramado()
@@ -332,6 +334,23 @@ def ejecutar_analisis_programado(
         if not cfg.filas:
             raise ValueError("No hay filas de datos cargadas.")
 
+        usuario_cupo = (cfg.usuario_cupo or "").strip()
+        hay_cupo = None
+        on_cuit_exitoso = None
+        registrar_valor_mc = None
+        registrar_valor_dfe = None
+        registrar_valor_np = None
+        if usuario_cupo:
+            from auth_registro import control_cupo_cuit, cupo_cuit_disponible
+            from auth_uso_valor import fabricar_registro_valor
+
+            if cupo_cuit_disponible(usuario_cupo) <= 0:
+                raise ValueError("Cupo de CUIT agotado.")
+            hay_cupo, on_cuit_exitoso = control_cupo_cuit(usuario_cupo)
+            registrar_valor_mc, registrar_valor_dfe, registrar_valor_np = fabricar_registro_valor(
+                usuario_cupo
+            )
+
         marcar_paso_ap("preparacion", "en_curso")
         filas_ap = _filas_desde_config(cfg)
         base = _carpeta_ejecucion(cfg.carpeta_destino)
@@ -380,6 +399,9 @@ def ejecutar_analisis_programado(
                             modo_ap=True,
                             on_log=log,
                             sesion=sesion,
+                            hay_cupo=hay_cupo,
+                            on_cuit_exitoso=on_cuit_exitoso,
+                            registrar_valor_mc=registrar_valor_mc,
                         )
                         resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
                         resultado["sistemas"]["mis_comprobantes"]["fallos"] = list(res.ingresos_fallidos)
@@ -423,6 +445,9 @@ def ejecutar_analisis_programado(
                             carpeta_base=base / "DFE",
                             modo_ap=True,
                             sesion=sesion,
+                            hay_cupo=hay_cupo,
+                            on_cuit_exitoso=on_cuit_exitoso,
+                            registrar_valor_dfe=registrar_valor_dfe,
                         )
                         resultado["sistemas"]["dfe"]["carpeta"] = str(carpeta_dfe)
                         marcar_paso_ap("dfe", "ok")
@@ -462,6 +487,9 @@ def ejecutar_analisis_programado(
                             carpeta_base=base / "Nuestra Parte",
                             modo_ap=True,
                             sesion=sesion,
+                            hay_cupo=hay_cupo,
+                            on_cuit_exitoso=on_cuit_exitoso,
+                            registrar_valor_np=registrar_valor_np,
                         )
                         resultado["sistemas"]["nuestra_parte"]["carpeta"] = str(carpeta_np)
                         marcar_paso_ap("nuestra_parte", "ok")

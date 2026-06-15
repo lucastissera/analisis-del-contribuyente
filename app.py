@@ -393,6 +393,7 @@ def _inject_suscripcion():
             "suscripcion_dias_restantes": None,
             "suscripcion_vencimiento_fmt": None,
             "suscripcion_cuit_fmt": None,
+            "suscripcion_cuit_disponibles": None,
         }
     try:
         from auth_registro import formatear_cuit, info_suscripcion_usuario
@@ -403,18 +404,55 @@ def _inject_suscripcion():
                 "suscripcion_dias_restantes": None,
                 "suscripcion_vencimiento_fmt": None,
                 "suscripcion_cuit_fmt": None,
+                "suscripcion_cuit_disponibles": None,
             }
         return {
             "suscripcion_dias_restantes": info["dias_restantes"],
             "suscripcion_vencimiento_fmt": info["valido_hasta_fmt"],
             "suscripcion_cuit_fmt": formatear_cuit(str(user)),
+            "suscripcion_cuit_disponibles": info.get("cuit_disponibles"),
         }
     except Exception:
         return {
             "suscripcion_dias_restantes": None,
             "suscripcion_vencimiento_fmt": None,
             "suscripcion_cuit_fmt": None,
+            "suscripcion_cuit_disponibles": None,
         }
+
+
+def _usuario_cupo_web() -> str | None:
+    if session.get("es_admin"):
+        return None
+    u = (session.get("user") or "").strip()
+    return u or None
+
+
+def _mensaje_cupo_agotado(lg: str) -> str:
+    return tr(lg, "err_cupo_cuit_agotado")
+
+
+def _verificar_cupo_inicio(lg: str) -> str | None:
+    user = _usuario_cupo_web()
+    if not user:
+        return None
+    from auth_registro import cupo_cuit_disponible
+
+    if cupo_cuit_disponible(user) > 0:
+        return None
+    return _mensaje_cupo_agotado(lg)
+
+
+def _control_cupo_sesion():
+    from auth_registro import control_cupo_cuit
+
+    return control_cupo_cuit(_usuario_cupo_web())
+
+
+def _registro_valor_sesion():
+    from auth_uso_valor import fabricar_registro_valor
+
+    return fabricar_registro_valor(_usuario_cupo_web())
 
 
 def _mapa_imputaciones_desde_peticion(
@@ -778,6 +816,7 @@ def admin_altas_usuarios():
         suspender_cuenta,
         reactivar_cuenta,
         actualizar_vencimiento,
+        actualizar_cuit_limite,
         estado_smtp,
         _dias_suscripcion,
     )
@@ -867,6 +906,25 @@ def admin_altas_usuarios():
                 )
             else:
                 flash(tr(lg, "admin_gestion_err_vencimiento"), "warning")
+        elif accion == "actualizar_cuit_limite":
+            raw_limite = (request.form.get("cuit_limite") or "").strip()
+            try:
+                limite = int(raw_limite)
+            except ValueError:
+                flash(tr(lg, "admin_gestion_err_cuit_limite"), "warning")
+            else:
+                if actualizar_cuit_limite(cuit, limite):
+                    flash(
+                        tr(
+                            lg,
+                            "admin_gestion_ok_cuit_limite",
+                            cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                            limite=limite,
+                        ),
+                        "success",
+                    )
+                else:
+                    flash(tr(lg, "admin_gestion_err_cuit_limite"), "warning")
         elif accion == "generar_enlace":
             email = (request.form.get("email") or "").strip()
             nombre = (request.form.get("nombre") or "").strip()
@@ -978,6 +1036,47 @@ def admin_altas_usuarios():
         fecha_default_alta=fecha_default_alta,
         min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
         smtp_estado=estado_smtp(),
+    )
+
+
+@app.get("/admin/dashboard-valor")
+def admin_dashboard_valor():
+    _requiere_admin()
+    from auth_registro import formatear_cuit, normalizar_cuit
+    from auth_uso_valor import dashboard_valor_usuario
+
+    lg = normalize_lang(session.get("lang"))
+    cuit = (request.args.get("cuit") or "").strip()
+    dash = dashboard_valor_usuario(cuit) if cuit else None
+    if cuit and not dash:
+        flash(tr(lg, "admin_dashboard_valor_err"), "warning")
+        return redirect(url_for("admin_altas_usuarios"))
+    return render_template(
+        "admin_dashboard_valor.html",
+        dashboard=dash,
+        cuit_fmt=formatear_cuit(normalizar_cuit(cuit) or cuit) if cuit else "",
+    )
+
+
+@app.get("/admin/dashboard-valor/exportar")
+def admin_dashboard_valor_exportar():
+    _requiere_admin()
+    from datetime import date
+
+    from auth_uso_valor import generar_excel_dashboard_valor, listar_dashboards_valor
+
+    lg = normalize_lang(session.get("lang"))
+    if not listar_dashboards_valor():
+        flash(tr(lg, "admin_dashboard_export_vacio"), "warning")
+        return redirect(url_for("admin_altas_usuarios"))
+
+    contenido = generar_excel_dashboard_valor()
+    nombre = f"Dashboard_Valor_Generado_{date.today().isoformat()}.xlsx"
+    return send_file(
+        io.BytesIO(contenido),
+        as_attachment=True,
+        download_name=nombre,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
 
@@ -1602,6 +1701,12 @@ def arca_descarga_lote():
             return jsonify({"error": err_msg}), 400
         return render_template("index.html", error=err_msg)
 
+    err_cupo = _verificar_cupo_inicio(lg)
+    if err_cupo:
+        if request.headers.get("X-Requested-With") == "fetch":
+            return jsonify({"error": err_cupo}), 403
+        return render_template("index.html", error=err_cupo)
+
     # Imputación contable opcional: si se adjuntó un Excel en la solapa de
     # imputación o se eligió una plantilla guardada, se aplica al lote
     # (solo a comprobantes recibidos). Si no, el lote se procesa sin imputar.
@@ -1641,6 +1746,8 @@ def arca_descarga_lote():
     on_prog = _wrap_progreso_con_entrega(callback_progreso(job_id), entrega)
     on_paso = callback_paso(job_id)
     on_log = envolver_log_con_entrega(callback_log_lote(job_id), entrega)
+    hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    registrar_valor_mc, _reg_dfe, _reg_np = _registro_valor_sesion()
 
     def _on_reiniciar() -> None:
         reiniciar_pasos(job_id)
@@ -1659,6 +1766,9 @@ def arca_descarga_lote():
                 carpeta_destino=carpeta_destino,
                 job_id=job_id,
                 nombre_carpeta_sesion=nombre_sesion_mc,
+                hay_cupo=hay_cupo,
+                on_cuit_exitoso=on_cuit_exitoso,
+                registrar_valor_mc=registrar_valor_mc,
             )
             if entrega:
                 entrega.escanear()
@@ -1800,6 +1910,12 @@ def dfe_descargar():
             return jsonify({"error": err_msg}), 400
         return render_template("dfe.html", error=err_msg)
 
+    err_cupo = _verificar_cupo_inicio(lg)
+    if err_cupo:
+        if es_fetch:
+            return jsonify({"error": err_cupo}), 403
+        return render_template("dfe.html", error=err_cupo)
+
     from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
     from cuit_en_arca.service import _headless_desde_env
 
@@ -1832,6 +1948,8 @@ def dfe_descargar():
     reiniciar_pasos_dfe(job_id)
     on_log = envolver_log_con_entrega(callback_log_dfe(job_id), entrega)
     on_paso = callback_paso_dfe(job_id)
+    hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    _reg_mc, registrar_valor_dfe, _reg_np = _registro_valor_sesion()
 
     def _reinit() -> None:
         reiniciar_pasos_dfe(job_id)
@@ -1864,6 +1982,9 @@ def dfe_descargar():
                 carpeta_base=carpeta_destino,
                 job_id=job_id,
                 nombre_carpeta_sesion=nombre_sesion_dfe,
+                hay_cupo=hay_cupo,
+                on_cuit_exitoso=on_cuit_exitoso,
+                registrar_valor_dfe=registrar_valor_dfe,
             )
             if entrega:
                 entrega.escanear()
@@ -1964,6 +2085,12 @@ def np_descargar():
             return jsonify({"error": err_msg}), 400
         return render_template("nuestra_parte.html", error=err_msg)
 
+    err_cupo = _verificar_cupo_inicio(lg)
+    if err_cupo:
+        if es_fetch:
+            return jsonify({"error": err_cupo}), 403
+        return render_template("nuestra_parte.html", error=err_cupo)
+
     from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
     from cuit_en_arca.service import _headless_desde_env
 
@@ -1995,6 +2122,8 @@ def np_descargar():
     reiniciar_pasos_np(job_id)
     on_log = envolver_log_con_entrega(callback_log_np(job_id), entrega)
     on_paso = callback_paso_np(job_id)
+    hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    _reg_mc, _reg_dfe, registrar_valor_np = _registro_valor_sesion()
 
     def _reinit() -> None:
         reiniciar_pasos_np(job_id)
@@ -2027,6 +2156,9 @@ def np_descargar():
                 carpeta_base=carpeta_destino,
                 job_id=job_id,
                 nombre_carpeta_sesion=nombre_sesion_np,
+                hay_cupo=hay_cupo,
+                on_cuit_exitoso=on_cuit_exitoso,
+                registrar_valor_np=registrar_valor_np,
             )
             if entrega:
                 entrega.escanear()
@@ -2137,6 +2269,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
 
     if solo_ejecucion:
         prev = cargar_config()
+        usuario_cupo = _usuario_cupo_web() or (prev.usuario_cupo or "").strip()
         cfg = ConfigAnalisisProgramado(
             activo=prev.activo,
             dia_semana=prev.dia_semana,
@@ -2147,6 +2280,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
             filas=filas_dict,
             ultima_ejecucion=prev.ultima_ejecucion,
             ultimo_resultado=prev.ultimo_resultado,
+            usuario_cupo=usuario_cupo,
         )
         return cfg, None
 
@@ -2167,6 +2301,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
         filas=filas_dict,
         ultima_ejecucion=None,
         ultimo_resultado=None,
+        usuario_cupo=_usuario_cupo_web() or "",
     )
     return cfg, None
 
@@ -2266,6 +2401,16 @@ def analisis_programado_ejecutar_ahora():
         return render_template(
             "analisis_programado.html",
             error=err_msg,
+            config=cargar_config().a_dict_publico(),
+        )
+
+    err_cupo = _verificar_cupo_inicio(lg)
+    if err_cupo:
+        if es_fetch:
+            return jsonify({"error": err_cupo}), 403
+        return render_template(
+            "analisis_programado.html",
+            error=err_cupo,
             config=cargar_config().a_dict_publico(),
         )
 

@@ -2173,11 +2173,14 @@ def _razon_social_propia(df: pd.DataFrame, emitidos: bool) -> str:
 def _resumen_por_mes(
     totales_por_periodo: dict[str, dict[str, float]],
 ) -> dict[str, dict[str, float]]:
-    """Extrae Neto Gravado Total, Total IVA e Imp. Total por período (YYYY-MM)."""
+    """Extrae totales por período (YYYY-MM) para el resumen por CUIT."""
     out: dict[str, dict[str, float]] = {}
     for periodo, cols in totales_por_periodo.items():
+        no_grav = float(cols.get("Neto No Gravado", 0.0) or 0.0)
+        exentas = float(cols.get("Op. Exentas", 0.0) or 0.0)
         out[str(periodo)] = {
             "neto": float(cols.get("Neto Gravado Total", 0.0) or 0.0),
+            "no_grav_exento": no_grav + exentas,
             "iva": float(cols.get("Total IVA", 0.0) or 0.0),
             "total": float(cols.get("Imp. Total", 0.0) or 0.0),
         }
@@ -2212,7 +2215,7 @@ def procesar_comprobantes_a_excel_y_resumen(
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[bytes, dict]:
     """Igual que ``procesar_comprobantes_a_excel`` pero devuelve también un
-    resumen ``{"razon_social", "por_mes": {YYYY-MM: {neto, iva, total}}}`` para
+    resumen ``{"razon_social", "por_mes": {YYYY-MM: {neto, no_grav_exento, iva, total}}}`` para
     el Excel consolidado por CUIT (tabla dinámica).
     """
     buffer = io.BytesIO(data)

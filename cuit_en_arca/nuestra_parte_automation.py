@@ -1824,6 +1824,9 @@ def ejecutar_nuestra_parte_lote(
     modo_ap: bool = False,
     nombre_carpeta_sesion: str | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
+    hay_cupo: Callable[[], bool] | None = None,
+    on_cuit_exitoso: Callable[[], None] | None = None,
+    registrar_valor_np: Callable[[], None] | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) de «Nuestra Parte». Tolerante a errores."""
     from cuit_en_arca.service import _requiere_playwright
@@ -1838,7 +1841,8 @@ def ejecutar_nuestra_parte_lote(
     _log(on_log, f"Carpeta de destino: {base}")
     resumen_lote: list[dict] = []
 
-    from cuit_en_arca.cancelacion import verificar_cancelacion
+    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.errores import CancelacionUsuarioError
     from cuit_en_arca.sesion_playwright import (
         SesionPlaywrightCompartida,
         reutilizar_navegador_por_defecto,
@@ -1858,6 +1862,18 @@ def ejecutar_nuestra_parte_lote(
             if on_reiniciar_pasos:
                 on_reiniciar_pasos()
 
+            if hay_cupo is not None and not hay_cupo():
+                msg = f"Cupo de CUIT agotado (CUIT {cuit_repr})"
+                _log(on_log, msg)
+                if on_cuit_fin:
+                    on_cuit_fin(cuit_repr, None, 0, msg)
+                resumen_lote.append(
+                    {"cuit": cuit_repr, "razon_social": "", "error": msg}
+                )
+                if on_progreso:
+                    on_progreso(idx, total, msg)
+                continue
+
             cred = CredencialesArca(
                 cuit_login=cuit_log,
                 clave_fiscal=getattr(fila, "clave_fiscal", ""),
@@ -1876,11 +1892,19 @@ def ejecutar_nuestra_parte_lote(
                     on_paso=on_paso,
                     sesion=con_sesion,
                 )
+                if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
+                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
                 if on_cuit_fin:
                     on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
+                if on_cuit_exitoso:
+                    on_cuit_exitoso()
+                if registrar_valor_np:
+                    registrar_valor_np()
                 resumen_lote.append(
                     {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
                 )
+            except CancelacionUsuarioError:
+                raise
             except Exception as exc:
                 _log(on_log, f"CUIT {cuit_repr}: ERROR {exc}")
                 if on_paso:

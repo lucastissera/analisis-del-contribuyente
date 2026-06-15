@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('admin_dashboard_valor_title', cuit=dashboard.cuit_fmt) }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" />
+    <script>
+      try {
+        if (localStorage.getItem("tema") === "oscuro") document.documentElement.classList.add("modo-oscuro");
+      } catch (e) {}
+    </script>
+    <style>
+      :root {
+        --bg-body: #fff; --bg-panel: #fafafa; --text-primary: #1a1a1a;
+        --text-muted: #444; --border: #bbb; --color-link: #1565c0;
+        --color-ok: #2e7d32; --btn-bg: #111; --btn-text: #fff; --btn-border: #333;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014; --bg-panel: #1a1c22; --text-primary: #eceef3;
+        --text-muted: #aeb4c0; --border: #3d424d; --color-link: #8ab4ff;
+        --color-ok: #66bb6a; --btn-bg: #3d7dd9; --btn-text: #0c1118; --btn-border: #5b93e8;
+      }
+      body { font-family: Arial, sans-serif; margin: 1rem; background: var(--bg-body); color: var(--text-primary); }
+      a { color: var(--color-link); }
+      .pagina { max-width: 640px; margin: 0 auto; }
+      .panel { border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.1rem; margin: 1rem 0; background: var(--bg-panel); }
+      .help { font-size: 0.88rem; color: var(--text-muted); margin: 0.35rem 0 0.85rem; }
+      .metricas { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+      .metrica { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; background: var(--bg-body); }
+      .metrica-valor { font-size: 1.45rem; font-weight: 700; line-height: 1.2; }
+      .metrica-etq { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.25rem; }
+      .metrica-wide { grid-column: 1 / -1; }
+      .volver { margin-bottom: 0.75rem; display: inline-block; }
+      .btn-dashboard { background: var(--color-link); color: #fff; border: none; font-size: 0.85rem; text-decoration: none; display: inline-block; padding: 0.35rem 0.65rem; border-radius: 4px; margin-bottom: 0.75rem; }
+      .btn-dashboard:hover { opacity: 0.92; }
+      h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+      .subtitulo { color: var(--text-muted); font-size: 0.92rem; margin: 0; }
+      @media (max-width: 520px) { .metricas { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      <a class="volver" href="{{ url_for('admin_altas_usuarios') }}">&larr; {{ t('admin_dashboard_valor_volver') }}</a>
+
+      <h1>{{ t('admin_dashboard_valor_h1', cuit=dashboard.cuit_fmt) }}</h1>
+      <p class="subtitulo">
+        {% if dashboard.nombre %}{{ dashboard.nombre }} · {% endif %}{{ dashboard.email or '—' }}
+      </p>
+      <p class="help">
+        {{ t('admin_dashboard_valor_periodo', desde=dashboard.valido_desde_fmt, hasta=dashboard.valido_hasta_fmt) }}
+      </p>
+      <p>
+        <a class="btn-dashboard" href="{{ url_for('admin_dashboard_valor_exportar') }}">{{ t('admin_dashboard_export_btn') }}</a>
+      </p>
+
+      <div class="panel">
+        <p class="help">{{ t('admin_dashboard_valor_intro') }}</p>
+        <div class="metricas">
+          <div class="metrica metrica-wide">
+            <div class="metrica-valor">{{ dashboard.cuit_usados }} / {{ dashboard.cuit_limite }}</div>
+            <div class="metrica-etq">{{ t('admin_dashboard_valor_cuit_procesados') }}</div>
+          </div>
+          <div class="metrica">
+            <div class="metrica-valor">{{ dashboard.mce_comprobantes }}</div>
+            <div class="metrica-etq">{{ t('admin_dashboard_valor_mce') }}</div>
+          </div>
+          <div class="metrica">
+            <div class="metrica-valor">{{ dashboard.mcr_comprobantes }}</div>
+            <div class="metrica-etq">{{ t('admin_dashboard_valor_mcr') }}</div>
+          </div>
+          <div class="metrica">
+            <div class="metrica-valor">{{ dashboard.dfe_notificaciones }}</div>
+            <div class="metrica-etq">{{ t('admin_dashboard_valor_dfe') }}</div>
+          </div>
+          <div class="metrica">
+            <div class="metrica-valor">{{ dashboard.np_cuits }}</div>
+            <div class="metrica-etq">{{ t('admin_dashboard_valor_np') }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

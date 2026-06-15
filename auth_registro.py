@@ -107,6 +107,128 @@ def _dias_suscripcion() -> int:
         return 30
 
 
+def _cuit_limite_default() -> int:
+    raw = (os.environ.get("AUTH_CUIT_LIMITE") or "100").strip()
+    try:
+        return max(0, min(int(raw), 1_000_000))
+    except ValueError:
+        return 100
+
+
+def _leer_cupo_meta(meta: dict[str, Any]) -> tuple[int, int]:
+    raw_limite = meta.get("cuit_limite")
+    if raw_limite is None:
+        limite = _cuit_limite_default()
+    else:
+        try:
+            limite = max(0, min(int(raw_limite), 1_000_000))
+        except (TypeError, ValueError):
+            limite = _cuit_limite_default()
+    try:
+        usados = max(0, min(int(meta.get("cuit_usados") or 0), 1_000_000))
+    except (TypeError, ValueError):
+        usados = 0
+    return limite, usados
+
+
+def _inicializar_cupo_meta(meta: dict[str, Any]) -> None:
+    if meta.get("cuit_limite") is None:
+        meta["cuit_limite"] = _cuit_limite_default()
+    if meta.get("cuit_usados") is None:
+        meta["cuit_usados"] = 0
+
+
+def _reset_cupo_meta(meta: dict[str, Any]) -> None:
+    _inicializar_cupo_meta(meta)
+    meta["cuit_usados"] = 0
+    from auth_uso_valor import reset_uso_periodo_meta
+
+    reset_uso_periodo_meta(meta)
+
+
+def info_cupo_cuit(username: str) -> dict[str, Any] | None:
+    """Cupo compartido entre servicios. Admin / sin overlay = ilimitado (None)."""
+    from auth import es_administrador
+
+    u_raw = (username or "").strip()
+    if not u_raw or es_administrador(u_raw):
+        return None
+    u = resolver_clave_overlay(u_raw) or normalizar_cuit(u_raw) or u_raw
+    meta = cargar_usuarios_overlay().get(u)
+    if not isinstance(meta, dict) or meta_es_admin(meta):
+        return None
+    if meta.get("pendiente_aprobacion"):
+        return None
+    limite, usados = _leer_cupo_meta(meta)
+    disponibles = max(0, limite - usados)
+    return {
+        "cuit_limite": limite,
+        "cuit_usados": usados,
+        "cuit_disponibles": disponibles,
+        "cuit_ilimitado": False,
+    }
+
+
+def cupo_cuit_disponible(username: str) -> int:
+    info = info_cupo_cuit(username)
+    if info is None:
+        return 1_000_000_000
+    return int(info["cuit_disponibles"])
+
+
+def consumir_cuit_exitoso(username: str, cantidad: int = 1) -> bool:
+    from auth import es_administrador
+
+    if cantidad < 1:
+        return True
+    u_raw = (username or "").strip()
+    if not u_raw or es_administrador(u_raw):
+        return True
+    u = resolver_clave_overlay(u_raw)
+    if not u:
+        return True
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return True
+        meta = users[u]
+        if not isinstance(meta, dict) or meta_es_admin(meta):
+            return True
+        limite, usados = _leer_cupo_meta(meta)
+        if usados + cantidad > limite:
+            return False
+        meta["cuit_usados"] = usados + cantidad
+        meta["cuit_limite"] = limite
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
+
+
+def control_cupo_cuit(username: str | None):
+    """Devuelve (hay_cupo, on_exitoso) o (None, None) si no aplica cupo.
+
+    El consumo se confirma al cerrar cada CUIT con éxito. Si el usuario cancela
+    durante ese CUIT, no se descuenta; los ya confirmados en el mismo lote sí.
+    """
+    u = (username or "").strip()
+    if not u:
+        return None, None
+    from auth import es_administrador
+
+    if es_administrador(u):
+        return None, None
+
+    def hay_cupo() -> bool:
+        return cupo_cuit_disponible(u) > 0
+
+    def on_exitoso() -> None:
+        consumir_cuit_exitoso(u)
+
+    return hay_cupo, on_exitoso
+
+
 def _parse_fecha_local(val: Any) -> date | None:
     from auth import _parse_fecha
 
@@ -680,6 +802,8 @@ def crear_usuario_admin(
             "pendiente_aprobacion": False,
             "alta_admin": ahora,
             "aprobado_en": ahora,
+            "cuit_limite": _cuit_limite_default(),
+            "cuit_usados": 0,
         }
         overlay["updated_at"] = ahora
         _write_store("usuarios_registrados", overlay, path)
@@ -732,6 +856,7 @@ def aprobar_cuenta(cuit: str) -> bool:
         users[u]["valido_desde"] = hoy.isoformat()
         users[u]["valido_hasta"] = valido_hasta.isoformat()
         users[u]["aprobado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _reset_cupo_meta(users[u])
         _guardar_overlay_completo(overlay)
     return True
 
@@ -749,6 +874,7 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
         suspendida = meta.get("activo") is False
         vh = _parse_fecha_local(meta.get("valido_hasta"))
         dias = (vh - hoy).days if vh else None
+        limite, usados = _leer_cupo_meta(meta)
         out.append(
             {
                 "cuit": cuit,
@@ -761,6 +887,9 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
                 "dias_restantes": dias,
                 "vencida": not suspendida and dias is not None and dias < 0,
                 "suspendida": suspendida,
+                "cuit_limite": limite,
+                "cuit_usados": usados,
+                "cuit_disponibles": max(0, limite - usados),
                 **_telefono_desde_meta(meta),
             }
         )
@@ -927,6 +1056,31 @@ def renovar_suscripcion(cuit: str, dias: int | None = None) -> bool:
             meta["valido_desde"] = hoy.isoformat()
         meta["valido_hasta"] = nueva_hasta.isoformat()
         meta["renovado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _reset_cupo_meta(meta)
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
+    return True
+
+
+def actualizar_cuit_limite(cuit: str, limite: int) -> bool:
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        return False
+    try:
+        nuevo_limite = max(0, min(int(limite), 1_000_000))
+    except (TypeError, ValueError):
+        return False
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if meta.get("pendiente_aprobacion"):
+            return False
+        meta["cuit_limite"] = nuevo_limite
+        _inicializar_cupo_meta(meta)
         overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         _write_store("usuarios_registrados", overlay, path)
     return True
@@ -944,11 +1098,15 @@ def info_suscripcion_usuario(username: str) -> dict[str, Any] | None:
         return None
     hoy = date.today()
     dias = (cuenta.valido_hasta - hoy).days
-    return {
+    out: dict[str, Any] = {
         "valido_hasta": cuenta.valido_hasta,
         "valido_hasta_fmt": cuenta.valido_hasta.strftime("%d/%m/%Y"),
         "dias_restantes": dias,
     }
+    cupo = info_cupo_cuit(u)
+    if cupo:
+        out.update(cupo)
+    return out
 
 
 def verificar_identidad_recuperacion(cuit: str, email: str) -> bool:

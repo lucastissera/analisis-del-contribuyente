@@ -44,6 +44,8 @@
       .btn-suspender { background: var(--color-error); color: #fff; border: none; }
       .btn-reactivar { background: var(--color-ok); color: #fff; border: none; }
       .btn-guardar { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); font-size: 0.85rem; }
+      .btn-dashboard { background: var(--color-link); color: #fff; border: none; font-size: 0.85rem; text-decoration: none; display: inline-block; padding: 0.35rem 0.65rem; border-radius: 4px; }
+      .btn-dashboard:hover { opacity: 0.92; }
       .form-venc { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
       .form-venc input[type="date"] { font-size: 0.85rem; }
       .acciones-suscripcion { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
@@ -296,6 +298,12 @@
 
       <h2>{{ t('admin_gestion_suscripciones_titulo') }}</h2>
       <p class="help">{{ t('admin_gestion_suscripciones_intro') }}</p>
+      {% if suscriptores %}
+      <p>
+        <a class="btn-dashboard" href="{{ url_for('admin_dashboard_valor_exportar') }}">{{ t('admin_dashboard_export_btn') }}</a>
+        <span class="help">{{ t('admin_dashboard_export_help') }}</span>
+      </p>
+      {% endif %}
       {% if not suscriptores %}
       <p>{{ t('admin_gestion_suscripciones_vacio') }}</p>
       {% else %}
@@ -305,6 +313,7 @@
             <th>{{ t('alta_cuit_label') }}</th>
             <th>{{ t('alta_email_label') }}</th>
             <th>{{ t('admin_gestion_col_vencimiento') }}</th>
+            <th>{{ t('admin_gestion_col_cupo') }}</th>
             <th>{{ t('admin_gestion_col_dias') }}</th>
             <th>{{ t('admin_gestion_col_clave') }}</th>
             <th>{{ t('admin_gestion_col_acciones') }}</th>
@@ -321,6 +330,15 @@
                 <input type="hidden" name="cuit" value="{{ s.cuit }}" />
                 <input type="date" name="valido_hasta" value="{{ s.valido_hasta_input }}" required />
                 <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_venc') }}</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" class="form-venc">
+                <input type="hidden" name="accion" value="actualizar_cuit_limite" />
+                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                <input type="number" name="cuit_limite" value="{{ s.cuit_limite }}" min="0" max="1000000" required />
+                <p class="help">{{ t('admin_gestion_cupo_resumen', usados=s.cuit_usados, disponibles=s.cuit_disponibles) }}</p>
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_cupo') }}</button>
               </form>
             </td>
             <td class="{{ 'vencida' if s.vencida else ('suspendida' if s.suspendida else '') }}">
@@ -355,6 +373,7 @@
             </td>
             <td>
               <div class="acciones-suscripcion">
+                <a class="btn-dashboard" href="{{ url_for('admin_dashboard_valor', cuit=s.cuit) }}">{{ t('admin_gestion_btn_dashboard_valor') }}</a>
                 {% if not s.suspendida %}
                 <form method="post" style="display:inline">
                   <input type="hidden" name="accion" value="renovar" />

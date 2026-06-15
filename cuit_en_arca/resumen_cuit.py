@@ -25,6 +25,7 @@ HEADERS = [
     "Tipo",
     "Mes",
     "Neto Gravado Total",
+    "Ingresos no grav. y exentos",
     "Total IVA",
     "Imp. Total",
 ]
@@ -37,14 +38,22 @@ _TABLA = "xl/tables/table1.xml"
 
 @dataclass
 class _AcumTipo:
-    # mes "YYYY-MM" -> [neto, iva, total]
+    # mes "YYYY-MM" -> [neto, no_grav_exento, iva, total]
     por_mes: dict[str, list[float]] = field(default_factory=dict)
 
-    def sumar(self, mes: str, neto: float, iva: float, total: float) -> None:
-        acc = self.por_mes.setdefault(mes, [0.0, 0.0, 0.0])
+    def sumar(
+        self,
+        mes: str,
+        neto: float,
+        no_grav_exento: float,
+        iva: float,
+        total: float,
+    ) -> None:
+        acc = self.por_mes.setdefault(mes, [0.0, 0.0, 0.0, 0.0])
         acc[0] += neto
-        acc[1] += iva
-        acc[2] += total
+        acc[1] += no_grav_exento
+        acc[2] += iva
+        acc[3] += total
 
 
 @dataclass
@@ -77,6 +86,7 @@ class ResumenCuitAcumulador:
             destino.sumar(
                 mes,
                 float(vals.get("neto", 0.0)),
+                float(vals.get("no_grav_exento", 0.0)),
                 float(vals.get("iva", 0.0)),
                 float(vals.get("total", 0.0)),
             )
@@ -87,8 +97,8 @@ class ResumenCuitAcumulador:
             for ac in self._cuits.values()
         )
 
-    def filas_datos(self) -> list[tuple[str, str, str, str, float, float, float]]:
-        filas: list[tuple[str, str, str, str, float, float, float]] = []
+    def filas_datos(self) -> list[tuple[str, str, str, str, float, float, float, float]]:
+        filas: list[tuple[str, str, str, str, float, float, float, float]] = []
         for cuit in sorted(self._cuits):
             ac = self._cuits[cuit]
             for tipo_nombre, tipo_acc in (
@@ -96,9 +106,18 @@ class ResumenCuitAcumulador:
                 ("Recibidos", ac.recibidos),
             ):
                 for mes in sorted(tipo_acc.por_mes):
-                    neto, iva, total = tipo_acc.por_mes[mes]
+                    neto, no_grav_exento, iva, total = tipo_acc.por_mes[mes]
                     filas.append(
-                        (cuit, ac.razon_social or cuit, tipo_nombre, mes, neto, iva, total)
+                        (
+                            cuit,
+                            ac.razon_social or cuit,
+                            tipo_nombre,
+                            mes,
+                            neto,
+                            no_grav_exento,
+                            iva,
+                            total,
+                        )
                     )
         return filas
 
@@ -135,10 +154,10 @@ def _col(idx: int) -> str:
 def _construir_sheet_data(filas) -> tuple[str, int]:
     rows = []
     encab = "".join(_celda_txt(f"{_col(j)}1", h) for j, h in enumerate(HEADERS))
-    rows.append(f'<row r="1" spans="1:7">{encab}</row>')
+    rows.append(f'<row r="1" spans="1:8">{encab}</row>')
 
     r = 2
-    for (cuit, razon, tipo, mes, neto, iva, total) in filas:
+    for (cuit, razon, tipo, mes, neto, no_grav_exento, iva, total) in filas:
         try:
             cuit_cell = f'<c r="A{r}"><v>{int(cuit)}</v></c>'
         except (ValueError, TypeError):
@@ -149,10 +168,11 @@ def _construir_sheet_data(filas) -> tuple[str, int]:
             + _celda_txt(f"C{r}", str(tipo))
             + _celda_txt(f"D{r}", str(mes))
             + _celda_num(f"E{r}", float(neto))
-            + _celda_num(f"F{r}", float(iva))
-            + _celda_num(f"G{r}", float(total))
+            + _celda_num(f"F{r}", float(no_grav_exento))
+            + _celda_num(f"G{r}", float(iva))
+            + _celda_num(f"H{r}", float(total))
         )
-        rows.append(f'<row r="{r}" spans="1:7">{celdas}</row>')
+        rows.append(f'<row r="{r}" spans="1:8">{celdas}</row>')
         r += 1
     return "<sheetData>" + "".join(rows) + "</sheetData>", r - 1
 
@@ -167,7 +187,7 @@ def construir_resumen_cuit_xlsx(acumulador: ResumenCuitAcumulador) -> bytes | No
 
     filas = acumulador.filas_datos()
     sheet_data, n_filas = _construir_sheet_data(filas)
-    ref = f"A1:G{n_filas}"
+    ref = f"A1:H{n_filas}"
 
     base = plantilla.read_bytes()
     salida = io.BytesIO()

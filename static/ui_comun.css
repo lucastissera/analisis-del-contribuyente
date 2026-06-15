@@ -80,11 +80,17 @@ html.modo-oscuro .btn-tema .icono-sol {
   font-size: 0.78rem;
   line-height: 1.35;
   color: var(--text-muted-2, var(--text-muted));
-  max-width: 14rem;
+  max-width: 20rem;
+}
+.barra-suscripcion-cupo {
+  padding-left: 0.35rem;
 }
 .barra-suscripcion-vencida {
   color: var(--color-error, #b00020);
   font-weight: 600;
+}
+.barra-suscripcion-sin-cupo {
+  color: var(--color-warning, #9a6700);
 }
 .pie-legal {
   margin-top: 0;
@@ -99,6 +105,7 @@ html.modo-oscuro .btn-tema .icono-sol {
   margin: 0 0 0.65rem 0;
   margin-left: auto;
   max-width: 38rem;
+  text-align: justify;
 }
 .pie-legal p:last-child {
   margin-bottom: 0;

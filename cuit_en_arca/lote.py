@@ -95,6 +95,18 @@ def _mensaje_sin_descargas(
     return f"{base} Revisá la planilla (CUIT, clave y rango de fechas en columna D)."
 
 
+def _cuit_mc_procesado_exitoso(resultado) -> bool:
+    """Éxito completo: emitidos y recibidos, sin aviso de descarga parcial."""
+    return bool(
+        resultado.emitidos
+        and resultado.recibidos
+        and not resultado.aviso_parcial
+    )
+
+
+_MENSAJE_CUPO_AGOTADO = "Cupo de CUIT agotado"
+
+
 def ejecutar_lote_arca(
     filas: list[FilaPlanillaArca],
     *,
@@ -110,6 +122,9 @@ def ejecutar_lote_arca(
     modo_ap: bool = False,
     nombre_carpeta_sesion: str | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
+    hay_cupo: Callable[[], bool] | None = None,
+    on_cuit_exitoso: Callable[[], None] | None = None,
+    registrar_valor_mc: Callable[[int, int], None] | None = None,
 ) -> ResultadoLoteArca:
     _requiere_playwright()
 
@@ -121,6 +136,8 @@ def ejecutar_lote_arca(
     )
 
     from sumar_imp_total import procesar_comprobantes_a_excel_y_resumen
+
+    from auth_uso_valor import contadores_mc_desde_resultado
 
     total = len(filas)
     archivos: dict[str, bytes] = {}
@@ -146,7 +163,8 @@ def ejecutar_lote_arca(
 
     headless = _headless_desde_env() if headless is None else headless
 
-    from cuit_en_arca.cancelacion import verificar_cancelacion
+    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.errores import CancelacionUsuarioError
 
     _log_lote(on_log, f"Lote: {total} fila(s) a procesar.")
     if errores_planilla:
@@ -169,6 +187,17 @@ def ejecutar_lote_arca(
 
             if on_reiniciar_pasos:
                 on_reiniciar_pasos()
+
+            if hay_cupo is not None and not hay_cupo():
+                msg_cupo = (
+                    f"{_MENSAJE_CUPO_AGOTADO} (fila {fila.fila_excel}, "
+                    f"CUIT {fila.cuit_representado})"
+                )
+                ingresos_fallidos.append(msg_cupo)
+                _log_lote(on_log, msg_cupo)
+                if on_progreso:
+                    on_progreso(i + 1, total, msg_cupo, True)
+                continue
 
             if on_progreso:
                 on_progreso(
@@ -202,6 +231,8 @@ def ejecutar_lote_arca(
                     on_log=on_log,
                     sesion=con_sesion,
                 )
+            except CancelacionUsuarioError:
+                raise
             except LoginArcaError as exc:
                 ingresos_fallidos.append(
                     f"CUIT ingreso {fila.cuit_login} (fila {fila.fila_excel}): {exc}"
@@ -252,6 +283,10 @@ def ejecutar_lote_arca(
                 _log_lote(on_log, "Procesando archivos descargados…")
                 fallo_proc = False
                 for nombre, datos, es_emit in nuevos:
+                    if job_id:
+                        verificar_cancelacion(job_id)
+                    elif modo_ap:
+                        verificar_cancelacion(ap=True)
                     try:
                         # Las imputaciones contables, por ahora, solo a recibidos.
                         excel_proc, resumen = procesar_comprobantes_a_excel_y_resumen(
@@ -275,6 +310,8 @@ def ejecutar_lote_arca(
                             or resumen.get("razon_social", ""),
                             por_mes=resumen.get("por_mes", {}),
                         )
+                    except CancelacionUsuarioError:
+                        raise
                     except Exception as exc:  # no abortar el lote por un archivo
                         fallo_proc = True
                         advertencias.append(
@@ -287,6 +324,15 @@ def ejecutar_lote_arca(
                     _log_lote(on_log, "Procesamiento completado con advertencias.")
                 else:
                     _log_lote(on_log, "Procesamiento completado.")
+
+            if _cuit_mc_procesado_exitoso(resultado):
+                if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
+                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+                if on_cuit_exitoso:
+                    on_cuit_exitoso()
+                if registrar_valor_mc:
+                    mce, mcr = contadores_mc_desde_resultado(resultado)
+                    registrar_valor_mc(mce, mcr)
 
             if on_progreso:
                 on_progreso(
