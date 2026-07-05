@@ -7,3 +7,4 @@ playwright>=1.46.0
 cryptography>=42.0.0
 bcrypt>=4.0.0
 psycopg2-binary>=2.9.9
+pillow>=10.0.0

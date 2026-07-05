@@ -5,6 +5,9 @@ Flujos:
 - **Hacienda:** Comprobantes en línea → Hacienda y Carne → por emisor y por receptor
   (100 comprobantes por hoja, paginación completa).
 
+Si se eligen granos y hacienda, se procesan **en serie** con login y pestañas
+independientes (primero granos, después hacienda), para no mezclar servicios en ARCA.
+
 Grabación hacienda: ``build/vl_grabacion/20260704_230138``, ``20260704_233832`` (CERRAR SESIÓN → Salir).
 Grabación granos: ``build/vl_grabacion/20260704_152152``.
 Manual: ``python tools/grabar_vl.py`` o ``explorar_vl.bat``.
@@ -976,6 +979,38 @@ def _nueva_pestana_lsp(context, paginas_antes: set[int] | None = None):
     return candidatas[-1] if candidatas else None
 
 
+def _intentos_lsp_apertura() -> int:
+    return 5 if _headless_desde_env() else 3
+
+
+def _esperar_lsp_tras_clic_rcel(rcel, paginas_antes: set[int], on_log=None):
+    """Espera pestaña LSP (popup o misma pestaña); en headless ARCA tarda más."""
+    ciclos = 28 if _headless_desde_env() else 18
+    for _ in range(ciclos):
+        if "lsp-web" in (rcel.url or "").lower():
+            return rcel
+        pg = _nueva_pestana_lsp(rcel.context, paginas_antes)
+        if pg is not None:
+            return pg
+        for p in rcel.context.pages:
+            if p.is_closed() or id(p) in paginas_antes:
+                continue
+            if "lsp-web" in (p.url or "").lower():
+                return p
+        pausa_humana(0.45, 0.75)
+    return None
+
+
+def _cerrar_pestanas_servicio(context, conservar, on_log=None) -> None:
+    """Cierra pestañas ARCA que no sean la de portal/rcel/LPG activa."""
+    for pg in list(context.pages):
+        if pg.is_closed() or pg is conservar:
+            continue
+        url = (pg.url or "").lower()
+        if any(x in url for x in ("lsp-web", "liquidacion", "lpg", "grano")):
+            _cerrar_pestana_navegador(pg, on_log, etiqueta="Pestaña de servicio")
+
+
 def _preparar_reintento_lsp_desde_rcel(rcel, on_log=None) -> None:
     """Tras recuperación: solo menú rcel visible, sin pestañas LSP colgadas."""
     _cerrar_pestanas_lsp(rcel.context, on_log)
@@ -1026,6 +1061,9 @@ def _cerrar_pestana_navegador(pg, on_log=None, *, etiqueta: str = "Pestaña") ->
     except Exception:
         pass
     if pg.is_closed():
+        return
+    if _headless_desde_env():
+        _log(on_log, f"  • No se pudo cerrar {etiqueta} en headless.")
         return
     try:
         pg.bring_to_front()
@@ -1222,7 +1260,7 @@ def _lsp_tiene_seleccion_empresa(lsp) -> bool:
     try:
         if botones.count() == 0:
             return False
-        return botones.first.is_visible(timeout=4000)
+        return botones.first.is_visible(timeout=8000 if _headless_desde_env() else 4000)
     except Exception:
         return False
 
@@ -1285,7 +1323,9 @@ def _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log=None) -> None:
 
 def _abrir_lsp_desde_rcel(rcel, on_log=None):
     """Abre Hacienda y Carne — Liquidación Electrónica; reintenta si la pestaña falla."""
-    for intento in range(1, 4):
+    max_int = _intentos_lsp_apertura()
+    for intento in range(1, max_int + 1):
+        _cerrar_pestanas_lsp(rcel.context, on_log)
         link = rcel.locator("#btn_fwd_lsp, a#btn_fwd_lsp").first
         if not link.count():
             link = rcel.get_by_role(
@@ -1302,22 +1342,27 @@ def _abrir_lsp_desde_rcel(rcel, on_log=None):
         except Exception:
             pass
 
-        _log(on_log, f"Abriendo liquidación hacienda (intento {intento}/3)…")
+        _log(on_log, f"Abriendo liquidación hacienda (intento {intento}/{max_int})…")
         paginas_antes = {
             id(pg) for pg in rcel.context.pages if not pg.is_closed()
         }
         lsp = None
         try:
-            with rcel.context.expect_page(timeout=12_000) as pi:
+            with rcel.expect_popup(timeout=16_000) as pop:
                 clic_humano(link)
-            lsp = pi.value
+            lsp = pop.value
         except Exception:
-            clic_humano(link)
-            pausa_humana(1.0, 1.5)
-            lsp = _nueva_pestana_lsp(rcel.context, paginas_antes)
+            try:
+                with rcel.context.expect_page(timeout=16_000) as pi:
+                    clic_humano(link)
+                lsp = pi.value
+            except Exception:
+                clic_humano(link)
+                pausa_humana(1.0, 2.0 if _headless_desde_env() else 1.5)
+                lsp = _esperar_lsp_tras_clic_rcel(rcel, paginas_antes, on_log)
 
         if lsp is None:
-            lsp = _nueva_pestana_lsp(rcel.context, paginas_antes)
+            lsp = _esperar_lsp_tras_clic_rcel(rcel, paginas_antes, on_log)
 
         if lsp is None:
             _log(on_log, "  • No se detectó pestaña LSP; se reintenta desde el menú.")
@@ -1325,10 +1370,10 @@ def _abrir_lsp_desde_rcel(rcel, on_log=None):
             continue
 
         try:
-            lsp.wait_for_load_state("domcontentloaded", timeout=20_000)
+            lsp.wait_for_load_state("domcontentloaded", timeout=25_000 if _headless_desde_env() else 20_000)
         except Exception:
             pass
-        pausa_humana(0.5, 1.0)
+        pausa_humana(0.8, 1.4 if _headless_desde_env() else 1.0)
         lsp.set_default_timeout(40_000)
 
         if _lsp_tiene_seleccion_empresa(lsp):
@@ -1950,6 +1995,28 @@ def ejecutar_vl_cuit(
         )
 
 
+def _orden_sistemas_vl(sistemas: list[str] | None) -> list[str]:
+    """Granos y hacienda nunca comparten sesión ARCA (uno termina, recién empieza el otro)."""
+    sis = sistemas or ["granos"]
+    return [s for s in ("granos", "hacienda") if s in sis]
+
+
+def _login_vl(page, cred: CredencialesArca, on_log, paso) -> None:
+    from cuit_en_arca.automation_playwright import (
+        LOGIN_URL,
+        _llenar_cuit_y_avanzar,
+        _login_clave_fiscal,
+    )
+
+    paso("login", "en_curso")
+    _log(on_log, f"Iniciando sesión (CUIT {cred.cuit_login})…")
+    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    pausa_humana(0.6, 1.2)
+    _llenar_cuit_y_avanzar(page, cred.cuit_login)
+    _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
+    paso("login", "ok")
+
+
 def _ejecutar_vl_impl(
     sesion: SesionPlaywrightCompartida,
     cred: CredencialesArca,
@@ -1964,13 +2031,7 @@ def _ejecutar_vl_impl(
 ) -> ResultadoVlCuit:
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-    from cuit_en_arca.automation_playwright import (
-        LOGIN_URL,
-        _llenar_cuit_y_avanzar,
-        _login_clave_fiscal,
-    )
-
-    sis = sistemas or ["granos"]
+    sistemas_ord = _orden_sistemas_vl(sistemas)
     carpeta_destino.mkdir(parents=True, exist_ok=True)
     resultado = ResultadoVlCuit(
         cuit_login=cred.cuit_login,
@@ -1989,71 +2050,82 @@ def _ejecutar_vl_impl(
     if not fecha_desde or not fecha_hasta:
         raise AutomatizacionArcaError("Faltan fechas desde/hasta para la consulta.")
 
-    page = sesion.nueva_pagina()
     archivos: list[str] = []
     razon: str | None = None
+
     try:
-        paso("login", "en_curso")
-        _log(on_log, f"Iniciando sesión (CUIT {cred.cuit_login})…")
-        page.goto(LOGIN_URL, wait_until="domcontentloaded")
-        pausa_humana(0.6, 1.2)
-        _llenar_cuit_y_avanzar(page, cred.cuit_login)
-        _login_clave_fiscal(page, cred.clave_fiscal, cred.cuit_login)
-        paso("login", "ok")
+        for sistema in sistemas_ord:
+            if len(sistemas_ord) > 1:
+                _log(
+                    on_log,
+                    f"Liquidaciones de {sistema}: sesión ARCA independiente "
+                    f"(login y navegador aparte).",
+                )
+            sesion.cerrar_paginas()
+            page = sesion.nueva_pagina()
+            try:
+                _login_vl(page, cred, on_log, paso)
 
-        if "granos" in sis:
-            paso("servicio_granos", "en_curso")
-            _log(on_log, "Abriendo Liquidación primaria de granos…")
-            vl = _abrir_lpg(page)
-            paso("servicio_granos", "ok")
+                if sistema == "granos":
+                    paso("servicio_granos", "en_curso")
+                    _log(on_log, "Abriendo Liquidación primaria de granos…")
+                    vl = _abrir_lpg(page)
+                    paso("servicio_granos", "ok")
 
-            paso("contribuyente_granos", "en_curso")
-            razon_granos = _seleccionar_contribuyente_lpg(vl, nombre_representado, on_log)
-            razon = razon or razon_granos
-            paso("contribuyente_granos", "ok")
+                    paso("contribuyente_granos", "en_curso")
+                    razon_granos = _seleccionar_contribuyente_lpg(vl, nombre_representado, on_log)
+                    razon = razon or razon_granos
+                    paso("contribuyente_granos", "ok")
 
-            carpeta_destino = _renombrar_carpeta_cuit_vl(
-                carpeta_destino,
-                nombre_representado,
-                razon_granos,
-                fallback=cred.cuit_login,
-            )
-            resultado.carpeta = str(carpeta_destino)
-            _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}")
-            dest_prim = carpeta_destino / "Primarias"
-            dest_sec = carpeta_destino / "Secundarias"
+                    carpeta_destino = _renombrar_carpeta_cuit_vl(
+                        carpeta_destino,
+                        nombre_representado,
+                        razon_granos,
+                        fallback=cred.cuit_login,
+                    )
+                    resultado.carpeta = str(carpeta_destino)
+                    _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}")
+                    dest_prim = carpeta_destino / "Primarias"
+                    dest_sec = carpeta_destino / "Secundarias"
 
-            paso("consulta_prim", "en_curso")
-            _log(on_log, "Liquidaciones primarias de granos…")
-            archivos_prim = _procesar_liquidaciones_primarias(
-                vl, dest_prim, fecha_desde, fecha_hasta, on_log
-            )
-            paso("consulta_prim", "ok")
-            paso("descargar_prim", "ok")
+                    paso("consulta_prim", "en_curso")
+                    _log(on_log, "Liquidaciones primarias de granos…")
+                    archivos_prim = _procesar_liquidaciones_primarias(
+                        vl, dest_prim, fecha_desde, fecha_hasta, on_log
+                    )
+                    paso("consulta_prim", "ok")
+                    paso("descargar_prim", "ok")
 
-            paso("consulta_sec", "en_curso")
-            _log(on_log, "Liquidaciones secundarias de granos (Menú principal)…")
-            archivos_sec = _procesar_liquidaciones_secundarias(
-                vl, dest_sec, fecha_desde, fecha_hasta, on_log
-            )
-            paso("consulta_sec", "ok")
-            paso("descargar_sec", "ok")
-            archivos.extend(archivos_prim + archivos_sec)
+                    paso("consulta_sec", "en_curso")
+                    _log(on_log, "Liquidaciones secundarias de granos (Menú principal)…")
+                    archivos_sec = _procesar_liquidaciones_secundarias(
+                        vl, dest_sec, fecha_desde, fecha_hasta, on_log
+                    )
+                    paso("consulta_sec", "ok")
+                    paso("descargar_sec", "ok")
+                    archivos.extend(archivos_prim + archivos_sec)
 
-        if "hacienda" in sis:
-            razon_hac, archivos_hac, carpeta_destino = _ejecutar_hacienda_vl(
-                page,
-                nombre_representado,
-                carpeta_destino,
-                fecha_desde,
-                fecha_hasta,
-                cuit_login=cred.cuit_login,
-                on_log=on_log,
-                on_paso=on_paso,
-            )
-            razon = razon or razon_hac
-            resultado.carpeta = str(carpeta_destino)
-            archivos.extend(archivos_hac)
+                elif sistema == "hacienda":
+                    razon_hac, archivos_hac, carpeta_destino = _ejecutar_hacienda_vl(
+                        page,
+                        nombre_representado,
+                        carpeta_destino,
+                        fecha_desde,
+                        fecha_hasta,
+                        cuit_login=cred.cuit_login,
+                        on_log=on_log,
+                        on_paso=on_paso,
+                    )
+                    razon = razon or razon_hac
+                    resultado.carpeta = str(carpeta_destino)
+                    archivos.extend(archivos_hac)
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+                sesion.cerrar_paginas()
+                pausa_humana(0.8, 1.4)
 
         resultado.razon_social = razon
         resultado.archivos = archivos
@@ -2075,11 +2147,6 @@ def _ejecutar_vl_impl(
         raise
     except Exception as exc:
         raise AutomatizacionArcaError(f"Error en Ventas y Liquidaciones: {exc}") from exc
-    finally:
-        try:
-            page.close()
-        except Exception:
-            pass
 
 
 def ejecutar_vl_lote(
