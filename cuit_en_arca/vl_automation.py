@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -961,6 +962,42 @@ def _listar_paginas_lsp(context) -> list:
     return out
 
 
+def _nueva_pestana_lsp(context, paginas_antes: set[int] | None = None):
+    """Última pestaña LSP abierta tras el clic (excluye las que ya existían)."""
+    candidatas: list = []
+    for pg in context.pages:
+        if pg.is_closed():
+            continue
+        if "lsp-web" not in (pg.url or "").lower():
+            continue
+        if paginas_antes and id(pg) in paginas_antes:
+            continue
+        candidatas.append(pg)
+    return candidatas[-1] if candidatas else None
+
+
+def _preparar_reintento_lsp_desde_rcel(rcel, on_log=None) -> None:
+    """Tras recuperación: solo menú rcel visible, sin pestañas LSP colgadas."""
+    _cerrar_pestanas_lsp(rcel.context, on_log)
+    pausa_humana(0.4, 0.8)
+    try:
+        rcel.bring_to_front()
+        rcel.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+    except Exception:
+        pass
+    link = rcel.locator("#btn_fwd_lsp, a#btn_fwd_lsp").first
+    if not link.count():
+        link = rcel.get_by_role(
+            "link",
+            name=re.compile(r"hacienda\s+y\s+carne.*liquidaci", re.I),
+        ).first
+    try:
+        link.wait_for(state="visible", timeout=15_000)
+    except Exception:
+        pass
+    _log(on_log, "  • Menú Comprobantes en línea listo; se reintenta Hacienda y Carne.")
+
+
 def _cerrar_pestana_navegador(pg, on_log=None, *, etiqueta: str = "Pestaña") -> None:
     """Cierra pestaña (page.close, window.close o Ctrl+W si hace falta)."""
     if pg.is_closed():
@@ -1190,14 +1227,14 @@ def _lsp_tiene_seleccion_empresa(lsp) -> bool:
         return False
 
 
-def _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log=None):
-    """ARCA a veces abre LSP en estado inválido: CERRAR SESIÓN → Salir → menú rcel.
+def _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log=None) -> None:
+    """CERRAR SESIÓN → Salir → 3 s → cerrar pestaña LSP → volver al menú rcel.
 
-    Tras Salir, ARCA puede abrir una pestaña LSP nueva y dejar la dañada abierta.
-    Se cierran las obsoletas, se activa la correcta y se devuelve si ya tiene selector.
+    No reutiliza pestañas LSP que ARCA pueda abrir solas: el reintento lo hace
+    ``_abrir_lsp_desde_rcel`` clickeando otra vez Hacienda y Carne.
     """
-    _log(on_log, "  • LSP en estado erróneo: CERRAR SESIÓN y reingreso desde Comprobantes en línea…")
-    pestana_mala = lsp
+    _log(on_log, "  • LSP en estado erróneo: CERRAR SESIÓN…")
+    pestana_danada = lsp
     cerrar = None
     for loc in (
         lsp.get_by_role("link", name=re.compile(r"cerrar\s+sesi[oó]n", re.I)),
@@ -1216,7 +1253,7 @@ def _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log=None):
             "LSP abrió en estado incorrecto y no apareció «CERRAR SESIÓN» para recuperar."
         )
     try:
-        pestana_mala.bring_to_front()
+        pestana_danada.bring_to_front()
     except Exception:
         pass
     clic_humano(cerrar)
@@ -1229,30 +1266,21 @@ def _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log=None):
         raise AutomatizacionArcaError(
             "No se confirmó «Salir» tras CERRAR SESIÓN en LSP."
         ) from exc
-    pausa_humana(0.8, 1.4)
-    try:
-        rcel.wait_for_url(re.compile(r"menu_ppal|rcel/jsp", re.I), timeout=22_000)
-    except Exception:
-        pass
+
+    _log(on_log, "  • Esperando 3 s antes de cerrar la pestaña LSP dañada…")
+    time.sleep(3)
+
+    if not pestana_danada.is_closed():
+        _cerrar_pestana_navegador(pestana_danada, on_log, etiqueta="Pestaña LSP dañada")
+    _cerrar_pestanas_lsp(lsp.context, on_log)
+
     try:
         rcel.bring_to_front()
+        rcel.wait_for_url(re.compile(r"menu_ppal|rcel/jsp", re.I), timeout=20_000)
         rcel.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
     except Exception:
         pass
-    pausa_humana(1.0, 1.8)
-    if not pestana_mala.is_closed():
-        _cerrar_pestana_navegador(pestana_mala, on_log, etiqueta="Pestaña LSP dañada")
-    lsp_ok = _esperar_pagina_lsp(lsp.context, timeout_ms=14_000, on_log=on_log)
-    if lsp_ok is not None and _lsp_tiene_seleccion_empresa(lsp_ok):
-        try:
-            lsp_ok.bring_to_front()
-        except Exception:
-            pass
-        _log(on_log, "  • Pestaña LSP correcta activa tras recuperación.")
-        return lsp_ok
-    _cerrar_pestanas_lsp(lsp.context, on_log)
-    pausa_humana(0.4, 0.8)
-    return None
+    _preparar_reintento_lsp_desde_rcel(rcel, on_log)
 
 
 def _abrir_lsp_desde_rcel(rcel, on_log=None):
@@ -1275,50 +1303,49 @@ def _abrir_lsp_desde_rcel(rcel, on_log=None):
             pass
 
         _log(on_log, f"Abriendo liquidación hacienda (intento {intento}/3)…")
+        paginas_antes = {
+            id(pg) for pg in rcel.context.pages if not pg.is_closed()
+        }
+        lsp = None
         try:
             with rcel.context.expect_page(timeout=12_000) as pi:
                 clic_humano(link)
-            nueva = pi.value
-            try:
-                nueva.wait_for_load_state("domcontentloaded", timeout=20_000)
-            except Exception:
-                pass
+            lsp = pi.value
         except Exception:
             clic_humano(link)
-            pausa_humana(0.8, 1.4)
+            pausa_humana(1.0, 1.5)
+            lsp = _nueva_pestana_lsp(rcel.context, paginas_antes)
 
-        lsp = _esperar_pagina_lsp(rcel.context, timeout_ms=16_000, on_log=on_log)
-        if lsp is not None:
-            lsp.set_default_timeout(40_000)
-            if _lsp_tiene_seleccion_empresa(lsp):
-                try:
-                    lsp.bring_to_front()
-                except Exception:
-                    pass
-                return lsp
-            try:
-                lsp_rec = _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log)
-                if lsp_rec is not None and _lsp_tiene_seleccion_empresa(lsp_rec):
-                    lsp_rec.set_default_timeout(40_000)
-                    return lsp_rec
-            except AutomatizacionArcaError as exc:
-                _log(on_log, f"  • Recuperación LSP: {exc}")
-                _cerrar_pestanas_lsp(rcel.context, on_log)
-                _cerrar_pestanas_no_lsp(rcel.context, conservar=rcel)
-            pausa_humana(0.6, 1.2)
-            try:
-                rcel.bring_to_front()
-            except Exception:
-                pass
+        if lsp is None:
+            lsp = _nueva_pestana_lsp(rcel.context, paginas_antes)
+
+        if lsp is None:
+            _log(on_log, "  • No se detectó pestaña LSP; se reintenta desde el menú.")
+            _preparar_reintento_lsp_desde_rcel(rcel, on_log)
             continue
 
-        _log(on_log, "  • Pestaña incorrecta o vacía; se cierra y se reintenta desde el menú.")
-        _cerrar_pestanas_no_lsp(rcel.context, conservar=rcel)
-        pausa_humana(0.6, 1.2)
         try:
-            rcel.bring_to_front()
+            lsp.wait_for_load_state("domcontentloaded", timeout=20_000)
         except Exception:
             pass
+        pausa_humana(0.5, 1.0)
+        lsp.set_default_timeout(40_000)
+
+        if _lsp_tiene_seleccion_empresa(lsp):
+            try:
+                lsp.bring_to_front()
+            except Exception:
+                pass
+            return lsp
+
+        _log(on_log, "  • LSP sin selector de empresa; se recupera y se reintenta…")
+        try:
+            _lsp_cerrar_sesion_y_volver_rcel(lsp, rcel, on_log)
+        except AutomatizacionArcaError as exc:
+            _log(on_log, f"  • Recuperación LSP: {exc}")
+            _cerrar_pestanas_lsp(rcel.context, on_log)
+            _preparar_reintento_lsp_desde_rcel(rcel, on_log)
+        continue
 
     raise AutomatizacionArcaError(
         "No se pudo abrir Liquidación de hacienda (LSP). "
@@ -1455,17 +1482,108 @@ def _ir_pagina_lsp(lsp, num: int, on_log=None) -> None:
     raise AutomatizacionArcaError(f"No se pudo ir a la página {num} de resultados LSP.")
 
 
+_RX_NUM_LIQ_LSP = re.compile(r"(\d+)\s*-\s*(\d+)")
+
+
+def _formatear_numero_liquidacion_lsp(pto: str, nro: str) -> str:
+    p = int(re.sub(r"\D", "", pto) or "0")
+    n = int(re.sub(r"\D", "", nro) or "0")
+    return f"{p:05d} - {n:08d}"
+
+
+def _extraer_numero_liquidacion_fila_lsp(fila) -> str | None:
+    """Número visible en la grilla LSP, p. ej. «00023 - 00016059»."""
+    try:
+        raw = fila.evaluate(
+            """(row) => {
+              const fmt = (pto, nro) => {
+                const p = String(parseInt(pto, 10) || 0).padStart(5, '0');
+                const n = String(parseInt(nro, 10) || 0).padStart(8, '0');
+                return p + ' - ' + n;
+              };
+              const link = row.querySelector('a.btnImprimir');
+              if (link) {
+                const onclick = link.getAttribute('onclick') || '';
+                const nums = onclick.match(/\\d+/g);
+                if (nums && nums.length >= 2) {
+                  return fmt(nums[nums.length - 2], nums[nums.length - 1]);
+                }
+                const href = link.getAttribute('href') || '';
+                const hrefNums = href.match(/\\d+/g);
+                if (hrefNums && hrefNums.length >= 2) {
+                  return fmt(hrefNums[hrefNums.length - 2], hrefNums[hrefNums.length - 1]);
+                }
+              }
+              const tds = [...row.querySelectorAll('td')];
+              for (const td of tds) {
+                const t = (td.innerText || '').trim();
+                const m = t.match(/^(\\d{4,5})\\s*-\\s*(\\d{5,8})$/);
+                if (m) return m[1] + ' - ' + m[2];
+              }
+              for (let i = 0; i < tds.length - 1; i++) {
+                const a = (tds[i].innerText || '').trim();
+                const b = (tds[i + 1].innerText || '').trim();
+                if (/^\\d{4,5}$/.test(a) && /^\\d{5,8}$/.test(b)) {
+                  return a + ' - ' + b;
+                }
+              }
+              const full = row.innerText || '';
+              const m = full.match(/(\\d{4,5})\\s*-\\s*(\\d{5,8})/);
+              if (m) return m[1] + ' - ' + m[2];
+              return '';
+            }"""
+        )
+    except Exception:
+        return None
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    m = _RX_NUM_LIQ_LSP.search(raw)
+    if m:
+        return _formatear_numero_liquidacion_lsp(m.group(1), m.group(2))
+    return _nombre_seguro(raw, fallback="")
+
+
+def _ruta_pdf_lsp(dest: Path, numero_liq: str, *, prefijo: str, fila: int, seq: int) -> Path:
+    base = _nombre_seguro(f"{numero_liq}.pdf", fallback=f"{prefijo}_{seq}.pdf")
+    if not base.lower().endswith(".pdf"):
+        base = f"{base}.pdf"
+    ruta = dest / base
+    if ruta.exists():
+        stem = _nombre_seguro(numero_liq, fallback=f"{prefijo}_{seq}")
+        ruta = dest / f"{stem}_{fila}.pdf"
+    return ruta
+
+
 def _locator_links_pdf_lsp(lsp):
-    return lsp.locator(
-        "table#resultTable a.btnImprimir.usarMano, "
-        "table#resultTable a.btnImprimir, "
-        "table#resultTable tbody tr td a.glyphicon"
-    )
+    """Solo ícono imprimir/PDF (grabación 20260704_230138: btnImprimir.usarMano.glyphicon)."""
+    return lsp.locator("table#resultTable tbody tr a.btnImprimir.usarMano, table#resultTable tbody tr a.btnImprimir")
+
+
+def _link_pdf_fila_lsp(lsp, indice_fila: int):
+    filas = lsp.locator("table#resultTable tbody tr")
+    fila = filas.nth(indice_fila)
+    link = fila.locator("a.btnImprimir.usarMano, a.btnImprimir").first
+    if link.count():
+        return link
+    return None
 
 
 def _contar_pdfs_lsp(lsp) -> int:
     try:
-        return _locator_links_pdf_lsp(lsp).count()
+        n = _locator_links_pdf_lsp(lsp).count()
+        if n > 0:
+            return n
+    except Exception:
+        pass
+    try:
+        filas = lsp.locator("table#resultTable tbody tr")
+        total = filas.count()
+        con_pdf = 0
+        for i in range(total):
+            if filas.nth(i).locator("a.btnImprimir").count():
+                con_pdf += 1
+        return con_pdf
     except Exception:
         return 0
 
@@ -1485,50 +1603,82 @@ def _descargar_pdfs_pagina_lsp(
         return guardados
 
     url_grilla = lsp.url or ""
-    for i in range(total):
-        if not _restaurar_vista_grilla_lsp(lsp, url_grilla, on_log):
+    fila = 0
+    intentos = 0
+    max_intentos = max(total * 4, 8)
+
+    while len(guardados) < total and intentos < max_intentos:
+        intentos += 1
+        if len(guardados) > 0 or intentos > 1:
+            if not _restaurar_vista_grilla_lsp(lsp, url_grilla, on_log):
+                _log(
+                    on_log,
+                    f"  • No se pudo recuperar la grilla LSP tras {len(guardados)}/{total} PDF.",
+                )
+                break
+
+        filas = lsp.locator("table#resultTable tbody tr")
+        if fila >= filas.count():
             break
-        links = _locator_links_pdf_lsp(lsp)
-        if links.count() <= i:
-            break
-        link = links.nth(i)
+
+        fila_loc = filas.nth(fila)
+        link = _link_pdf_fila_lsp(lsp, fila)
+        if link is None:
+            fila += 1
+            continue
+
         try:
             if not link.is_visible(timeout=3000):
                 link.scroll_into_view_if_needed(timeout=5000)
         except Exception:
             pass
-        numero = offset + len(guardados) + 1
-        nombre = _nombre_seguro(f"{prefijo}_{numero}.pdf", fallback=f"{prefijo}_{numero}.pdf")
-        ruta = dest / nombre
-        if ruta.exists():
-            ruta = dest / f"{prefijo}_{numero}_{i}.pdf"
+
+        numero_liq = _extraer_numero_liquidacion_fila_lsp(fila_loc)
+        seq = offset + len(guardados) + 1
+        if not numero_liq:
+            numero_liq = f"{prefijo}_{seq}"
+            _log(on_log, f"  • No se leyó nº de liquidación en fila {fila + 1}; se usa {numero_liq}.")
+        ruta = _ruta_pdf_lsp(dest, numero_liq, prefijo=prefijo, fila=fila, seq=seq)
+
         if _guardar_pdf_desde_click(lsp, link, ruta, on_log, url_grilla=url_grilla):
             guardados.append(str(ruta))
-            _log(on_log, f"  • PDF ({prefijo}) {numero}: {ruta.name}")
+            fila += 1
+            _log(on_log, f"  • PDF ({prefijo}) {numero_liq}: {ruta.name}")
             _restaurar_vista_grilla_lsp(lsp, url_grilla, on_log)
-        pausa_humana(0.2, 0.45)
+        else:
+            _log(
+                on_log,
+                f"  • No se pudo descargar PDF {numero_liq} (fila {fila + 1}, {prefijo}).",
+            )
+            if intentos >= max_intentos - 1:
+                break
+        pausa_humana(0.25, 0.5)
+
     return guardados
 
 
 def _restaurar_vista_grilla_lsp(lsp, url_grilla: str, on_log=None) -> bool:
-    try:
-        tbl = lsp.locator("table#resultTable").first
-        if tbl.count() and tbl.is_visible(timeout=3000):
-            return True
-    except Exception:
-        pass
-    url_actual = lsp.url or ""
-    try:
-        if url_grilla and url_actual and url_actual != url_grilla:
-            lsp.go_back(wait_until="domcontentloaded", timeout=_VL_ESPERA_MS)
-        else:
-            lsp.reload(wait_until="domcontentloaded", timeout=_VL_ESPERA_MS)
-        pausa_humana(0.5, 1.0)
-        lsp.locator("table#resultTable").first.wait_for(state="visible", timeout=12_000)
-        return True
-    except Exception as exc:
-        _log(on_log, f"  • Reintentando grilla LSP: {exc}")
-        return False
+    for intento in range(5):
+        try:
+            tbl = lsp.locator("table#resultTable").first
+            if tbl.count() and tbl.is_visible(timeout=3000):
+                if _contar_pdfs_lsp(lsp) > 0:
+                    return True
+        except Exception:
+            pass
+        url_actual = lsp.url or ""
+        try:
+            if url_grilla and url_actual and url_actual != url_grilla:
+                lsp.go_back(wait_until="domcontentloaded", timeout=_VL_ESPERA_MS)
+            else:
+                lsp.reload(wait_until="domcontentloaded", timeout=_VL_ESPERA_MS)
+            pausa_humana(0.5, 1.0)
+            lsp.locator("table#resultTable").first.wait_for(state="visible", timeout=12_000)
+            if _contar_pdfs_lsp(lsp) > 0:
+                return True
+        except Exception as exc:
+            _log(on_log, f"  • Reintentando grilla LSP ({intento + 1}/5): {exc}")
+    return False
 
 
 def _descargar_lsp_paginado(
@@ -1637,7 +1787,6 @@ def _ejecutar_hacienda_vl(
     paso("contribuyente_rcel", "ok")
 
     lsp = _abrir_lsp_desde_rcel(rcel, on_log)
-    lsp = _resolver_pagina_lsp(rcel.context, on_log, cerrar_obsoletas=True) or lsp
     try:
         lsp.bring_to_front()
     except Exception:
