@@ -2492,17 +2492,40 @@ def _filas_ap_desde_manual(lg: str):
     dfe_desde = request.form.getlist("ap_dfe_desde")
     dfe_hasta = request.form.getlist("ap_dfe_hasta")
     ejercicios = request.form.getlist("ap_ejercicio")
+    repr_liq = request.form.getlist("ap_repr_liq")
+    liq_desde = request.form.getlist("ap_liq_desde")
+    liq_hasta = request.form.getlist("ap_liq_hasta")
 
     hay = any(
         (v or "").strip()
-        for lst in (cuits, claves, reprs, fechas_mc, dfe_desde, dfe_hasta, ejercicios)
+        for lst in (
+            cuits,
+            claves,
+            reprs,
+            fechas_mc,
+            dfe_desde,
+            dfe_hasta,
+            ejercicios,
+            repr_liq,
+            liq_desde,
+            liq_hasta,
+        )
         for v in lst
     )
     if not hay:
         return [], [], tr(lg, "ap_err_sin_datos")
 
     filas, errores = parsear_entradas_manuales_ap(
-        cuits, claves, reprs, fechas_mc, dfe_desde, dfe_hasta, ejercicios
+        cuits,
+        claves,
+        reprs,
+        fechas_mc,
+        dfe_desde,
+        dfe_hasta,
+        ejercicios,
+        repr_liq,
+        liq_desde,
+        liq_hasta,
     )
     if not filas:
         return [], errores, "; ".join(errores) or tr(lg, "ap_err_sin_datos")
@@ -2522,7 +2545,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
     sistemas = [
         s
         for s in request.form.getlist("ap_sistemas")
-        if s in ("mis_comprobantes", "dfe", "nuestra_parte")
+        if s in ("mis_comprobantes", "dfe", "nuestra_parte", "liquidaciones")
     ]
     if not sistemas:
         return None, tr(lg, "ap_err_sin_sistema")

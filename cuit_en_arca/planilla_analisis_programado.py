@@ -1,9 +1,13 @@
-"""Lectura de la planilla unificada «Análisis Programado» (columnas A–G).
+"""Lectura de la planilla unificada «Análisis Programado» (columnas A–J).
 
-Solo se leen las columnas A–G; el resto de la hoja puede contener anotaciones.
+Solo se leen las columnas A–J; el resto de la hoja puede contener anotaciones.
 Encabezados esperados (fila 1 del modelo):
   A CUIT | B Clave Fiscal | C CUIT Representado | D Fechas Mis Comprobantes
   E Fecha DFE Desde | F Fecha DFE Hasta | G Ejercicio Nuestra Parte
+  H Representado | I Fecha Liq Desde | J Fecha Liq Hasta
+
+Según los sistemas elegidos al ejecutar, se usan solo las columnas que correspondan
+(Mis Comprobantes → D; DFE → E–F; Nuestra Parte → G; Liquidaciones → H–J).
 """
 
 from __future__ import annotations
@@ -16,9 +20,10 @@ from openpyxl import load_workbook
 from cuit_en_arca.errores import CredencialesArchivoError
 from cuit_en_arca.planilla_lote import FilaPlanillaArca, _celda_rango, _celda_str, _solo_digitos
 from cuit_en_arca.planilla_nuestra_parte import FilaNuestraParte
+from cuit_en_arca.planilla_vl import FilaPlanillaVl
 from cuit_en_arca.validacion import parsear_fecha_argentina, parsear_rango_fechas_texto, validar_rango_max_un_anio
 
-COLS_DATOS = 7  # A–G
+COLS_DATOS = 10  # A–J
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,9 @@ class FilaAnalisisProgramado:
     fecha_dfe_desde: str
     fecha_dfe_hasta: str
     ejercicio_nuestra_parte: str
+    representado_liquidaciones: str
+    fecha_liq_desde: str
+    fecha_liq_hasta: str
 
 
 def _fila_vacia(vals: tuple) -> bool:
@@ -49,6 +57,9 @@ def _parsear_fila_ap(fila_num: int, row_vals: tuple) -> FilaAnalisisProgramado |
     dfe_desde = _celda_rango(vals[4])
     dfe_hasta = _celda_rango(vals[5])
     ejercicio = _celda_str(vals[6])
+    repr_liq = _celda_str(vals[7])
+    liq_desde = _celda_rango(vals[8])
+    liq_hasta = _celda_rango(vals[9])
 
     if not cuit_log or not clave:
         raise CredencialesArchivoError(
@@ -71,6 +82,9 @@ def _parsear_fila_ap(fila_num: int, row_vals: tuple) -> FilaAnalisisProgramado |
         fecha_dfe_desde=dfe_desde.strip(),
         fecha_dfe_hasta=dfe_hasta.strip(),
         ejercicio_nuestra_parte=ejercicio.strip(),
+        representado_liquidaciones=repr_liq.strip(),
+        fecha_liq_desde=liq_desde.strip(),
+        fecha_liq_hasta=liq_hasta.strip(),
     )
 
 
@@ -89,7 +103,6 @@ def leer_planilla_analisis_programado(
     if not rows:
         raise CredencialesArchivoError("La planilla está vacía.")
 
-    # Fila 1 = encabezados del modelo; datos desde fila 2.
     filas: list[FilaAnalisisProgramado] = []
     errores: list[str] = []
     for n, row in enumerate(rows[1:], start=2):
@@ -106,7 +119,7 @@ def leer_planilla_analisis_programado(
 
     if not filas and not errores:
         raise CredencialesArchivoError(
-            "No hay filas de datos (completá desde la fila 2, columnas A–G)."
+            "No hay filas de datos (completá desde la fila 2, columnas A–J)."
         )
     return filas, errores
 
@@ -119,6 +132,9 @@ def parsear_entradas_manuales_ap(
     dfe_desde: list[str],
     dfe_hasta: list[str],
     ejercicios: list[str],
+    repr_liq: list[str],
+    liq_desde: list[str],
+    liq_hasta: list[str],
 ) -> tuple[list[FilaAnalisisProgramado], list[str]]:
     n = max(
         len(cuits),
@@ -128,6 +144,9 @@ def parsear_entradas_manuales_ap(
         len(dfe_desde),
         len(dfe_hasta),
         len(ejercicios),
+        len(repr_liq),
+        len(liq_desde),
+        len(liq_hasta),
         0,
     )
 
@@ -146,6 +165,9 @@ def parsear_entradas_manuales_ap(
             _at(dfe_desde, i),
             _at(dfe_hasta, i),
             _at(ejercicios, i),
+            _at(repr_liq, i),
+            _at(liq_desde, i),
+            _at(liq_hasta, i),
         )
         if _fila_vacia(row):
             continue
@@ -176,6 +198,21 @@ def _par_fechas_mc(texto: str, fila: int) -> tuple[str, str] | None:
     hasta = parsear_fecha_argentina(fh)
     validar_rango_max_un_anio(desde, hasta)
     return fd, fh
+
+
+def _par_fechas_liquidaciones(desde: str, hasta: str, fila: int) -> tuple[str, str]:
+    if not (desde or "").strip() or not (hasta or "").strip():
+        raise CredencialesArchivoError(
+            f"Fila {fila}: liquidaciones requiere fecha desde (col. I) y hasta (col. J)."
+        )
+    try:
+        parsear_fecha_argentina(desde.strip())
+        parsear_fecha_argentina(hasta.strip())
+    except Exception as exc:
+        raise CredencialesArchivoError(
+            f"Fila {fila}: fechas de liquidaciones inválidas ({exc})."
+        ) from exc
+    return desde.strip(), hasta.strip()
 
 
 def filas_mis_comprobantes(
@@ -266,3 +303,37 @@ def filas_nuestra_parte(
             )
         )
     return out, []
+
+
+def filas_liquidaciones(
+    filas: list[FilaAnalisisProgramado],
+) -> tuple[list[FilaPlanillaVl], list[str]]:
+    out: list[FilaPlanillaVl] = []
+    errores: list[str] = []
+    for f in filas:
+        if not f.fecha_liq_desde and not f.fecha_liq_hasta:
+            continue
+        try:
+            fd, fh = _par_fechas_liquidaciones(
+                f.fecha_liq_desde, f.fecha_liq_hasta, f.fila_excel
+            )
+        except CredencialesArchivoError as exc:
+            errores.append(str(exc))
+            continue
+        nombre = (f.representado_liquidaciones or "").strip()
+        if not nombre:
+            errores.append(
+                f"Fila {f.fila_excel}: liquidaciones requiere Representado (col. H)."
+            )
+            continue
+        out.append(
+            FilaPlanillaVl(
+                fila_excel=f.fila_excel,
+                cuit_login=f.cuit_login,
+                clave_fiscal=f.clave_fiscal,
+                nombre_representado=nombre,
+                fecha_desde=fd,
+                fecha_hasta=fh,
+            )
+        )
+    return out, errores

@@ -16,6 +16,10 @@ a = Analysis(
         ("templates", "templates"),
         ("static", "static"),
         ("Formato Analisis Programado.xlsx", "."),
+        (
+            "Formato analisis programado/Formato Analisis Programado.xlsx",
+            "Formato analisis programado",
+        ),
         ("Formato DFE/Formato DFE.xlsx", "Formato DFE"),
         (
             "Formato Ventas y Liquidaciones/Formato VyL.xlsx",

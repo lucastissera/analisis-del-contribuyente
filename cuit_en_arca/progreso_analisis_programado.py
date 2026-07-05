@@ -11,11 +11,12 @@ from cuit_en_arca.hora_log import hora_log_ar
 _lock = threading.Lock()
 _estado: EstadoEjecucionAP | None = None
 
-_ORDEN_SISTEMAS = ("mis_comprobantes", "dfe", "nuestra_parte")
+_ORDEN_SISTEMAS = ("mis_comprobantes", "dfe", "nuestra_parte", "liquidaciones")
 _ETIQUETAS_SISTEMA = {
     "mis_comprobantes": "Mis Comprobantes",
     "dfe": "Domicilio Fiscal Electrónico",
     "nuestra_parte": "Nuestra Parte",
+    "liquidaciones": "Ventas y Liquidaciones",
 }
 
 _MAX_LOG = 400

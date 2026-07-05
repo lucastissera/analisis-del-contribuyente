@@ -61,7 +61,7 @@
       }
       .campos-grid {
         display: grid;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 0.45rem;
         min-width: 0;
       }
@@ -149,6 +149,7 @@
             <label><input type="checkbox" name="ap_sistemas" value="mis_comprobantes" /> {{ t('ap_sistema_mc') }}</label>
             <label><input type="checkbox" name="ap_sistemas" value="dfe" /> {{ t('ap_sistema_dfe') }}</label>
             <label><input type="checkbox" name="ap_sistemas" value="nuestra_parte" /> {{ t('ap_sistema_np') }}</label>
+            <label><input type="checkbox" name="ap_sistemas" value="liquidaciones" /> {{ t('ap_sistema_liq') }}</label>
           </div>
         </div>
 
@@ -198,6 +199,9 @@
                 <label><strong>{{ t('ap_col_dfe_desde') }}</strong><input name="ap_dfe_desde" type="text" placeholder="dd/mm/aaaa" /></label>
                 <label><strong>{{ t('ap_col_dfe_hasta') }}</strong><input name="ap_dfe_hasta" type="text" placeholder="dd/mm/aaaa" /></label>
                 <label><strong>{{ t('ap_col_ejercicio') }}</strong><input name="ap_ejercicio" type="text" placeholder="2025" /></label>
+                <label><strong>{{ t('ap_col_repr_liq') }}</strong><input name="ap_repr_liq" type="text" autocomplete="off" /></label>
+                <label><strong>{{ t('ap_col_liq_desde') }}</strong><input name="ap_liq_desde" type="text" placeholder="dd/mm/aaaa" /></label>
+                <label><strong>{{ t('ap_col_liq_hasta') }}</strong><input name="ap_liq_hasta" type="text" placeholder="dd/mm/aaaa" /></label>
               </div>
               <button type="button" class="fila-quitar" title="{{ t('ap_manual_quitar') }}">&times;</button>
             </div>
@@ -289,7 +293,8 @@
         nombresSistema: {
           mis_comprobantes: {{ t('ap_sistema_mc')|tojson }},
           dfe: {{ t('ap_sistema_dfe')|tojson }},
-          nuestra_parte: {{ t('ap_sistema_np')|tojson }}
+          nuestra_parte: {{ t('ap_sistema_np')|tojson }},
+          liquidaciones: {{ t('ap_sistema_liq')|tojson }}
         }
       };
 

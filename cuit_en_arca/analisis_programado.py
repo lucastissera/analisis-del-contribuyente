@@ -23,7 +23,7 @@ _ejecucion_seq = 0
 _ejecucion_activa_seq = 0
 _scheduler_iniciado = False
 
-SISTEMAS_VALIDOS = frozenset({"mis_comprobantes", "dfe", "nuestra_parte"})
+SISTEMAS_VALIDOS = frozenset({"mis_comprobantes", "dfe", "nuestra_parte", "liquidaciones"})
 
 DIAS_SEMANA = (
     (0, "Lunes"),
@@ -66,8 +66,10 @@ def ruta_plantilla_excel() -> Path:
     dev_raiz = Path(__file__).resolve().parent.parent
     candidatos.extend(
         [
+            raiz / "Formato analisis programado" / "Formato Analisis Programado.xlsx",
             raiz / "Formato Analisis Programado.xlsx",
             raiz / "static" / "Formato Analisis Programado.xlsx",
+            dev_raiz / "Formato analisis programado" / "Formato Analisis Programado.xlsx",
             dev_raiz / "Formato Analisis Programado.xlsx",
             dev_raiz / "static" / "Formato Analisis Programado.xlsx",
         ]
@@ -114,6 +116,9 @@ class ConfigAnalisisProgramado:
                     "fecha_dfe_desde": f.get("fecha_dfe_desde"),
                     "fecha_dfe_hasta": f.get("fecha_dfe_hasta"),
                     "ejercicio_nuestra_parte": f.get("ejercicio_nuestra_parte"),
+                    "representado_liquidaciones": f.get("representado_liquidaciones"),
+                    "fecha_liq_desde": f.get("fecha_liq_desde"),
+                    "fecha_liq_hasta": f.get("fecha_liq_hasta"),
                 }
             )
         d["filas"] = filas_pub
@@ -211,6 +216,9 @@ def _filas_desde_config(cfg: ConfigAnalisisProgramado):
                 fecha_dfe_desde=str(raw.get("fecha_dfe_desde") or ""),
                 fecha_dfe_hasta=str(raw.get("fecha_dfe_hasta") or ""),
                 ejercicio_nuestra_parte=str(raw.get("ejercicio_nuestra_parte") or ""),
+                representado_liquidaciones=str(raw.get("representado_liquidaciones") or ""),
+                fecha_liq_desde=str(raw.get("fecha_liq_desde") or ""),
+                fecha_liq_hasta=str(raw.get("fecha_liq_hasta") or ""),
             )
         )
     return out
@@ -371,6 +379,7 @@ def ejecutar_analisis_programado(
 
         from cuit_en_arca.planilla_analisis_programado import (
             filas_dfe,
+            filas_liquidaciones,
             filas_mis_comprobantes,
             filas_nuestra_parte,
         )
@@ -509,6 +518,50 @@ def ejecutar_analisis_programado(
                 else:
                     log("Nuestra Parte: sin filas con ejercicio en la planilla.")
                     marcar_paso_ap("nuestra_parte", "ok")
+                if entrega:
+                    entrega.escanear()
+                sesion.cerrar_paginas()
+
+            if "liquidaciones" in cfg.sistemas:
+                verificar_cancelacion(ap=True)
+                marcar_paso_ap("liquidaciones", "en_curso")
+                vl, err_vl = filas_liquidaciones(filas_ap)
+                resultado["sistemas"]["liquidaciones"] = {
+                    "filas": len(vl),
+                    "errores_planilla": err_vl,
+                }
+                if vl:
+                    from cuit_en_arca.vl_automation import ejecutar_vl_lote
+
+                    log(f"Liquidaciones: {len(vl)} fila(s)…")
+                    try:
+                        carpeta_vl = ejecutar_vl_lote(
+                            vl,
+                            sistemas=["granos", "hacienda"],
+                            headless=headless,
+                            on_log=log,
+                            carpeta_base=base / "Ventas y Liquidaciones",
+                            sesion=sesion,
+                            hay_cupo=hay_cupo,
+                            on_cuit_exitoso=on_cuit_exitoso,
+                        )
+                        resultado["sistemas"]["liquidaciones"]["carpeta"] = str(carpeta_vl)
+                        marcar_paso_ap("liquidaciones", "ok")
+                    except CancelacionUsuarioError as exc:
+                        marcar_cancelado_ap(str(exc))
+                        if not manual:
+                            limpiar_cache_programacion(cfg)
+                        return resultado
+                    except Exception as exc:
+                        resultado["sistemas"]["liquidaciones"]["error"] = str(exc)
+                        resultado["fallos"].append(f"Liquidaciones: {exc}")
+                        marcar_paso_ap("liquidaciones", "error")
+                elif err_vl:
+                    resultado["fallos"].extend(err_vl)
+                    marcar_paso_ap("liquidaciones", "error")
+                else:
+                    log("Liquidaciones: sin filas con fechas en la planilla (col. I–J).")
+                    marcar_paso_ap("liquidaciones", "ok")
                 if entrega:
                     entrega.escanear()
                 sesion.cerrar_paginas()

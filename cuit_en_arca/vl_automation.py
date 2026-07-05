@@ -2177,6 +2177,7 @@ def ejecutar_vl_lote(
     nombre_carpeta_sesion: str | None = None,
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
+    sesion: SesionPlaywrightCompartida | None = None,
 ) -> Path:
     headless = _headless_desde_env() if headless is None else headless
     base = carpeta_vl_escritorio(
@@ -2261,7 +2262,10 @@ def ejecutar_vl_lote(
             if on_progreso:
                 on_progreso(idx, total, f"{nombre_repr or cuit_log} completado ({idx}/{total})")
 
-    if reutilizar_navegador_por_defecto(filas=total):
+    if sesion is not None:
+        _log(on_log, "Navegador compartido (análisis programado / lote).")
+        _procesar_lote(sesion)
+    elif reutilizar_navegador_por_defecto(filas=total):
         with SesionPlaywrightCompartida(headless=headless) as sesion_local:
             _log(on_log, "Navegador compartido activo.")
             _procesar_lote(sesion_local)
