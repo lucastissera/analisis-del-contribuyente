@@ -34,6 +34,14 @@ from cuit_en_arca.errores import (
     LoginArcaError,
 )
 from cuit_en_arca.service import _headless_desde_env
+
+_modo_headless_vl: bool | None = None
+
+
+def _vl_headless() -> bool:
+    if _modo_headless_vl is not None:
+        return _modo_headless_vl
+    return _headless_desde_env()
 from cuit_en_arca.stealth import clic_humano, escribir_como_humano, pausa_humana
 
 VL_TERMINO_BUSQUEDA = "Liquidación primaria de granos"
@@ -980,12 +988,12 @@ def _nueva_pestana_lsp(context, paginas_antes: set[int] | None = None):
 
 
 def _intentos_lsp_apertura() -> int:
-    return 5 if _headless_desde_env() else 3
+    return 5 if _vl_headless() else 3
 
 
 def _esperar_lsp_tras_clic_rcel(rcel, paginas_antes: set[int], on_log=None):
     """Espera pestaña LSP (popup o misma pestaña); en headless ARCA tarda más."""
-    ciclos = 28 if _headless_desde_env() else 18
+    ciclos = 28 if _vl_headless() else 18
     for _ in range(ciclos):
         if "lsp-web" in (rcel.url or "").lower():
             return rcel
@@ -1062,7 +1070,7 @@ def _cerrar_pestana_navegador(pg, on_log=None, *, etiqueta: str = "Pestaña") ->
         pass
     if pg.is_closed():
         return
-    if _headless_desde_env():
+    if _vl_headless():
         _log(on_log, f"  • No se pudo cerrar {etiqueta} en headless.")
         return
     try:
@@ -1260,7 +1268,7 @@ def _lsp_tiene_seleccion_empresa(lsp) -> bool:
     try:
         if botones.count() == 0:
             return False
-        return botones.first.is_visible(timeout=8000 if _headless_desde_env() else 4000)
+        return botones.first.is_visible(timeout=8000 if _vl_headless() else 4000)
     except Exception:
         return False
 
@@ -1358,7 +1366,7 @@ def _abrir_lsp_desde_rcel(rcel, on_log=None):
                 lsp = pi.value
             except Exception:
                 clic_humano(link)
-                pausa_humana(1.0, 2.0 if _headless_desde_env() else 1.5)
+                pausa_humana(1.0, 2.0 if _vl_headless() else 1.5)
                 lsp = _esperar_lsp_tras_clic_rcel(rcel, paginas_antes, on_log)
 
         if lsp is None:
@@ -1370,10 +1378,10 @@ def _abrir_lsp_desde_rcel(rcel, on_log=None):
             continue
 
         try:
-            lsp.wait_for_load_state("domcontentloaded", timeout=25_000 if _headless_desde_env() else 20_000)
+            lsp.wait_for_load_state("domcontentloaded", timeout=25_000 if _vl_headless() else 20_000)
         except Exception:
             pass
-        pausa_humana(0.8, 1.4 if _headless_desde_env() else 1.0)
+        pausa_humana(0.8, 1.4 if _vl_headless() else 1.0)
         lsp.set_default_timeout(40_000)
 
         if _lsp_tiene_seleccion_empresa(lsp):
@@ -1959,40 +1967,45 @@ def ejecutar_vl_cuit(
     on_paso: Callable[[str, str], None] | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
 ) -> ResultadoVlCuit:
+    global _modo_headless_vl
     headless = _headless_desde_env() if headless is None else headless
-    if not _playwright_disponible():
-        raise AutomatizacionNoDisponibleError(
-            "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
-        )
+    _modo_headless_vl = headless
+    try:
+        if not _playwright_disponible():
+            raise AutomatizacionNoDisponibleError(
+                "Playwright no está instalado. En local: pip install playwright && playwright install chromium"
+            )
 
-    from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
+        from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
-    sis = sistemas or ["granos"]
-    if sesion is not None:
-        return _ejecutar_vl_impl(
-            sesion,
-            cred,
-            fecha_desde,
-            fecha_hasta,
-            nombre_representado=nombre_representado,
-            carpeta_destino=carpeta_destino,
-            sistemas=sis,
-            on_log=on_log,
-            on_paso=on_paso,
-        )
+        sis = sistemas or ["granos"]
+        if sesion is not None:
+            return _ejecutar_vl_impl(
+                sesion,
+                cred,
+                fecha_desde,
+                fecha_hasta,
+                nombre_representado=nombre_representado,
+                carpeta_destino=carpeta_destino,
+                sistemas=sis,
+                on_log=on_log,
+                on_paso=on_paso,
+            )
 
-    with SesionPlaywrightCompartida(headless=headless) as sesion_local:
-        return _ejecutar_vl_impl(
-            sesion_local,
-            cred,
-            fecha_desde,
-            fecha_hasta,
-            nombre_representado=nombre_representado,
-            carpeta_destino=carpeta_destino,
-            sistemas=sis,
-            on_log=on_log,
-            on_paso=on_paso,
-        )
+        with SesionPlaywrightCompartida(headless=headless) as sesion_local:
+            return _ejecutar_vl_impl(
+                sesion_local,
+                cred,
+                fecha_desde,
+                fecha_hasta,
+                nombre_representado=nombre_representado,
+                carpeta_destino=carpeta_destino,
+                sistemas=sis,
+                on_log=on_log,
+                on_paso=on_paso,
+            )
+    finally:
+        _modo_headless_vl = None
 
 
 def _orden_sistemas_vl(sistemas: list[str] | None) -> list[str]:

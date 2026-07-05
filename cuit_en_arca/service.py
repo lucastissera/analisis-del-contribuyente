@@ -98,8 +98,15 @@ def _headless_desde_env() -> bool:
     )
 
 
+def _es_entorno_servidor_web() -> bool:
+    """True en Render / gunicorn; False en el .exe portable."""
+    return not getattr(sys, "frozen", False)
+
+
 def headless_desde_form(valor: str | None) -> bool:
-    """Oculto por defecto; visible solo si el formulario envía ``ver_navegador=1``."""
+    """Oculto por defecto; visible solo en portable si el formulario envía ``ver_navegador=1``."""
+    if _es_entorno_servidor_web():
+        return True
     if valor is not None and str(valor).strip():
         mostrar = str(valor).strip().lower() in ("1", "true", "yes", "on")
         return not mostrar

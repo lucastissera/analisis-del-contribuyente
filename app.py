@@ -1300,6 +1300,74 @@ def procesador():
     return render_template("index.html")
 
 
+@app.get("/procesador/plantilla-imputacion")
+def procesador_plantilla_imputacion():
+    from cuit_en_arca.plantillas_importacion import ruta_plantilla_imputacion_contable_excel
+
+    ruta = ruta_plantilla_imputacion_contable_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato imputacion contable.xlsx",
+        mimetype=MIME_XLSX,
+    )
+
+
+@app.post("/procesador/cruce-lic-mcr")
+def procesador_cruce_lic_mcr():
+    from cruce_lic_mcr import procesar_cruce_lic_mcr
+
+    lg = normalize_lang(session.get("lang"))
+    f_lic = request.files.get("excel_libro_iva_compras")
+    f_mcr = request.files.get("excel_mcr_cruce")
+    has_lic = bool(f_lic and (f_lic.filename or "").strip())
+    has_mcr = bool(f_mcr and (f_mcr.filename or "").strip())
+    if not has_lic or not has_mcr:
+        return render_template(
+            "index.html",
+            error=tr(lg, "err_cruce_lic_mcr_faltan_archivos"),
+        )
+    nombre_lic = Path(f_lic.filename).name
+    nombre_mcr = Path(f_mcr.filename).name
+    if not nombre_lic.lower().endswith(".xlsx") or not nombre_mcr.lower().endswith(
+        ".xlsx"
+    ):
+        return render_template(
+            "index.html",
+            error=tr(lg, "err_cruce_lic_mcr_solo_xlsx"),
+        )
+    try:
+        contenido, meta = procesar_cruce_lic_mcr(
+            f_lic.read(),
+            f_mcr.read(),
+            lic_nombre=nombre_lic,
+            mcr_nombre=nombre_mcr,
+            ui_lang=lg,
+        )
+    except ValueError as exc:
+        return render_template("index.html", error=str(exc))
+    except Exception as exc:
+        return render_template(
+            "index.html",
+            error=tr(lg, "err_cruce_lic_mcr_proceso", exc=exc),
+        )
+
+    nombre_salida = f"cruce_{Path(nombre_lic).stem}_{Path(nombre_mcr).stem}.xlsx"
+    download_id = uuid4().hex
+    DESCARGAS[download_id] = (contenido, nombre_salida, MIME_XLSX)
+    return render_template(
+        "index.html",
+        mostrar_resultado_cruce=True,
+        cruce_total_mcr=meta["total_mcr"],
+        cruce_total_lic=meta["total_lic"],
+        cruce_total_faltantes=meta["total_cruce"],
+        download_id=download_id,
+        nombre_salida=nombre_salida,
+    )
+
+
 @app.get("/descargar/<download_id>")
 def descargar(download_id: str):
     item = DESCARGAS.get(download_id)
@@ -1352,7 +1420,7 @@ def procesar():
             elif str(exc) == "nombre_vacio":
                 pass
 
-    con_cols_imp = mapa_imputaciones is not None
+    con_cols_imp = mapa_imputaciones is not None and has_r
 
     if has_r and has_e:
         nombre_r = Path(f_rec.filename).name
@@ -1396,13 +1464,10 @@ def procesar():
             )
 
         tabla_r = enriquecer_contrapartes_con_imputacion(tabla_r, mapa_imputaciones)
-        tabla_e = enriquecer_contrapartes_con_imputacion(tabla_e, mapa_imputaciones)
         res_imp_r = (
             resumen_totales_por_imputacion(tabla_r) if con_cols_imp else None
         )
-        res_imp_e = (
-            resumen_totales_por_imputacion(tabla_e) if con_cols_imp else None
-        )
+        res_imp_e = None
 
         per_r = periodos_orden_crono(
             tpp_r,
@@ -1514,10 +1579,10 @@ def procesar():
 
     tabla_contrapartes = enriquecer_contrapartes_con_imputacion(
         tabla_contrapartes,
-        mapa_imputaciones,
+        mapa_imputaciones if (con_cols_imp and not emitidos) else None,
     )
     res_imp = (
-        resumen_totales_por_imputacion(tabla_contrapartes) if con_cols_imp else None
+        resumen_totales_por_imputacion(tabla_contrapartes) if con_cols_imp and not emitidos else None
     )
 
     salida = io.BytesIO()

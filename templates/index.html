@@ -907,7 +907,11 @@
           <div class="resultado-acordeon-cuerpo">
             <div class="importacion-ref-imputacion" id="bloque-imputaciones">
               <h3>{{ t('processor_section_imputaciones') }}</h3>
-              <p class="subtitulo-detalle">{{ t('processor_section_imputaciones_help')|safe }}</p>
+              <p class="subtitulo-detalle">
+                {{ t('processor_section_imputaciones_help_1')|safe }}
+                <a href="{{ url_for('procesador_plantilla_imputacion') }}" download="Formato imputacion contable.xlsx">{{ t('processor_imputacion_descargar_modelo') }}</a>
+                {{ t('processor_section_imputaciones_help_2')|safe }}
+              </p>
               <div class="zona-soltar-wrap">
                 <div
                   class="zona-soltar-archivo"
@@ -1202,7 +1206,103 @@
             </form>
           </div>
         </details>
+
+        <details class="resultado-acordeon seccion-top" id="seccion-cruce-lic-mcr">
+          <summary class="resultado-acordeon-cabecera">{{ t('seccion_cruce_lic_mcr_titulo') }}</summary>
+          <div class="resultado-acordeon-cuerpo">
+            <p class="subtitulo-detalle" style="margin-top: 0.85rem">{{ t('seccion_cruce_lic_mcr_desc')|safe }}</p>
+            <form
+              method="post"
+              action="{{ url_for('procesador_cruce_lic_mcr') }}"
+              enctype="multipart/form-data"
+              id="form-cruce-lic-mcr"
+            >
+              <div class="importacion-dual">
+                <div class="importacion-bloque" id="bloque-cruce-lic">
+                  <h3>{{ t('cruce_lic_label') }}</h3>
+                  <p class="subtitulo-detalle">{{ t('cruce_lic_help')|safe }}</p>
+                  <div class="zona-soltar-wrap">
+                    <div
+                      class="zona-soltar-archivo"
+                      id="zona-soltar-cruce-lic"
+                      role="group"
+                      aria-label="{{ t('drop_zone_aria') }} — {{ t('cruce_lic_label') }}"
+                    >
+                      <input
+                        id="excel-cruce-lic"
+                        name="excel_libro_iva_compras"
+                        type="file"
+                        accept=".xlsx"
+                        class="input-archivo-oculto"
+                      />
+                      <p class="zona-soltar-texto" id="ayuda-soltar-cruce-lic">
+                        {{ t('drop_text_1')|safe }}
+                        <button type="button" class="btn-elegir-archivo" id="btn-elegir-cruce-lic">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
+                      </p>
+                      <p
+                        class="zona-soltar-nombre archivo-seleccionado-vacio"
+                        id="nombre-archivo-cruce-lic"
+                        aria-live="polite"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+                <div class="importacion-bloque" id="bloque-cruce-mcr">
+                  <h3>{{ t('cruce_mcr_label') }}</h3>
+                  <p class="subtitulo-detalle">{{ t('cruce_mcr_help')|safe }}</p>
+                  <div class="zona-soltar-wrap">
+                    <div
+                      class="zona-soltar-archivo"
+                      id="zona-soltar-cruce-mcr"
+                      role="group"
+                      aria-label="{{ t('drop_zone_aria') }} — {{ t('cruce_mcr_label') }}"
+                    >
+                      <input
+                        id="excel-cruce-mcr"
+                        name="excel_mcr_cruce"
+                        type="file"
+                        accept=".xlsx"
+                        class="input-archivo-oculto"
+                      />
+                      <p class="zona-soltar-texto" id="ayuda-soltar-cruce-mcr">
+                        {{ t('drop_text_1')|safe }}
+                        <button type="button" class="btn-elegir-archivo" id="btn-elegir-cruce-mcr">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
+                      </p>
+                      <p
+                        class="zona-soltar-nombre archivo-seleccionado-vacio"
+                        id="nombre-archivo-cruce-mcr"
+                        aria-live="polite"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="acciones-form">
+                <button type="submit">{{ t('cruce_submit') }}</button>
+              </div>
+            </form>
+          </div>
+        </details>
       </div>
+
+      {% if mostrar_resultado_cruce %}
+      <div class="resultado-comprobantes">
+        <div class="resumen-filas">
+          <details class="resultado-acordeon" open>
+            <summary class="resultado-acordeon-cabecera">{{ t('cruce_resultado_titulo') }}</summary>
+            <div class="resultado-acordeon-cuerpo">
+              <p class="subtitulo-detalle">
+                {{ t('cruce_resultado_resumen', mcr=cruce_total_mcr, lic=cruce_total_lic, faltantes=cruce_total_faltantes) }}
+              </p>
+              <p class="subtitulo-detalle">{{ t('cruce_resultado_descarga')|safe }}</p>
+              <p style="margin-top: 1rem">
+                <a class="btn-principal" href="{{ url_for('descargar', download_id=download_id) }}" download="{{ nombre_salida }}">{{ t('download_adjusted', name=nombre_salida) }}</a>
+              </p>
+            </div>
+          </details>
+        </div>
+      </div>
+      {% endif %}
 
       {% if mostrar_resultado %}
       <div class="resultado-comprobantes">
@@ -1925,6 +2025,78 @@
         if (inputI && zonaI && nombreI) {
           wireZona(zonaI, inputI, nombreI, btnI);
         }
+
+        function esValidoXlsx(f) {
+          var n = f && f.name ? String(f.name).toLowerCase() : "";
+          return n.endsWith(".xlsx");
+        }
+
+        function wireZonaXlsx(zona, input, nombreEl, btnElegir) {
+          if (!zona || !input || !nombreEl) return;
+          input.addEventListener("change", function () {
+            if (input.files && input.files.length) {
+              var f = input.files[0];
+              if (esValidoXlsx(f)) {
+                mostrarNombreArchivo(nombreEl, f);
+              } else {
+                mostrarError(nombreEl, I18N.err_cruce_lic_mcr_solo_xlsx || I18N.err_invalid_ext || "");
+                input.value = "";
+              }
+            } else {
+              vaciarNombre(nombreEl);
+            }
+          });
+          if (btnElegir) {
+            btnElegir.addEventListener("click", function () {
+              input.click();
+            });
+          }
+          var nDrag = 0;
+          zona.addEventListener("dragenter", function (e) {
+            e.preventDefault();
+            nDrag++;
+            zona.classList.add("zona-soltar-activa");
+          });
+          zona.addEventListener("dragleave", function (e) {
+            e.preventDefault();
+            nDrag--;
+            if (nDrag <= 0) {
+              nDrag = 0;
+              zona.classList.remove("zona-soltar-activa");
+            }
+          });
+          zona.addEventListener("dragover", function (e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          });
+          zona.addEventListener("drop", function (e) {
+            e.preventDefault();
+            nDrag = 0;
+            zona.classList.remove("zona-soltar-activa");
+            var files = e.dataTransfer && e.dataTransfer.files;
+            if (!files || !files.length) return;
+            var f = files[0];
+            if (!esValidoXlsx(f)) {
+              mostrarError(nombreEl, I18N.err_cruce_lic_mcr_solo_xlsx || I18N.err_invalid_ext || "");
+              return;
+            }
+            asignarArchivo(input, nombreEl, f);
+          });
+        }
+
+        wireZonaXlsx(
+          document.getElementById("zona-soltar-cruce-lic"),
+          document.getElementById("excel-cruce-lic"),
+          document.getElementById("nombre-archivo-cruce-lic"),
+          document.getElementById("btn-elegir-cruce-lic")
+        );
+        wireZonaXlsx(
+          document.getElementById("zona-soltar-cruce-mcr"),
+          document.getElementById("excel-cruce-mcr"),
+          document.getElementById("nombre-archivo-cruce-mcr"),
+          document.getElementById("btn-elegir-cruce-mcr")
+        );
+
         var selImp = document.getElementById("select-plantilla-imputacion");
         if (inputI && selImp && nombreI) {
           selImp.addEventListener("change", function () {

@@ -1,3 +1,4 @@
+{% if modo_escritorio %}
 <button
   type="button"
   class="btn-sec btn-toggle-navegador"
@@ -5,3 +6,4 @@
   aria-pressed="false"
 >{{ t('btn_ver_navegador') }}</button>
 <input type="hidden" name="ver_navegador" id="{{ input_id }}" value="">
+{% endif %}

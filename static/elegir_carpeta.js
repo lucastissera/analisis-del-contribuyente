@@ -3,6 +3,7 @@
   var PREFIJOS_SISTEMA = {
     mis_comprobantes: "Mis Comprobantes",
     dfe: "DFE",
+    vl: "Ventas y Liquidaciones",
     nuestra_parte: "Nuestra Parte",
     analisis_programado: "Análisis Programado",
   };

@@ -25,6 +25,9 @@ def log_indica_archivo_nuevo(texto: str) -> bool:
         or "emitidos guardado" in t
         or "recibidos guardado" in t
         or "procesado:" in t
+        or "• pdf (" in t
+        or "total pdf (" in t
+        or "listo." in t and " pdf en " in t
     )
 
 

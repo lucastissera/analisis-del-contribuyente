@@ -49,3 +49,10 @@ def ruta_plantilla_np_excel() -> Path:
         "Formato Nuestra Parte",
         "Formato Nuestra Parte.xlsx",
     )
+
+
+def ruta_plantilla_imputacion_contable_excel() -> Path:
+    return ruta_plantilla_excel(
+        "Formato imputacion contable",
+        "Formato imputacion contable.xlsx",
+    )

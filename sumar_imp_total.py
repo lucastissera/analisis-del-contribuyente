@@ -622,9 +622,7 @@ def acumulado_por_contraparte(
 # DataFrame de imputaciones: columnas (cuit, razón|None, código, nombre) ya resueltas
 ATTR_IMPUTACION_COLUMNAS = "imputacion_resuelta_cols"
 
-# CUIT con documento válido pero ausente en la planilla de imputación (mapa cargado)
-IMPUTACION_ASIGNAR_CODIGO = "ASIGNAR IMPUTACION"
-IMPUTACION_ASIGNAR_NOMBRE = "ASIGNAR IMPUTACION"
+# CUIT con documento válido pero ausente en la planilla de imputación → columnas vacías
 _COLUMNA_COD_IMPUTACION_COMPROBANTES = "Cód. imputación"
 _COLUMNA_NOM_IMPUTACION_COMPROBANTES = "Imputación contable"
 
@@ -1174,8 +1172,7 @@ def enriquecer_contrapartes_con_imputacion(
         if not k:
             cod, nom = ("", "")
         elif k not in mapa_cuit_imputacion:
-            cod = IMPUTACION_ASIGNAR_CODIGO
-            nom = IMPUTACION_ASIGNAR_NOMBRE
+            cod, nom = ("", "")
         else:
             cod, nom = mapa_cuit_imputacion[k]
         row["codigo_imputacion"] = cod
@@ -1192,11 +1189,11 @@ def agregar_columnas_imputacion_a_dataframe_comprobantes(
 ) -> pd.DataFrame:
     """
     Añade por fila ``Cód. imputación`` e ``Imputación contable`` según el CUIT de contraparte
-    (misma columna que ``acumulado_por_contraparte``). CUIT presente y no listado en el mapa
-    → imputación ficticia ``ASIGNAR IMPUTACION``.
+    (misma columna que ``acumulado_por_contraparte``). Solo aplica a comprobantes recibidos;
+    CUIT no listado en el mapa → columnas vacías.
     """
     out = df.copy()
-    if not mapa_cuit_imputacion:
+    if not mapa_cuit_imputacion or emitidos:
         return out
     col_doc = "Nro. Doc. Receptor" if emitidos else "Nro. Doc. Emisor"
     if col_doc not in out.columns:
@@ -1209,8 +1206,8 @@ def agregar_columnas_imputacion_a_dataframe_comprobantes(
             codigos.append("")
             nombres.append("")
         elif k not in mapa_cuit_imputacion:
-            codigos.append(IMPUTACION_ASIGNAR_CODIGO)
-            nombres.append(IMPUTACION_ASIGNAR_NOMBRE)
+            codigos.append("")
+            nombres.append("")
         else:
             c, n = mapa_cuit_imputacion[k]
             codigos.append(c)
@@ -1954,9 +1951,9 @@ def escribir_excel_informe_completo(
 ) -> None:
     temp = io.BytesIO()
     df_xl = df_ajustado
-    if mapa_imputaciones is not None:
+    if mapa_imputaciones is not None and not emitidos:
         df_xl = agregar_columnas_imputacion_a_dataframe_comprobantes(
-            df_ajustado, mapa_imputaciones, emitidos=emitidos
+            df_ajustado, mapa_imputaciones, emitidos=False
         )
     df_xl.to_excel(temp, index=False, engine="openpyxl", sheet_name=_SHEET_COMPR)
     temp.seek(0)
@@ -2039,13 +2036,7 @@ def escribir_excel_informe_dual(
         if mapa_imputaciones is not None
         else df_recibidos
     )
-    df_e_xl = (
-        agregar_columnas_imputacion_a_dataframe_comprobantes(
-            df_emitidos, mapa_imputaciones, emitidos=True
-        )
-        if mapa_imputaciones is not None
-        else df_emitidos
-    )
+    df_e_xl = df_emitidos
     for row in dataframe_to_rows(df_r_xl, index=False, header=True):
         ws0.append(row)
     encab_r = [c.value for c in ws0[1]]
@@ -2112,7 +2103,7 @@ def escribir_excel_informe_dual(
     _rellenar_hoja_contrapartes_excel(
         wsp_e,
         tabla_contrapartes_emit,
-        con_imputacion=con_columnas_imputacion_en_contrapartes,
+        con_imputacion=False,
     )
 
     if resumen_imputacion_emit is not None:
@@ -2233,7 +2224,7 @@ def procesar_comprobantes_a_excel_y_resumen(
         emitidos=emitidos,
     )
 
-    con_cols_imp = mapa_imputaciones is not None
+    con_cols_imp = mapa_imputaciones is not None and not emitidos
     resumen_imputacion = None
     if con_cols_imp:
         tabla_contrapartes = enriquecer_contrapartes_con_imputacion(

@@ -59,6 +59,7 @@
           "Nuestra Parte",
           "DFE",
           "Mis Comprobantes",
+          "Ventas y Liquidaciones",
           "Análisis Programado",
         ];
         for (var p = 0; p < prefijos.length; p++) {

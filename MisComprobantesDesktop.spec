@@ -26,6 +26,10 @@ a = Analysis(
             "Formato Analisis Comprobantes",
         ),
         ("Formato Nuestra Parte/Formato Nuestra Parte.xlsx", "Formato Nuestra Parte"),
+        (
+            "Formato imputacion contable/Formato imputacion contable.xlsx",
+            "Formato imputacion contable",
+        ),
     ]
     + _pw_datas
     + _gr_datas,

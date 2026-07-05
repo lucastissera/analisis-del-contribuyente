@@ -166,9 +166,7 @@ def agregar_archivo_vl(
         if not item:
             return
         st: EstadoJobVl = item["estado"]
-        st.archivos.append(
-            {"download_id": download_id, "path": rel_path, "nombre": nombre}
-        )
+        st.archivos.append({"id": download_id, "ruta": rel_path, "nombre": nombre})
 
 
 def agregar_resumen_cuit_vl(
