@@ -43,8 +43,9 @@ def _detectar_columnas(headers: list[str]) -> dict[str, int | None]:
     for i, h in enumerate(headers):
         if not h:
             continue
-        if idx_login is None and any(
-            x in h for x in ("cuit ingreso", "cuit login", "cuit representante", "cuit ingres")
+        if idx_login is None and (
+            h == "cuit"
+            or any(x in h for x in ("cuit ingreso", "cuit login", "cuit representante", "cuit ingres"))
         ):
             idx_login = i
         elif idx_clave is None and "clave" in h and "fiscal" in h:
@@ -53,9 +54,9 @@ def _detectar_columnas(headers: list[str]) -> dict[str, int | None]:
             idx_repr = i
         elif idx_rango is None and ("rango" in h and "fecha" in h):
             idx_rango = i
-        elif idx_desde is None and "fecha" in h and any(x in h for x in ("desde", "inicio")):
+        elif idx_desde is None and "fecha" in h and any(x in h for x in ("desde", "inicio", "liq desde")):
             idx_desde = i
-        elif idx_hasta is None and "fecha" in h and any(x in h for x in ("hasta", "fin")):
+        elif idx_hasta is None and "fecha" in h and any(x in h for x in ("hasta", "fin", "liq hasta")):
             idx_hasta = i
     if idx_login is None and idx_clave is None and idx_repr is None and idx_rango is None:
         return {
@@ -66,11 +67,12 @@ def _detectar_columnas(headers: list[str]) -> dict[str, int | None]:
             "desde": 4 if len(headers) > 4 else None,
             "hasta": 5 if len(headers) > 5 else None,
         }
+    rango_default = None if (idx_desde is not None or idx_hasta is not None) else 3
     return {
         "login": idx_login if idx_login is not None else 0,
         "clave": idx_clave if idx_clave is not None else 1,
         "repr": idx_repr if idx_repr is not None else 2,
-        "rango": idx_rango if idx_rango is not None else 3,
+        "rango": idx_rango if idx_rango is not None else rango_default,
         "desde": idx_desde,
         "hasta": idx_hasta,
     }

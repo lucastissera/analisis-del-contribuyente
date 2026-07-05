@@ -90,19 +90,20 @@ def _requiere_playwright() -> None:
 
 
 def _headless_desde_env() -> bool:
-    """Servidor web: headless por defecto (sin pantalla). Portable: visible salvo env."""
-    if getattr(sys, "frozen", False):
-        return os.environ.get("CUIT_EN_ARCA_HEADLESS", "0").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
+    """Navegador oculto por defecto (web, portable y desarrollo). ``CUIT_EN_ARCA_HEADLESS=0`` lo muestra."""
     return os.environ.get("CUIT_EN_ARCA_HEADLESS", "1").strip().lower() not in (
         "0",
         "false",
         "no",
     )
+
+
+def headless_desde_form(valor: str | None) -> bool:
+    """Oculto por defecto; visible solo si el formulario envía ``ver_navegador=1``."""
+    if valor is not None and str(valor).strip():
+        mostrar = str(valor).strip().lower() in ("1", "true", "yes", "on")
+        return not mostrar
+    return _headless_desde_env()
 
 
 def ejecutar_flujo_cuit_en_arca(

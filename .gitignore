@@ -2,8 +2,25 @@
 .env
 .env.local
 
-# Credenciales reales (usar auth_users.example.json como plantilla)
+# Credenciales reales — NO subir a Git / Render (usar *.example.* como plantilla)
 auth_users.json
+auth_users.enc
+auth_remote.txt
+auth_data_dir.txt
+**/auth_remote.txt
+**/auth_users.json
+**/auth_users.enc
+
+# Portable / build local (PyInstaller, grabaciones, Chromium embebido)
+dist/
+build/
+build/vl_grabacion/
+tools/_gen_auth_dist_once.py
+
+# Datos de usuario en esta máquina (plantillas imputación, caché auth local)
+data_local_imputaciones/
+data_local_auth/
+.playwright-browsers/
 
 # Python
 __pycache__/
@@ -13,10 +30,3 @@ __pycache__/
 .venv/
 venv/
 env/
-
-# PyInstaller / datos locales de plantillas
-dist/
-build/
-data_local_imputaciones/
-data_local_auth/
-.playwright-browsers/

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compila el portable con PyInstaller, copia ``auth_users.json`` e instala Chromium
+Compila el portable con PyInstaller, genera ``auth_users.enc`` (cifrado) e instala Chromium
 en ``dist/AnalisisIntegralContribuyente/ms-playwright`` para descarga ARCA en el .exe.
 
 Uso: desde la raíz del proyecto
@@ -23,7 +23,8 @@ from app_branding import APP_EXE_BASENAME
 
 DIST_DIR = ROOT / "dist" / APP_EXE_BASENAME
 SPEC = ROOT / "MisComprobantesDesktop.spec"
-AUTH_SRC = ROOT / "auth_users.json"
+AUTH_SRC_JSON = ROOT / "auth_users.json"
+AUTH_SRC_ENC = ROOT / "auth_users.enc"
 BROWSERS_DIR = DIST_DIR / "ms-playwright"
 LOGO_PNG = ROOT / "static" / "logo.png"
 LOGO_ICO = ROOT / "static" / "logo.ico"
@@ -76,6 +77,37 @@ def _instalar_chromium_portable() -> int:
     return r.returncode
 
 
+def _copiar_usuarios_portable() -> None:
+    """Solo ``auth_users.enc`` en dist (nunca JSON en claro)."""
+    import json
+
+    from auth_crypto import escribir_archivo_cifrado, leer_archivo_usuarios
+
+    dest = DIST_DIR / "auth_users.enc"
+    if AUTH_SRC_ENC.is_file():
+        shutil.copy2(AUTH_SRC_ENC, dest)
+        print(f"Usuarios cifrados copiados: {dest}", flush=True)
+        return
+    if AUTH_SRC_JSON.is_file():
+        try:
+            with open(AUTH_SRC_JSON, encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"ERROR leyendo {AUTH_SRC_JSON}: {exc}", file=sys.stderr)
+            return
+        if isinstance(data, dict):
+            escribir_archivo_cifrado(dest, data)
+            print(f"Usuarios cifrados generados: {dest}", flush=True)
+            return
+    print(
+        "Aviso: no hay auth_users.enc ni auth_users.json en la raíz.\n"
+        "  • Neon/web: copiá auth_remote.example.txt → auth_remote.txt junto al .exe\n"
+        "    (URL https://analisisdelcontribuyente.onrender.com/api/auth-users + token).\n"
+        "  • Local: python tools/encrypt_auth_users.py",
+        flush=True,
+    )
+
+
 def main() -> int:
     if not SPEC.is_file():
         print(f"ERROR: no se encuentra {SPEC}", file=sys.stderr)
@@ -94,17 +126,7 @@ def main() -> int:
     ejemplo_remoto = ROOT / "auth_remote.example.txt"
     if ejemplo_remoto.is_file():
         shutil.copy2(ejemplo_remoto, DIST_DIR / "auth_remote.example.txt")
-    if AUTH_SRC.is_file():
-        dest = DIST_DIR / "auth_users.json"
-        shutil.copy2(AUTH_SRC, dest)
-        print(f"Claves sincronizadas: {dest}", flush=True)
-    else:
-        print(
-            "Aviso: no hay auth_users.json en la raíz del repo; "
-            "configurá auth_remote.txt o .env para usuarios en la nube "
-            "(ver docs/AUTH_USUARIOS_NUBE.md).",
-            flush=True,
-        )
+    _copiar_usuarios_portable()
     _instalar_chromium_portable()
     print(
         f"\nListo: {DIST_DIR}\n"

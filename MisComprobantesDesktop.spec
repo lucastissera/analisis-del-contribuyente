@@ -15,9 +15,12 @@ a = Analysis(
     datas=[
         ("templates", "templates"),
         ("static", "static"),
-        ("auth_users.example.json", "."),
         ("Formato Analisis Programado.xlsx", "."),
         ("Formato DFE/Formato DFE.xlsx", "Formato DFE"),
+        (
+            "Formato Ventas y Liquidaciones/Formato VyL.xlsx",
+            "Formato Ventas y Liquidaciones",
+        ),
         (
             "Formato Analisis Comprobantes/Formato Analisis Comprobantes.xlsx",
             "Formato Analisis Comprobantes",
@@ -33,6 +36,7 @@ a = Analysis(
         "jinja2",
         "werkzeug",
         "auth",
+        "auth_crypto",
         "app_branding",
         "sumar_imp_total",
         "plantillas_imputacion",
@@ -50,6 +54,10 @@ a = Analysis(
         "cuit_en_arca.automation_playwright",
         "cuit_en_arca.dfe_automation",
         "cuit_en_arca.progreso_dfe",
+        "cuit_en_arca.vl_automation",
+        "cuit_en_arca.progreso_vl",
+        "cuit_en_arca.planilla_vl",
+        "cuit_en_arca.razon_social",
         "cuit_en_arca.progreso_lote",
         "cuit_en_arca.nuestra_parte_automation",
         "cuit_en_arca.progreso_nuestra_parte",

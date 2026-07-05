@@ -12,9 +12,9 @@ echo Listo. Ejecutable y archivos en:
 echo   %~dp0dist\AnalisisIntegralContribuyente\
 echo Ejecutable principal:
 echo   %~dp0dist\AnalisisIntegralContribuyente\AnalisisIntegralContribuyente.exe
-if exist "%~dp0auth_users.json" (
-  echo auth_users.json copiado junto al .exe.
+if exist "%~dp0dist\AnalisisIntegralContribuyente\auth_users.enc" (
+  echo auth_users.enc generado junto al .exe.
 ) else (
-  echo Aviso: no hay auth_users.json en la raiz; el portable usara el ejemplo empaquetado.
+  echo Aviso: no hay auth_users.enc; configurá auth_remote.txt para sync Neon o generá claves al compilar.
 )
 endlocal

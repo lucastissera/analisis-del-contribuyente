@@ -9,10 +9,12 @@ Modos (por prioridad):
 
 3. **Archivo local externo:** ``AUTH_USERS_PATH`` apunta a un JSON fuera del proyecto.
 
-4. **Archivo empaquetado / desarrollo:** ``auth_users.json`` en la raíz o junto al .exe
-   (no commitear claves reales; ver ``auth_users.example.json``).
+4. **Archivo local cifrado (portable):** ``auth_users.enc`` junto al .exe (generado con
+   ``python tools/encrypt_auth_users.py``). No incluir JSON en claro en la distribución.
 
-5. **Respaldo:** ``AUTH_ADMIN_USER`` y ``AUTH_ADMIN_PASSWORD`` en el entorno.
+5. **Desarrollo:** ``auth_users.json`` en la raíz (no commitear; ver ``auth_users.example.json``).
+
+6. **Respaldo:** ``AUTH_ADMIN_USER`` y ``AUTH_ADMIN_PASSWORD`` en el entorno.
 """
 
 from __future__ import annotations
@@ -227,15 +229,15 @@ def _auth_users_file() -> Path:
         return Path(override)
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        portable = exe_dir / "auth_users.json"
-        if portable.is_file():
-            return portable
-        meip = getattr(sys, "_MEIPASS", None)
-        if meip:
-            for name in ("auth_users.json", "auth_users.example.json"):
-                bundled = Path(meip) / name
-                if bundled.is_file():
-                    return bundled
+        for name in ("auth_users.enc", "auth_users.json"):
+            portable = exe_dir / name
+            if portable.is_file():
+                return portable
+        return exe_dir / "auth_users.enc"
+    for name in ("auth_users.enc", "auth_users.json"):
+        local = _AUTH_DIR / name
+        if local.is_file():
+            return local
     return _AUTH_DIR / "auth_users.json"
 
 
@@ -243,7 +245,7 @@ def _cache_path() -> Path:
     override = (os.environ.get("AUTH_USERS_CACHE_PATH") or "").strip()
     if override:
         return Path(override)
-    return _dir_datos_usuario() / "auth" / "auth_users_cache.json"
+    return _dir_datos_usuario() / "auth" / "auth_users_cache.enc"
 
 
 def _normalizar_usuarios(raw: dict) -> dict[str, str]:
@@ -260,18 +262,22 @@ def _leer_json_archivo(path: Path) -> dict[str, CuentaUsuario]:
     if not path.is_file():
         return {}
     try:
-        with open(path, encoding="utf-8-sig") as f:
-            return _parse_users_payload(json.load(f))
-    except json.JSONDecodeError as exc:
-        _LOG.warning("JSON de usuarios inválido en %s: %s", path, exc)
-    except OSError as exc:
-        _LOG.warning("No se pudo leer %s: %s", path, exc)
+        from auth_crypto import leer_archivo_usuarios
+
+        data = leer_archivo_usuarios(path)
+        if not data:
+            _LOG.warning("No se pudo leer usuarios en %s", path)
+            return {}
+        return _parse_users_payload(data)
+    except Exception as exc:
+        _LOG.warning("Error al leer usuarios en %s: %s", path, exc)
     return {}
 
 
 def _guardar_cache(cuentas: dict[str, CuentaUsuario], *, origen: str, meta: dict[str, Any] | None = None) -> None:
+    from auth_crypto import escribir_archivo_cifrado
+
     path = _cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "origen": origen,
@@ -279,30 +285,36 @@ def _guardar_cache(cuentas: dict[str, CuentaUsuario], *, origen: str, meta: dict
     }
     if meta:
         payload["meta"] = meta
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    escribir_archivo_cifrado(path, payload)
 
 
 def _leer_cache() -> tuple[dict[str, CuentaUsuario], float]:
+    from auth_crypto import leer_archivo_usuarios
+
     path = _cache_path()
-    if not path.is_file():
-        return {}, 0.0
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        cuentas = _parse_users_payload(data)
-        fetched_at = 0.0
-        raw_ts = data.get("fetched_at")
-        if raw_ts:
-            try:
-                dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
-                fetched_at = dt.timestamp()
-            except ValueError:
-                fetched_at = path.stat().st_mtime
-        else:
-            fetched_at = path.stat().st_mtime
-        return cuentas, fetched_at
-    except (json.JSONDecodeError, OSError) as exc:
-        _LOG.warning("Caché de usuarios inválida en %s: %s", path, exc)
-        return {}, 0.0
+    legacy = path.with_name("auth_users_cache.json")
+    for candidato in (path, legacy):
+        if not candidato.is_file():
+            continue
+        try:
+            data = leer_archivo_usuarios(candidato)
+            if not data:
+                continue
+            cuentas = _parse_users_payload(data)
+            fetched_at = 0.0
+            raw_ts = data.get("fetched_at")
+            if raw_ts:
+                try:
+                    dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+                    fetched_at = dt.timestamp()
+                except ValueError:
+                    fetched_at = candidato.stat().st_mtime
+            else:
+                fetched_at = candidato.stat().st_mtime
+            return cuentas, fetched_at
+        except OSError as exc:
+            _LOG.warning("Caché de usuarios inválida en %s: %s", candidato, exc)
+    return {}, 0.0
 
 
 def _fetch_remoto() -> tuple[dict[str, CuentaUsuario], dict[str, Any] | None]:
@@ -421,23 +433,45 @@ def _usuarios_desde_entorno() -> dict[str, CuentaUsuario]:
     return {}
 
 
+def _cuentas_archivo_local() -> dict[str, CuentaUsuario]:
+    """Usuarios en auth_users.enc / .json (junto al .exe en portable o raíz en dev)."""
+    path = _auth_users_file()
+    if not path.is_file():
+        return {}
+    return _leer_json_archivo(path)
+
+
+def _fusionar_cuentas(
+    base: dict[str, CuentaUsuario],
+    extra: dict[str, CuentaUsuario],
+) -> dict[str, CuentaUsuario]:
+    """Combina listados; ``base`` (local junto al .exe) prevalece sobre ``extra`` (remoto)."""
+    if not extra:
+        return dict(base)
+    if not base:
+        return dict(extra)
+    return {**extra, **base}
+
+
 def _load_cuentas_sin_env_json() -> dict[str, CuentaUsuario]:
     global _cache_usuarios
+
+    locales = _cuentas_archivo_local()
 
     if _modo_remoto_activo():
         with _lock:
             if _cache_usuarios:
-                return dict(_cache_usuarios)
+                return _fusionar_cuentas(locales, _cache_usuarios)
         remotos = _actualizar_cache_remota()
         if remotos:
-            return remotos
+            return _fusionar_cuentas(locales, remotos)
+        if locales:
+            return dict(locales)
         fallback = _usuarios_desde_entorno()
         if fallback:
-            return fallback
+            return _fusionar_cuentas(locales, fallback)
         return {}
 
-    path = _auth_users_file()
-    locales = _leer_json_archivo(path)
     if locales:
         return locales
     return _usuarios_desde_entorno()
@@ -459,21 +493,39 @@ def _actualizar_cache_remota(*, forzar: bool = False) -> dict[str, CuentaUsuario
             return dict(_cache_usuarios)
 
     cuentas, meta = _fetch_remoto()
+    locales = _cuentas_archivo_local()
     if cuentas:
-        _guardar_cache(cuentas, origen=_remote_url(), meta=meta)
+        merged = _fusionar_cuentas(locales, cuentas)
+        _guardar_cache(merged, origen=_remote_url(), meta=meta)
         with _lock:
-            _cache_usuarios = cuentas
+            _cache_usuarios = merged
             _cache_obtenido_en = time.time()
-        _LOG.info("Usuarios remotos actualizados (%d cuenta(s))", len(cuentas))
-        return dict(cuentas)
+        _LOG.info(
+            "Usuarios remotos actualizados (%d remoto(s), %d local(es), %d total)",
+            len(cuentas),
+            len(locales),
+            len(merged),
+        )
+        return dict(merged)
 
     cache, fetched_at = _leer_cache()
     if cache:
+        merged = _fusionar_cuentas(locales, cache)
         with _lock:
-            _cache_usuarios = cache
+            _cache_usuarios = merged
             _cache_obtenido_en = fetched_at or time.time()
-        _LOG.info("Usando caché local de usuarios (%d cuenta(s))", len(cache))
-        return dict(cache)
+        _LOG.info("Usando caché local de usuarios (%d cuenta(s))", len(merged))
+        return dict(merged)
+
+    if locales:
+        with _lock:
+            _cache_usuarios = dict(locales)
+            _cache_obtenido_en = time.time()
+        _LOG.info(
+            "Sin sync remoto; login con auth_users.enc junto al .exe (%d cuenta(s))",
+            len(locales),
+        )
+        return dict(locales)
 
     return {}
 
@@ -514,6 +566,9 @@ def estado_auth() -> dict[str, Any]:
         "modo_env_json": env_json,
         "modo_remoto": remoto,
         "url_remota": _remote_url() if remoto else "",
+        "archivo_local": str(_auth_users_file()) if _auth_users_file().is_file() else "",
+        "archivo_local_cuentas": len(_cuentas_archivo_local()),
+        "archivo_cifrado": _auth_users_file().suffix.lower() == ".enc",
         "cache_path": str(_cache_path()),
         "cache_cuentas": len(cache_users),
         "cache_actualizado": (
@@ -529,6 +584,7 @@ def estado_auth() -> dict[str, Any]:
 def _load_cuentas() -> dict[str, CuentaUsuario]:
     env_cuentas = _usuarios_desde_env_json()
     base = env_cuentas if env_cuentas else _load_cuentas_sin_env_json()
+    locales = _cuentas_archivo_local()
     try:
         from auth_registro import cargar_usuarios_overlay, meta_es_admin
 
@@ -545,6 +601,9 @@ def _load_cuentas() -> dict[str, CuentaUsuario]:
                     base[u] = cuenta
     except Exception:
         _LOG.debug("Overlay de usuarios registrados no disponible", exc_info=True)
+    if locales:
+        for u, cuenta in locales.items():
+            base[u] = cuenta
     return base
 
 

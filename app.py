@@ -131,6 +131,19 @@ from cuit_en_arca.progreso_dfe import (
     progreso_cuit_dfe,
     reiniciar_pasos_dfe,
 )
+from cuit_en_arca.progreso_vl import (
+    agregar_archivo_vl,
+    agregar_resumen_cuit_vl,
+    callback_log_vl,
+    callback_paso_vl,
+    crear_job_vl,
+    marcar_error_vl,
+    marcar_cancelado_vl,
+    marcar_ok_vl,
+    obtener_job_vl,
+    progreso_cuit_vl,
+    reiniciar_pasos_vl,
+)
 from cuit_en_arca.planilla_nuestra_parte import (
     leer_planilla_np_con_errores,
     parsear_entradas_manuales_np,
@@ -1749,6 +1762,10 @@ def arca_descarga_lote():
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     registrar_valor_mc, _reg_dfe, _reg_np = _registro_valor_sesion()
 
+    from cuit_en_arca.service import headless_desde_form
+
+    headless = headless_desde_form(request.form.get("ver_navegador"))
+
     def _on_reiniciar() -> None:
         reiniciar_pasos(job_id)
 
@@ -1769,6 +1786,7 @@ def arca_descarga_lote():
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
                 registrar_valor_mc=registrar_valor_mc,
+                headless=headless,
             )
             if entrega:
                 entrega.escanear()
@@ -1917,9 +1935,9 @@ def dfe_descargar():
         return render_template("dfe.html", error=err_cupo)
 
     from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
-    from cuit_en_arca.service import _headless_desde_env
+    from cuit_en_arca.service import headless_desde_form
 
-    headless = _headless_desde_env()
+    headless = headless_desde_form(request.form.get("ver_navegador"))
 
     carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
 
@@ -2012,6 +2030,197 @@ def dfe_estado(job_id: str):
 
 
 # --------------------------------------------------------------------------- #
+# Ventas y Liquidaciones (Liquidaciones primarias de granos)
+# --------------------------------------------------------------------------- #
+def _filas_vl_desde_peticion(lg: str):
+    """Devuelve (filas, errores_planilla, mensaje_error)."""
+    from cuit_en_arca.planilla_vl import (
+        leer_planilla_vl_con_errores,
+        parsear_entradas_manuales_vl,
+    )
+
+    f = request.files.get("vl_excel")
+    has_file = bool(f and getattr(f, "filename", None) and str(f.filename).strip())
+    if has_file:
+        nombre = Path(f.filename).name
+        if not nombre.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_only_xlsx_csv")
+        try:
+            filas, errores = leer_planilla_vl_con_errores(io.BytesIO(f.read()))
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            return [], errores, "; ".join(errores) or tr(lg, "vl_err_sin_datos")
+        return filas, errores, None
+
+    cuits = request.form.getlist("vl_cuit_login")
+    claves = request.form.getlist("vl_clave_fiscal")
+    nombres = request.form.getlist("vl_nombre_representado")
+    desdes = request.form.getlist("vl_fecha_desde")
+    hastas = request.form.getlist("vl_fecha_hasta")
+
+    hay_algo = any(
+        (v or "").strip()
+        for lista in (cuits, claves, nombres, desdes, hastas)
+        for v in lista
+    )
+    if not hay_algo:
+        return [], [], tr(lg, "vl_err_sin_datos")
+
+    filas, errores = parsear_entradas_manuales_vl(
+        cuits, claves, nombres, desdes, hastas
+    )
+    if not filas:
+        return [], errores, "; ".join(errores) or tr(lg, "vl_err_manual_incompleto")
+    return filas, errores, None
+
+
+@app.get("/ventas-liquidaciones")
+def ventas_liquidaciones():
+    return render_template("ventas_liquidaciones.html")
+
+
+@app.get("/ventas-liquidaciones/plantilla")
+def vl_plantilla():
+    from cuit_en_arca.vl_automation import ruta_plantilla_vl_excel
+
+    ruta = ruta_plantilla_vl_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato VyL.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/vl-descargar")
+def vl_descargar():
+    lg = normalize_lang(session.get("lang"))
+    es_fetch = request.headers.get("X-Requested-With") == "fetch"
+
+    if not _mostrar_ui_cuit_arca():
+        if es_fetch:
+            return jsonify({"error": tr(lg, "err_arca_disabled")}), 403
+        return render_template("ventas_liquidaciones.html", error=tr(lg, "err_arca_disabled")), 403
+
+    filas, _errores, err_msg = _filas_vl_desde_peticion(lg)
+    if err_msg:
+        if es_fetch:
+            return jsonify({"error": err_msg}), 400
+        return render_template("ventas_liquidaciones.html", error=err_msg)
+
+    err_cupo = _verificar_cupo_inicio(lg)
+    if err_cupo:
+        if es_fetch:
+            return jsonify({"error": err_cupo}), 403
+        return render_template("ventas_liquidaciones.html", error=err_cupo)
+
+    sistemas = [
+        s for s in request.form.getlist("vl_sistemas") if s in ("granos", "hacienda")
+    ]
+    if not sistemas:
+        msg = tr(lg, "vl_err_sin_sistema")
+        if es_fetch:
+            return jsonify({"error": msg}), 400
+        return render_template("ventas_liquidaciones.html", error=msg)
+
+    from cuit_en_arca.service import headless_desde_form
+    from cuit_en_arca.vl_automation import ejecutar_vl_lote
+
+    headless = headless_desde_form(request.form.get("ver_navegador"))
+
+    carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
+
+    job_id = uuid4().hex
+    base, entrega = _fabricar_entrega(
+        job_id,
+        carpeta_form,
+        lambda did, rel, nom: agregar_archivo_vl(job_id, did, rel, nom),
+    )
+    if base is None:
+        msg = tr(lg, "carpeta_cancelada")
+        if es_fetch:
+            return jsonify({"error": msg}), 400
+        return render_template("ventas_liquidaciones.html", error=msg)
+    carpeta_destino = str(base)
+    nombre_sesion_vl = _nombre_carpeta_web_sesion("Ventas y Liquidaciones")
+
+    def _err_inesperado(exc: Exception) -> str:
+        return tr(lg, "err_arca_unexpected", exc=exc)
+
+    from cuit_en_arca.cancelacion import reset_cancelacion
+    from cuit_en_arca.entrega_web import envolver_log_con_entrega
+
+    reset_cancelacion(job_id)
+    crear_job_vl(job_id, len(filas), sistemas=sistemas)
+    reiniciar_pasos_vl(job_id, sistemas)
+    on_log = envolver_log_con_entrega(callback_log_vl(job_id), entrega)
+    on_paso = callback_paso_vl(job_id)
+    hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+
+    def _reinit() -> None:
+        reiniciar_pasos_vl(job_id)
+
+    def _prog(actual: int, total: int, msg: str) -> None:
+        progreso_cuit_vl(job_id, actual, total, msg)
+
+    def _cuit_fin(cuit, razon_social, total_archivos, error) -> None:
+        agregar_resumen_cuit_vl(
+            job_id,
+            cuit=cuit,
+            razon_social=razon_social,
+            total_archivos=total_archivos,
+            error=error,
+        )
+        if entrega:
+            entrega.escanear()
+
+    def _worker() -> None:
+        try:
+            progreso_cuit_vl(job_id, 0, len(filas), "Iniciando…")
+            carpeta = ejecutar_vl_lote(
+                filas,
+                sistemas=sistemas,
+                headless=headless,
+                on_log=on_log,
+                on_paso=on_paso,
+                on_reiniciar_pasos=_reinit,
+                on_progreso=_prog,
+                on_cuit_fin=_cuit_fin,
+                carpeta_base=carpeta_destino,
+                job_id=job_id,
+                nombre_carpeta_sesion=nombre_sesion_vl,
+                hay_cupo=hay_cupo,
+                on_cuit_exitoso=on_cuit_exitoso,
+            )
+            if entrega:
+                entrega.escanear()
+            marcar_ok_vl(job_id, carpeta=str(carpeta))
+        except CancelacionUsuarioError as exc:
+            marcar_cancelado_vl(job_id, str(exc))
+        except ArcaProcesoError as exc:
+            marcar_error_vl(job_id, str(exc))
+        except Exception as exc:
+            marcar_error_vl(job_id, _err_inesperado(exc))
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    if es_fetch:
+        return jsonify({"job_id": job_id, "total": len(filas)})
+    return render_template("ventas_liquidaciones.html", vl_job_id=job_id)
+
+
+@app.get("/vl-estado/<job_id>")
+def vl_estado(job_id: str):
+    estado = obtener_job_vl(job_id)
+    if estado is None:
+        return jsonify({"error": "job_not_found"}), 404
+    return jsonify(estado)
+
+
+# --------------------------------------------------------------------------- #
 # Nuestra Parte
 # --------------------------------------------------------------------------- #
 def _filas_np_desde_peticion(lg: str):
@@ -2092,9 +2301,9 @@ def np_descargar():
         return render_template("nuestra_parte.html", error=err_cupo)
 
     from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
-    from cuit_en_arca.service import _headless_desde_env
+    from cuit_en_arca.service import headless_desde_form
 
-    headless = _headless_desde_env()
+    headless = headless_desde_form(request.form.get("ver_navegador"))
     carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
 
     job_id = uuid4().hex
@@ -2390,6 +2599,7 @@ def analisis_programado_guardar():
 @app.post("/analisis-programado/ejecutar-ahora")
 def analisis_programado_ejecutar_ahora():
     from cuit_en_arca.analisis_programado import cargar_config, lanzar_ejecucion_ap
+    from cuit_en_arca.service import headless_desde_form
 
     lg = normalize_lang(session.get("lang"))
     es_fetch = request.headers.get("X-Requested-With") == "fetch"
@@ -2414,7 +2624,11 @@ def analisis_programado_ejecutar_ahora():
             config=cargar_config().a_dict_publico(),
         )
 
-    ok, msg = lanzar_ejecucion_ap(cfg, manual=True)
+    ok, msg = lanzar_ejecucion_ap(
+        cfg,
+        manual=True,
+        headless=headless_desde_form(request.form.get("ver_navegador")),
+    )
     if not ok:
         err = tr(lg, "ap_err_en_curso")
         if es_fetch:
@@ -2454,6 +2668,8 @@ def cancelar_descarga():
         solicitar_cancelacion(job_id)
         if tipo == "dfe":
             marcar_cancelado_dfe(job_id, msg)
+        elif tipo == "vl":
+            marcar_cancelado_vl(job_id, msg)
         elif tipo == "np":
             marcar_cancelado_np(job_id, msg)
         else:

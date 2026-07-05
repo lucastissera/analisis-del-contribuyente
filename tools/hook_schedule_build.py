@@ -25,7 +25,7 @@ _IGNORE_ROOT = frozenset(
 )
 _RELEVANT_SUFFIX = frozenset({".py", ".html", ".spec", ".json", ".bat", ".md"})
 _RELEVANT_NAMES = frozenset(
-    {"requirements.txt", "MisComprobantesDesktop.spec", "auth_users.json"}
+    {"requirements.txt", "MisComprobantesDesktop.spec", "auth_users.json", "auth_users.enc"}
 )
 
 _timer: threading.Timer | None = None

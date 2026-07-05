@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{{ t('dfe_page_title') }}</title>
+    <title>{{ t('vl_page_title') }}</title>
     <link
       rel="icon"
       type="image/png"
@@ -41,8 +41,8 @@
         --btn-bg: #111;
         --btn-text: #fff;
         --btn-border: #333;
-        --dfe-bg: #f3edff;
-        --dfe-border: #7e57c2;
+        --vl-bg: #f3edff;
+        --vl-border: #7e57c2;
       }
       html.modo-oscuro {
         color-scheme: dark;
@@ -58,8 +58,8 @@
         --btn-bg: #3d7dd9;
         --btn-text: #0c1118;
         --btn-border: #5b93e8;
-        --dfe-bg: #241a35;
-        --dfe-border: #9c72d6;
+        --vl-bg: #241a35;
+        --vl-border: #9c72d6;
       }
       body {
         font-family: Arial, sans-serif;
@@ -178,7 +178,7 @@
       .btn-agregar {
         margin-top: 0.8rem;
         padding: 0.45rem 0.8rem;
-        border: 1px dashed var(--dfe-border);
+        border: 1px dashed var(--vl-border);
         background: transparent;
         color: var(--text-primary);
         border-radius: 8px;
@@ -187,6 +187,21 @@
       }
       .acciones {
         margin-top: 0.4rem;
+      }
+      .vl-sistemas {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+      .vl-sistemas label {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.95rem;
+      }
+      .vl-ico {
+        font-size: 1.15rem;
+        line-height: 1;
       }
       .btn-principal {
         padding: 0.65rem 1.3rem;
@@ -223,7 +238,7 @@
       .barra-fill {
         height: 100%;
         width: 0%;
-        background: var(--dfe-border);
+        background: var(--vl-border);
         transition: width 0.3s ease;
       }
       .pasos {
@@ -275,82 +290,92 @@
     <div class="pagina">
       {% include 'partials/barra_superior.html' %}
 
-      {% with titulo=t('dfe_heading') %}
+      {% with titulo=t('vl_heading') %}
       {% include 'partials/cabecera_isologo.html' %}
       {% endwith %}
 
-      <p class="intro">{{ t('dfe_intro')|safe }}</p>
+      <p class="intro">{{ t('vl_intro')|safe }}</p>
 
-      <form id="form-dfe" method="post" action="{{ url_for('dfe_descargar') }}" enctype="multipart/form-data" autocomplete="off">
-        <input type="hidden" id="dfe-carpeta-destino" name="carpeta_destino" value="" />
+      <form id="form-vl" method="post" action="{{ url_for('vl_descargar') }}" enctype="multipart/form-data" autocomplete="off">
+        <input type="hidden" id="vl-carpeta-destino" name="carpeta_destino" value="" />
         <input type="hidden" id="web-carpeta-sesion" name="web_carpeta_sesion" value="" />
+
         <div class="panel">
-          <h2>{{ t('dfe_import_titulo') }}</h2>
-          <p class="help">{{ t('dfe_import_help')|safe }}</p>
-          <p><a href="{{ url_for('dfe_plantilla') }}" download="Formato DFE.xlsx">{{ t('dfe_import_descargar') }}</a></p>
-          <label><strong>{{ t('dfe_import_label_file') }}</strong>
-            <input type="file" name="dfe_excel" accept=".xlsx" />
+          <h2>{{ t('vl_sistemas_titulo') }}</h2>
+          <p class="help">{{ t('vl_sistemas_help') }}</p>
+          <div class="vl-sistemas">
+            <label><input type="checkbox" name="vl_sistemas" value="granos" checked /> <span class="vl-ico" aria-hidden="true">&#127806;</span> {{ t('vl_sistema_granos') }}</label>
+            <label><input type="checkbox" name="vl_sistemas" value="hacienda" checked /> <span class="vl-ico" aria-hidden="true">&#128004;</span> {{ t('vl_sistema_hacienda') }}</label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>{{ t('vl_import_titulo') }}</h2>
+          <p class="help">{{ t('vl_import_help')|safe }}</p>
+          <p><a href="{{ url_for('vl_plantilla') }}" download="Formato VyL.xlsx">{{ t('vl_import_descargar') }}</a></p>
+          <label><strong>{{ t('vl_import_label_file') }}</strong>
+            <input type="file" name="vl_excel" accept=".xlsx" />
           </label>
         </div>
 
         <div class="panel">
-          <h2>{{ t('dfe_manual_titulo') }}</h2>
-          <p class="help">{{ t('dfe_manual_help') }}</p>
+          <h2>{{ t('vl_manual_titulo') }}</h2>
+          <p class="help">{{ t('vl_manual_help') }}</p>
           <div id="filas-manual" class="filas-manual">
             <div class="fila-manual">
               <div class="campos-grid">
-                <label><strong>{{ t('dfe_manual_cuit_login') }}</strong>
-                  <input name="dfe_cuit_login" type="text" data-dfe="login" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
+                <label><strong>{{ t('vl_manual_cuit_login') }}</strong>
+                  <input name="vl_cuit_login" type="text" data-vl="login" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
                 </label>
-                <label><strong>{{ t('dfe_manual_clave') }}</strong>
+                <label><strong>{{ t('vl_manual_clave') }}</strong>
                   <div class="clave-wrap">
-                    <input class="clave-input" name="dfe_clave_fiscal" type="password" data-dfe="clave" autocomplete="new-password" />
+                    <input class="clave-input" name="vl_clave_fiscal" type="password" data-vl="clave" autocomplete="new-password" />
                     <button type="button" class="clave-toggle" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}">{{ t('clave_mostrar') }}</button>
                   </div>
                 </label>
-                <label><strong>{{ t('dfe_manual_cuit_repr') }}</strong>
-                  <input name="dfe_cuit_representado" type="text" data-dfe="repr" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
+                <label><strong>{{ t('vl_manual_nombre_repr') }}</strong>
+                  <input name="vl_nombre_representado" type="text" data-vl="repr" autocomplete="off" placeholder="{{ t('vl_manual_nombre_ph') }}" />
                 </label>
-                <label><strong>{{ t('dfe_manual_desde') }}</strong>
-                  <input name="dfe_fecha_desde" type="text" data-dfe="desde" autocomplete="off" placeholder="{{ t('dfe_manual_fecha_ph') }}" />
+                <label><strong>{{ t('vl_manual_desde') }}</strong>
+                  <input name="vl_fecha_desde" type="text" data-vl="desde" autocomplete="off" placeholder="{{ t('vl_manual_fecha_ph') }}" />
                 </label>
-                <label><strong>{{ t('dfe_manual_hasta') }}</strong>
-                  <input name="dfe_fecha_hasta" type="text" data-dfe="hasta" autocomplete="off" placeholder="{{ t('dfe_manual_fecha_ph') }}" />
+                <label><strong>{{ t('vl_manual_hasta') }}</strong>
+                  <input name="vl_fecha_hasta" type="text" data-vl="hasta" autocomplete="off" placeholder="{{ t('vl_manual_fecha_ph') }}" />
                 </label>
               </div>
-              <button type="button" class="fila-quitar" title="{{ t('dfe_manual_quitar') }}">&times;</button>
+              <button type="button" class="fila-quitar" title="{{ t('vl_manual_quitar') }}">&times;</button>
             </div>
           </div>
-          <button type="button" id="agregar-fila" class="btn-agregar">+ {{ t('dfe_manual_agregar') }}</button>
+          <button type="button" id="agregar-fila" class="btn-agregar">+ {{ t('vl_manual_agregar') }}</button>
         </div>
 
         <div class="carpeta-row">
-          <p class="help" style="margin:0">{{ t('carpeta_destino_label') }}: <code id="dfe-carpeta-label" class="ruta">—</code></p>
+          <p class="help" style="margin:0">{{ t('carpeta_destino_label') }}: <code id="vl-carpeta-label" class="ruta">—</code></p>
           {% if not modo_escritorio %}
-          <p class="help" style="margin:0.35rem 0 0">{{ t('dfe_carpeta_modo_web') }}</p>
+          <p class="help" style="margin:0.35rem 0 0">{{ t('vl_carpeta_modo_web') }}</p>
           <p class="help" style="margin:0.35rem 0 0">{{ t('carpeta_permiso_navegador')|safe }}</p>
           {% endif %}
-          <button type="button" class="btn-sec" id="dfe-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
-          <button type="button" class="btn-sec btn-cancelar-descarga" id="dfe-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
+          <button type="button" class="btn-sec" id="vl-btn-elegir-carpeta">{{ t('elegir_carpeta_btn') }}</button>
+          <button type="button" class="btn-sec btn-cancelar-descarga" id="vl-btn-cancelar">{{ t('btn_cancelar_descarga') }}</button>
         </div>
 
         <p class="error" id="form-error" style="display: none"></p>
         <div class="acciones acciones-form">
-          <button type="submit" class="btn-principal" id="btn-enviar">{{ t('dfe_submit') }}</button>
-          {% set input_id = 'dfe-ver-navegador' %}
+          <button type="submit" class="btn-principal" id="btn-enviar">{{ t('vl_submit') }}</button>
+          {% set input_id = 'vl-ver-navegador' %}
           {% include 'partials/btn_ver_navegador.html' %}
-          <button type="button" class="btn-peligro" id="dfe-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
+          <button type="button" class="btn-peligro" id="vl-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
         </div>
       </form>
 
       <div class="progreso panel" id="progreso">
-        <h2>{{ t('dfe_progress_label') }}</h2>
+        <h2>{{ t('vl_progress_label') }}</h2>
         <div class="barra"><div class="barra-fill" id="barra-fill"></div></div>
         <div id="mensaje-progreso" class="help"></div>
         <ul class="pasos" id="pasos"></ul>
         <div class="resultado-ok" id="resultado-ok" style="display: none"></div>
         <p class="error" id="error-progreso" style="display: none"></p>
-        <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('dfe_log_titulo') }}</h2>
+        <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('vl_log_titulo') }}</h2>
         <div class="log" id="log"></div>
       </div>
 
@@ -367,13 +392,14 @@
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
     <script>
       var I18N = {
-        sinDatos: {{ t('dfe_err_sin_datos')|tojson }},
-        okCarpeta: {{ t('dfe_ok_carpeta')|tojson }},
-        okTitulo: {{ t('dfe_ok_titulo')|tojson }},
-        working: {{ t('dfe_working')|tojson }},
-        quitar: {{ t('dfe_manual_quitar')|tojson }},
+        sinDatos: {{ t('vl_err_sin_datos')|tojson }},
+        sinSistema: {{ t('vl_err_sin_sistema')|tojson }},
+        okCarpeta: {{ t('vl_ok_carpeta')|tojson }},
+        okTitulo: {{ t('vl_ok_titulo')|tojson }},
+        working: {{ t('vl_working')|tojson }},
+        quitar: {{ t('vl_manual_quitar')|tojson }},
         carpetaTitulo: {{ t('carpeta_elegir_titulo')|tojson }},
-        carpetaModoWeb: {{ t('dfe_carpeta_modo_web')|tojson }},
+        carpetaModoWeb: {{ t('vl_carpeta_modo_web')|tojson }},
         errCarpetaWebApi: {{ t('err_carpeta_web_api')|tojson }},
         errCarpetaRestringida: {{ t('err_carpeta_restringida')|tojson }},
         errCarpetaPermisoDenegado: {{ t('err_carpeta_permiso_denegado')|tojson }},
@@ -391,12 +417,12 @@
 
         function limpiarAutofill() {
           // Evita que el navegador autocomplete con usuario/clave del sistema.
-          document.querySelectorAll('[data-dfe="login"], [data-dfe="clave"], [data-dfe="repr"]').forEach(function (i) {
+          document.querySelectorAll('[data-vl="login"], [data-vl="clave"], [data-vl="repr"]').forEach(function (i) {
             if (i.dataset.touched !== "1") i.value = "";
           });
         }
         cont.addEventListener("input", function (e) {
-          if (e.target && e.target.dataset && e.target.dataset.dfe) e.target.dataset.touched = "1";
+          if (e.target && e.target.dataset && e.target.dataset.vl) e.target.dataset.touched = "1";
         });
         setTimeout(limpiarAutofill, 60);
         setTimeout(limpiarAutofill, 400);
@@ -422,7 +448,7 @@
       })();
 
       (function envio() {
-        var form = document.getElementById("form-dfe");
+        var form = document.getElementById("form-vl");
         var btn = document.getElementById("btn-enviar");
         var errBox = document.getElementById("form-error");
         var prog = document.getElementById("progreso");
@@ -434,7 +460,7 @@
         var errProg = document.getElementById("error-progreso");
         var timer = null;
         var pollActivo = false;
-        function detenerPollDfe() {
+        function detenerPollVl() {
           pollActivo = false;
           if (timer) {
             clearInterval(timer);
@@ -442,9 +468,9 @@
           }
         }
         var carpetaApi = McElegirCarpeta.enlazar({
-          inputId: "dfe-carpeta-destino",
-          labelId: "dfe-carpeta-label",
-          btnId: "dfe-btn-elegir-carpeta",
+          inputId: "vl-carpeta-destino",
+          labelId: "vl-carpeta-label",
+          btnId: "vl-btn-elegir-carpeta",
           titulo: I18N.carpetaTitulo,
           webHint: I18N.carpetaModoWeb || "",
           onCancel: function () {
@@ -467,21 +493,26 @@
             restringida: I18N.errCarpetaRestringida,
             permisoDenegado: I18N.errCarpetaPermisoDenegado,
           },
-          sistema: "dfe",
+          sistema: "vl",
           sesionInputId: "web-carpeta-sesion",
         });
 
+        function haySistema() {
+          return form.querySelectorAll('input[name="vl_sistemas"]:checked').length > 0;
+        }
+
         function hayDatos() {
-          var file = form.querySelector('input[name="dfe_excel"]');
+          var file = form.querySelector('input[name="vl_excel"]');
           if (file && file.files && file.files.length) return true;
           var filas = document.querySelectorAll("#filas-manual .fila-manual");
           for (var i = 0; i < filas.length; i++) {
             var f = filas[i];
-            var cuit = (f.querySelector('[data-dfe="login"]').value || "").trim();
-            var clave = (f.querySelector('[data-dfe="clave"]').value || "").trim();
-            var d = (f.querySelector('[data-dfe="desde"]').value || "").trim();
-            var h = (f.querySelector('[data-dfe="hasta"]').value || "").trim();
-            if (cuit && clave && d && h) return true;
+            var cuit = (f.querySelector('[data-vl="login"]').value || "").trim();
+            var clave = (f.querySelector('[data-vl="clave"]').value || "").trim();
+            var repr = (f.querySelector('[data-vl="repr"]').value || "").trim();
+            var d = (f.querySelector('[data-vl="desde"]').value || "").trim();
+            var h = (f.querySelector('[data-vl="hasta"]').value || "").trim();
+            if (cuit && clave && repr && d && h) return true;
           }
           return false;
         }
@@ -520,7 +551,7 @@
 
         function poll(jobId) {
           if (!pollActivo) return;
-          fetch("{{ url_for('dfe_estado', job_id='__ID__') }}".replace("__ID__", jobId), {
+          fetch("{{ url_for('vl_estado', job_id='__ID__') }}".replace("__ID__", jobId), {
             credentials: "same-origin",
           })
             .then(function (r) { return r.json(); })
@@ -543,22 +574,22 @@
                   (st.cuits_ok + " CUIT · " + st.total_archivos + " archivo(s) · " + st.cuits_fallidos + " con error.") +
                   htmlFallos(st.resumen, st.carpeta);
                 btn.disabled = false;
-                btn.textContent = "{{ t('dfe_submit') }}";
+                btn.textContent = "{{ t('vl_submit') }}";
               } else if (st.estado === "error" || st.estado === "cancelado") {
                 clearInterval(timer);
                 McCancelarDescarga.limpiar();
                 errProg.style.display = "block";
                 errProg.textContent = st.error || st.mensaje || "Error";
                 btn.disabled = false;
-                btn.textContent = "{{ t('dfe_submit') }}";
+                btn.textContent = "{{ t('vl_submit') }}";
               } else {
-                McCancelarDescarga.registrar("dfe", jobId);
+                McCancelarDescarga.registrar("vl", jobId);
               }
             })
             .catch(function () {});
         }
 
-        function lanzarDfe() {
+        function lanzarVl() {
           btn.disabled = true;
           btn.textContent = I18N.working;
           prog.style.display = "block";
@@ -572,12 +603,12 @@
                 errBox.style.display = "block";
                 errBox.textContent = (res.data && res.data.error) || "Error";
                 btn.disabled = false;
-                btn.textContent = "{{ t('dfe_submit') }}";
+                btn.textContent = "{{ t('vl_submit') }}";
                 return;
               }
               if (res.data.job_id) {
                 pollActivo = true;
-                McCancelarDescarga.setDetenerPoll(detenerPollDfe);
+                McCancelarDescarga.setDetenerPoll(detenerPollVl);
                 timer = setInterval(function () { poll(res.data.job_id); }, 1200);
                 poll(res.data.job_id);
               }
@@ -586,13 +617,18 @@
               errBox.style.display = "block";
               errBox.textContent = (err && err.message) || I18N.errorRed || "Error de red.";
               btn.disabled = false;
-              btn.textContent = "{{ t('dfe_submit') }}";
+              btn.textContent = "{{ t('vl_submit') }}";
             });
         }
 
         form.addEventListener("submit", function (ev) {
           ev.preventDefault();
           errBox.style.display = "none";
+          if (!haySistema()) {
+            errBox.style.display = "block";
+            errBox.textContent = I18N.sinSistema;
+            return;
+          }
           if (!hayDatos()) {
             errBox.style.display = "block";
             errBox.textContent = I18N.sinDatos;
@@ -602,50 +638,50 @@
           btn.textContent = I18N.working;
           McElegirCarpeta.resolver({
             api: carpetaApi,
-            sistema: "dfe",
+            sistema: "vl",
             sesionInputId: "web-carpeta-sesion",
           })
             .then(function (ruta) {
               if (McElegirCarpeta.requiereCarpeta(ruta)) {
                 btn.disabled = false;
-                btn.textContent = "{{ t('dfe_submit') }}";
+                btn.textContent = "{{ t('vl_submit') }}";
                 errBox.style.display = "block";
                 errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
                 return;
               }
               carpetaApi.aplicar(ruta);
-              lanzarDfe();
+              lanzarVl();
             })
             .catch(function () {
               btn.disabled = false;
-              btn.textContent = "{{ t('dfe_submit') }}";
+              btn.textContent = "{{ t('vl_submit') }}";
               errBox.style.display = "block";
               errBox.textContent = I18N.carpetaCancelada || "No se eligió carpeta.";
             });
         });
 
-        McCancelarDescarga.enlazar(document.getElementById("dfe-btn-cancelar"), {
+        McCancelarDescarga.enlazar(document.getElementById("vl-btn-cancelar"), {
           confirm: I18N.cancelarConfirm,
           submitBtn: btn,
-          submitLabel: "{{ t('dfe_submit') }}",
+          submitLabel: "{{ t('vl_submit') }}",
           progreso: prog,
           errProg: errProg,
           okBox: okBox,
           mensajeCancelado: I18N.msgCancelado,
         });
 
-        document.getElementById("dfe-btn-limpiar-datos").addEventListener("click", function () {
+        document.getElementById("vl-btn-limpiar-datos").addEventListener("click", function () {
           McLimpiarDatos({
             confirm: I18N.limpiarConfirm,
             mensajeCancelado: I18N.msgCancelado,
-            formId: "form-dfe",
-            fileNames: ["dfe_excel"],
+            formId: "form-vl",
+            fileNames: ["vl_excel"],
             manualContainerId: "filas-manual",
-            carpetaInputId: "dfe-carpeta-destino",
-            carpetaLabelId: "dfe-carpeta-label",
+            carpetaInputId: "vl-carpeta-destino",
+            carpetaLabelId: "vl-carpeta-label",
             onListo: function () {
               btn.disabled = false;
-              btn.textContent = "{{ t('dfe_submit') }}";
+              btn.textContent = "{{ t('vl_submit') }}";
               prog.style.display = "none";
               okBox.style.display = "none";
               errProg.style.display = "none";
@@ -654,12 +690,12 @@
           });
         });
 
-        {% if dfe_job_id %}
+        {% if vl_job_id %}
         pollActivo = true;
-        McCancelarDescarga.setDetenerPoll(detenerPollDfe);
-        McCancelarDescarga.registrar("dfe", "{{ dfe_job_id }}");
-        timer = setInterval(function () { poll("{{ dfe_job_id }}"); }, 1200);
-        poll("{{ dfe_job_id }}");
+        McCancelarDescarga.setDetenerPoll(detenerPollVl);
+        McCancelarDescarga.registrar("vl", "{{ vl_job_id }}");
+        timer = setInterval(function () { poll("{{ vl_job_id }}"); }, 1200);
+        poll("{{ vl_job_id }}");
         {% endif %}
       })();
     </script>

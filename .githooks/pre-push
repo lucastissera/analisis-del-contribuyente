@@ -1,0 +1,5 @@
+#!/bin/sh
+# Bloquea push si hay secretos del portable en el commit.
+# Activar una vez: git config core.hooksPath .githooks
+cd "$(git rev-parse --show-toplevel)" || exit 1
+python tools/verificar_antes_de_push.py || exit 1

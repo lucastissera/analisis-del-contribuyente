@@ -1,7 +1,7 @@
 # Render.com — build con Chromium para descarga ARCA
 services:
   - type: web
-    name: mis-comprobantes-arca
+    name: analisisdelcontribuyente
     runtime: python
     buildCommand: >-
       pip install -r requirements.txt &&
@@ -30,5 +30,5 @@ services:
       # AUTH_ADMIN_USER  — opcional: Lucas
       # DATABASE_URL — PostgreSQL Neon (persistencia de altas de clientes)
       # AUTH_ADMIN_NOTIFY_EMAIL, SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
-      # CURSOR_REPO_URL  — ej. https://github.com/.../analisismiscomprobantes
+      # CURSOR_REPO_URL  — ej. https://github.com/lucastissera/analisis-del-contribuyente
       # CURSOR_REPO_BRANCH — default main

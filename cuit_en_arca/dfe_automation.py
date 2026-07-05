@@ -4,17 +4,18 @@ Flujo:
 1. Login con clave fiscal (reutiliza el login de Mis Comprobantes).
 2. Abre el servicio «Domicilio Fiscal Electrónico» **desde el portal** (el SSO no
    funciona entrando por URL directa a ``ve.cloud.afip.gob.ar``).
-3. Cierra el popup inicial ("Recordar más tarde").
+3. Cierra popups de la ventanilla (bienvenida «Recordar más tarde» y, si aparece,
+   «tiene oficio» con «CERRAR» al entrar a representados).
 4. Si el CUIT representado difiere del login: pestaña «Comunicaciones de mis
    representados» y selección del CUIT en el desplegable.
-5. Aplica el rango de fechas y lista las comunicaciones recibidas.
+5. Cierra popups residuales y aplica el rango de fechas; lista las comunicaciones recibidas.
 6. Por cada comunicación:
    - Si tiene archivo adjunto (``a#adjunto-nombre``: .txt / .pdf), lo **descarga**.
    - Si es solo informativa en pantalla, **imprime la pantalla a PDF**.
 7. Guarda todo en una carpeta del escritorio: ``DFE yyyy-mm-dd``.
 
-En servidor web usa navegador headless; en el portable (.exe), visible por defecto
-(``CUIT_EN_ARCA_HEADLESS=1`` fuerza headless también en el .exe).
+En servidor web y portable: navegador oculto por defecto; visible con el botón
+«Ver navegador en vivo» o ``CUIT_EN_ARCA_HEADLESS=0``.
 """
 
 from __future__ import annotations
@@ -151,6 +152,106 @@ def _nombre_seguro(nombre: str, *, fallback: str = "archivo") -> str:
     nombre = _INVALIDOS.sub("_", nombre)
     nombre = re.sub(r"\s+", " ", nombre).strip(" .")
     return nombre or fallback
+
+
+def _nombre_carpeta_cuit_dfe(
+    cuit: str,
+    razon_social: str | None = None,
+    *,
+    fallback: str = "",
+) -> str:
+    """``{CUIT} - {razón social}`` para la subcarpeta de un contribuyente."""
+    cuit_n = _cuit_dfe_n(cuit or fallback)
+    cuit_fmt = (
+        _cuit_dfe_fmt(cuit_n)
+        if len(cuit_n) == 11
+        else _nombre_seguro(cuit, fallback=fallback or "cuit")
+    )
+    rs = _nombre_seguro((razon_social or "").strip(), fallback="")
+    if rs and rs != cuit_fmt and not re.fullmatch(r"[\d\-]+", rs):
+        return _nombre_seguro(f"{cuit_fmt} - {rs}", fallback=cuit_fmt)[:180]
+    return cuit_fmt
+
+
+def _razon_social_dfe(
+    ve,
+    cuit_repr: str,
+    on_log=None,
+    *,
+    etiqueta_select: str = "",
+) -> str | None:
+    """Obtiene la razón social visible en DFE (titular o representado)."""
+    from cuit_en_arca.automation_playwright import (
+        _limpiar_razon_social,
+        _razon_social_activa_mcmp,
+    )
+
+    candidatos: list[str] = []
+    if etiqueta_select:
+        candidatos.append(etiqueta_select)
+
+    try:
+        txt = ve.evaluate(
+            """() => {
+              const panel = document.querySelector("#representados-comunicaciones-tab");
+              if (panel) {
+                for (const sel of panel.querySelectorAll("select")) {
+                  const opt = sel.options[sel.selectedIndex];
+                  if (opt) {
+                    const t = (opt.textContent || opt.label || "").trim();
+                    if (t) return t;
+                  }
+                }
+              }
+              const el = document.querySelector(".nombre-activo");
+              return el ? (el.textContent || "").trim() : "";
+            }"""
+        )
+        if txt:
+            candidatos.append(str(txt))
+    except Exception:
+        pass
+
+    try:
+        rs_mcmp = _razon_social_activa_mcmp(ve)
+        if rs_mcmp:
+            candidatos.append(rs_mcmp)
+    except Exception:
+        pass
+
+    cuit_n = _cuit_dfe_n(cuit_repr)
+    for raw in candidatos:
+        rs = _limpiar_razon_social(raw)
+        if not rs:
+            continue
+        if rs == cuit_n or re.fullmatch(r"[\d\-]+", rs):
+            continue
+        _log(on_log, f"Razón social DFE: {rs}.")
+        return rs
+    return None
+
+
+def _renombrar_carpeta_cuit_dfe(
+    dest: Path,
+    cuit: str,
+    razon_social: str | None,
+    *,
+    fallback: str = "",
+) -> Path:
+    if not dest.is_dir():
+        return dest
+    nuevo = dest.parent / _nombre_carpeta_cuit_dfe(
+        cuit, razon_social, fallback=fallback
+    )
+    if nuevo == dest:
+        return dest
+    if nuevo.is_dir():
+        return dest
+    try:
+        dest.rename(nuevo)
+        return nuevo
+    except OSError:
+        return dest
 
 
 def _fecha_a_iso(recibido: str) -> str:
@@ -435,10 +536,13 @@ def _activar_pestana_representados_dfe(ve, on_log=None) -> None:
     clic_humano(tab.first)
     pausa_humana(0.45, 0.85)
     ve.locator(_DFE_PANEL_REPRESENTADOS).wait_for(state="visible", timeout=12_000)
+    # El popup «tiene oficio» suele aparecer varios segundos después del clic en la pestaña.
+    _cerrar_popup_dfe(ve, on_log, esperar_aparicion=10.0)
     _log(on_log, "Pestaña «Comunicaciones de mis representados» activa.")
 
 
-def _seleccionar_cuit_representado_dfe(ve, cuit_repr: str, on_log=None) -> None:
+def _seleccionar_cuit_representado_dfe(ve, cuit_repr: str, on_log=None) -> str:
+    """Selecciona el CUIT representado; devuelve el texto visible de la opción."""
     cuit_n = _cuit_dfe_n(cuit_repr)
     fmt = _cuit_dfe_fmt(cuit_n)
     panel = ve.locator(_DFE_PANEL_REPRESENTADOS)
@@ -475,12 +579,13 @@ def _seleccionar_cuit_representado_dfe(ve, cuit_repr: str, on_log=None) -> None:
     )
 
     if isinstance(resultado, dict) and resultado.get("ok"):
+        etiqueta = str(resultado.get("label") or "").strip()
         _log(
             on_log,
-            f"CUIT representado seleccionado ({resultado.get('label') or cuit_n}).",
+            f"CUIT representado seleccionado ({etiqueta or cuit_n}).",
         )
         pausa_humana(0.15, 0.3)
-        return
+        return etiqueta
 
     # Desplegable custom (Bootstrap / Vue): abrir y elegir opción visible.
     cands = panel.locator("select, [role='combobox'], .custom-select")
@@ -505,7 +610,21 @@ def _seleccionar_cuit_representado_dfe(ve, cuit_repr: str, on_log=None) -> None:
                     clic_humano(loc.first)
                     _log(on_log, f"CUIT representado seleccionado: {cuit_n}.")
                     pausa_humana(0.15, 0.3)
-                    return
+                    try:
+                        txt = ve.evaluate(
+                            """() => {
+                              const panel = document.querySelector("#representados-comunicaciones-tab");
+                              if (!panel) return "";
+                              for (const sel of panel.querySelectorAll("select")) {
+                                const opt = sel.options[sel.selectedIndex];
+                                if (opt) return (opt.textContent || opt.label || "").trim();
+                              }
+                              return "";
+                            }"""
+                        )
+                        return str(txt or "").strip()
+                    except Exception:
+                        return ""
             except Exception:
                 continue
 
@@ -545,6 +664,7 @@ def _escribir_fecha_dfe(campo, valor: date) -> None:
 
 
 def _click_aplicar_representados(ve, on_log=None, *, motivo: str = "") -> None:
+    _cerrar_popup_dfe(ve, on_log, esperar_aparicion=2.0)
     root = _panel_representados_dfe(ve)
     if not _click_boton_aplicar_dfe(
         ve, root, _DFE_BTN_APLICAR_REPRESENTADOS, solo_panel=True
@@ -558,47 +678,241 @@ def _click_aplicar_representados(ve, on_log=None, *, motivo: str = "") -> None:
     _esperar_tabla_representados(ve)
 
 
-def _configurar_dfe_representados(ve, cuit_repr: str, on_log=None) -> None:
+def _configurar_dfe_representados(ve, cuit_repr: str, on_log=None) -> str:
     _activar_pestana_representados_dfe(ve, on_log)
-    _seleccionar_cuit_representado_dfe(ve, cuit_repr, on_log)
+    etiqueta = _seleccionar_cuit_representado_dfe(ve, cuit_repr, on_log)
+    _cerrar_popup_dfe(ve, on_log, esperar_aparicion=4.0)
     _esperar_filtros_representados_dfe(ve, on_log)
     # Tras elegir el CUIT hay que Aplicar para cargar la grilla (grabación 121636).
     _click_aplicar_representados(ve, on_log, motivo="CUIT representado")
+    return etiqueta
 
 
 def _esperar_filtros_representados_dfe(ve, on_log=None) -> None:
     """Espera hasta 5 s a que estén visibles fechas y botón Aplicar."""
     panel = ve.locator(_DFE_PANEL_REPRESENTADOS)
-    try:
-        panel.locator("#daterange-fechas-desde").wait_for(
-            state="visible", timeout=_DFE_ESPERA_FILTROS_REPRESENTADO_MS
-        )
-        panel.locator(f"#{_DFE_BTN_APLICAR_REPRESENTADOS}").wait_for(
-            state="visible", timeout=_DFE_ESPERA_FILTROS_REPRESENTADO_MS
-        )
-        _log(on_log, "Filtros de fechas listos.")
-    except Exception as exc:
-        _log(on_log, f"Espera de filtros DFE representados: {exc}")
+    for intento in range(2):
+        _cerrar_popup_dfe(ve, on_log, esperar_aparicion=2.0 if intento else 0)
+        try:
+            panel.locator("#daterange-fechas-desde").wait_for(
+                state="visible", timeout=_DFE_ESPERA_FILTROS_REPRESENTADO_MS
+            )
+            panel.locator(f"#{_DFE_BTN_APLICAR_REPRESENTADOS}").wait_for(
+                state="visible", timeout=_DFE_ESPERA_FILTROS_REPRESENTADO_MS
+            )
+            _log(on_log, "Filtros de fechas listos.")
+            return
+        except Exception as exc:
+            if intento == 0:
+                _log(on_log, "Filtros bloqueados; reintentando tras cerrar popups…")
+                continue
+            _log(on_log, f"Espera de filtros DFE representados: {exc}")
 
 
-def _cerrar_popup_dfe(ve, on_log=None) -> None:
+def _popup_dfe_abierto(ve) -> bool:
     try:
-        btn = ve.get_by_role("button", name=re.compile(r"recordar m[aá]s tarde", re.I))
-        if btn.count() and btn.first.is_visible(timeout=4000):
-            clic_humano(btn.first)
+        return bool(
+            ve.evaluate(
+                """
+                () => {
+                  if (document.body.classList.contains('modal-open')) return true;
+                  for (const id of [
+                    'dfeModal___BV_modal_outer_',
+                    'tieneOficioModal___BV_modal_outer_',
+                  ]) {
+                    const el = document.getElementById(id);
+                    if (!el) continue;
+                    const s = window.getComputedStyle(el);
+                    if (s.display !== 'none' && s.visibility !== 'hidden') return true;
+                  }
+                  return false;
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
+def _cerrar_popups_dfe_js(ve, on_log=None) -> bool:
+    """Cierra modales Bootstrap-Vue por DOM (más fiable que is_visible)."""
+    try:
+        result = ve.evaluate(
+            """
+            () => {
+              const norm = (t) => (t || '')
+                .trim()
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\\u0300-\\u036f]/g, '');
+              const targets = [
+                {
+                  footer: 'tieneOficioModal___BV_modal_footer_',
+                  words: ['cerrar'],
+                },
+                {
+                  footer: 'dfeModal___BV_modal_footer_',
+                  words: ['recordar mas tarde', 'recordar más tarde'],
+                },
+              ];
+              for (const { footer, words } of targets) {
+                const foot = document.getElementById(footer);
+                if (!foot) continue;
+                for (const btn of foot.querySelectorAll('button, a')) {
+                  const t = norm(btn.innerText || btn.textContent || '');
+                  if (words.some((w) => t.includes(norm(w)))) {
+                    btn.click();
+                    return { ok: true, modal: footer, btn: t };
+                  }
+                }
+              }
+              if (document.body.classList.contains('modal-open')) {
+                for (const foot of document.querySelectorAll(
+                  '[id$="___BV_modal_footer_"]'
+                )) {
+                  for (const btn of foot.querySelectorAll('button')) {
+                    const t = norm(btn.innerText || btn.textContent || '');
+                    if (
+                      t === 'cerrar' ||
+                      t === 'entendido' ||
+                      t === 'aceptar' ||
+                      t.includes('recordar')
+                    ) {
+                      btn.click();
+                      return { ok: true, modal: foot.id || 'modal', btn: t };
+                    }
+                  }
+                }
+              }
+              return { ok: false };
+            }
+            """
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            _log(
+                on_log,
+                f"Popup cerrado ({result.get('modal')}: {result.get('btn')}).",
+            )
+            pausa_humana(0.25, 0.45)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
+    """Cierra un popup visible de DFE. Devuelve True si cerró alguno."""
+    if _cerrar_popups_dfe_js(ve, on_log):
+        return True
+
+    for footer_id, patron in (
+        ("tieneOficioModal___BV_modal_footer_", re.compile(r"cerrar", re.I)),
+        ("dfeModal___BV_modal_footer_", re.compile(r"recordar", re.I)),
+    ):
+        try:
+            footer = ve.locator(f"#{footer_id}")
+            if not footer.count():
+                continue
+            btn = footer.locator("button").filter(has_text=patron).first
+            if btn.count():
+                try:
+                    btn.click(force=True, timeout=4000)
+                except Exception:
+                    clic_humano(btn)
+                _log(on_log, f"Popup cerrado ({footer_id}).")
+                pausa_humana(0.25, 0.45)
+                return True
+        except Exception:
+            pass
+
+    try:
+        modal = ve.locator("#tieneOficioModal___BV_modal_outer_, #tieneOficioModal")
+        if modal.count():
+            btn = ve.locator("#tieneOficioModal___BV_modal_footer_ button").filter(
+                has_text=re.compile(r"cerrar", re.I)
+            )
+            if btn.count():
+                try:
+                    btn.first.click(force=True, timeout=4000)
+                except Exception:
+                    clic_humano(btn.first)
+                _log(on_log, "Popup «tiene oficio» cerrado (CERRAR).")
+                pausa_humana(0.25, 0.45)
+                return True
+    except Exception:
+        pass
+
+    try:
+        btn = ve.locator("#dfeModal___BV_modal_footer_ button").filter(
+            has_text=re.compile(r"recordar", re.I)
+        )
+        if btn.count():
+            try:
+                btn.first.click(force=True, timeout=4000)
+            except Exception:
+                clic_humano(btn.first)
             _log(on_log, "Popup inicial cerrado (Recordar más tarde).")
             pausa_humana(0.25, 0.45)
-            return
+            return True
     except Exception:
         pass
-    # Alternativa: "Entendido"
+
     try:
-        btn = ve.get_by_role("button", name=re.compile(r"^entendido$", re.I))
-        if btn.count() and btn.first.is_visible(timeout=2000):
-            clic_humano(btn.first)
-            pausa_humana(0.2, 0.4)
+        btn = ve.get_by_role("button", name=re.compile(r"recordar m[aá]s tarde", re.I))
+        if btn.count() and btn.first.is_visible(timeout=1200):
+            try:
+                btn.first.click(force=True, timeout=4000)
+            except Exception:
+                clic_humano(btn.first)
+            _log(on_log, "Popup inicial cerrado (Recordar más tarde).")
+            pausa_humana(0.25, 0.45)
+            return True
     except Exception:
         pass
+
+    if _popup_dfe_abierto(ve):
+        try:
+            btn = ve.locator(
+                '[id$="___BV_modal_footer_"] button, .modal.show footer button'
+            ).filter(has_text=re.compile(r"cerrar|entendido|aceptar|recordar", re.I))
+            if btn.count():
+                try:
+                    btn.first.click(force=True, timeout=4000)
+                except Exception:
+                    clic_humano(btn.first)
+                _log(on_log, "Popup emergente cerrado.")
+                pausa_humana(0.25, 0.45)
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def _cerrar_popup_dfe(
+    ve,
+    on_log=None,
+    *,
+    esperar_aparicion: float = 0,
+) -> None:
+    """Cierra popups opcionales de DFE (pueden aparecer o no)."""
+    limite = time.time() + max(0.0, float(esperar_aparicion))
+    while time.time() < limite:
+        if _cerrar_un_popup_dfe(ve, on_log):
+            pausa_humana(0.2, 0.35)
+            continue
+        if not _popup_dfe_abierto(ve):
+            pausa_humana(0.3, 0.5)
+        else:
+            pausa_humana(0.15, 0.3)
+
+    for _ in range(5):
+        if not _cerrar_un_popup_dfe(ve, on_log):
+            break
+        pausa_humana(0.15, 0.3)
+
+    if _popup_dfe_abierto(ve):
+        _log(on_log, "Aviso: puede quedar un popup de DFE sin cerrar.")
 
 
 def _es_select_paginacion(s) -> bool:
@@ -666,6 +980,7 @@ def _maximizar_registros(ve) -> None:
 def _click_boton_aplicar_dfe(
     ve, root, id_boton: str | None = None, *, solo_panel: bool = False
 ) -> bool:
+    _cerrar_popup_dfe(ve, on_log=None)
     botones: list = []
     if id_boton:
         botones.append(root.locator(f"#{id_boton}").first)
@@ -699,6 +1014,7 @@ def _aplicar_rango_representados(
     on_log=None,
 ) -> None:
     """En representados: fecha desde → Aplicar → fecha hasta → Aplicar (grabación ARCA)."""
+    _cerrar_popup_dfe(ve, on_log)
     di = _campo_fecha_representados(ve, "desde")
     dh = _campo_fecha_representados(ve, "hasta")
     try:
@@ -778,6 +1094,62 @@ def _leer_filas_representados(ve) -> list[dict]:
     return out
 
 
+def _click_siguiente_pagina_representados(ve, on_log=None) -> bool:
+    """Avanza a la página siguiente de la grilla representados (grabación 20260704_144903)."""
+    ids_antes = {r["id"] for r in _leer_filas_representados(ve)}
+    try:
+        avanzo = ve.evaluate(
+            """
+            () => {
+              const panel = document.querySelector("#representados-comunicaciones-tab");
+              if (!panel) return false;
+              const btns = [...panel.querySelectorAll("button.pagination-button")];
+              if (!btns.length) return false;
+              const disabled = (b) =>
+                b.disabled ||
+                b.classList.contains("disabled") ||
+                b.getAttribute("aria-disabled") === "true";
+              for (const b of btns) {
+                const aria = (b.getAttribute("aria-label") || "").toLowerCase();
+                if (
+                  aria.includes("siguiente") ||
+                  aria.includes("next") ||
+                  aria.includes("avanzar")
+                ) {
+                  if (!disabled(b)) {
+                    b.click();
+                    return true;
+                  }
+                }
+              }
+              if (btns.length >= 3) {
+                const next = btns[btns.length - 2];
+                if (next && !disabled(next)) {
+                  next.click();
+                  return true;
+                }
+              }
+              return false;
+            }
+            """
+        )
+        if not avanzo:
+            return False
+        pausa_humana(0.5, 0.9)
+        _esperar_tabla_representados(ve, timeout_ms=15_000)
+        ids_despues = {r["id"] for r in _leer_filas_representados(ve)}
+        if ids_despues == ids_antes:
+            return False
+        _log(
+            on_log,
+            f"Paginación representados: página siguiente ({len(ids_despues)} visibles).",
+        )
+        return True
+    except Exception as exc:
+        _log(on_log, f"No se pudo avanzar página representados: {exc}")
+        return False
+
+
 def _abrir_detalle_representado(ve, com: dict) -> bool:
     sid = com.get("sistema_id") or f"sistema[{com['id']}]"
     panel = _panel_representados_dfe(ve)
@@ -818,6 +1190,7 @@ def _aplicar_rango(
 ) -> None:
     if not desde or not hasta:
         return
+    _cerrar_popup_dfe(ve, on_log)
     try:
         root = ve.locator(panel) if panel else ve
         di = root.locator("#daterange-fechas-desde").first
@@ -870,7 +1243,7 @@ def _preparar_listado_dfe(
     *,
     representados: bool = False,
 ) -> list[dict]:
-    """Tras cerrar el popup: filtrar, maximizar paginación y leer filas."""
+    """Configura filtros/paginación y lee filas (titular: una grilla; representados: página actual)."""
     if representados:
         if fecha_desde and fecha_hasta:
             _aplicar_rango_representados(ve, fecha_desde, fecha_hasta, on_log)
@@ -878,7 +1251,7 @@ def _preparar_listado_dfe(
             _esperar_tabla_representados(ve)
         _maximizar_pagina_representados(ve, on_log)
         filas = _leer_filas_representados(ve)
-        _log(on_log, f"Comunicaciones representados en grilla: {len(filas)}.")
+        _log(on_log, f"Comunicaciones representados en grilla (página actual): {len(filas)}.")
         return filas
     if fecha_desde and fecha_hasta:
         _aplicar_rango(ve, fecha_desde, fecha_hasta, on_log)
@@ -886,6 +1259,81 @@ def _preparar_listado_dfe(
         _esperar_tabla_comunicaciones(ve, timeout_ms=_DFE_ESPERA_TABLA_MS)
     _maximizar_registros(ve)
     return _leer_filas(ve)
+
+
+def _descargar_comunicaciones_dfe(
+    ve,
+    carpeta_destino: Path,
+    fecha_desde: date | None,
+    fecha_hasta: date | None,
+    resultado: ResultadoDfeCuit,
+    on_log=None,
+    *,
+    representados: bool = False,
+) -> None:
+    """Descarga todas las comunicaciones visibles, recorriendo páginas si hace falta."""
+    total_objetivo = 0
+    procesadas = 0
+
+    if representados:
+        pagina = 0
+        while pagina < 250:
+            pagina += 1
+            _cerrar_popup_dfe(ve, on_log)
+            _esperar_tabla_representados(ve)
+            filas = _leer_filas_representados(ve)
+            objetivo = _seleccionar_objetivo(
+                filas, fecha_desde, fecha_hasta, representados=True
+            )
+            if objetivo:
+                total_objetivo += len(objetivo)
+                _log(
+                    on_log,
+                    f"Página {pagina}: {len(objetivo)} comunicación(es) a procesar.",
+                )
+                for com in objetivo:
+                    procesadas += 1
+                    _log(
+                        on_log,
+                        f"[{procesadas}] {com.get('asunto', '')[:60]} "
+                        f"(N° {com['id']}, {com.get('recibido', '')})",
+                    )
+                    if not _abrir_detalle_representado(ve, com):
+                        _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
+                        continue
+                    res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
+                    resultado.comunicaciones.append(res_com)
+                    _volver_a_lista(ve, representados=True)
+            if not _click_siguiente_pagina_representados(ve, on_log):
+                break
+        _log(
+            on_log,
+            f"Comunicaciones detectadas (todas las páginas): {total_objetivo}.",
+        )
+        return
+
+    filas = _preparar_listado_dfe(
+        ve,
+        fecha_desde,
+        fecha_hasta,
+        on_log,
+        representados=False,
+    )
+    _log(on_log, f"Comunicaciones detectadas: {len(filas)}.")
+    objetivo = _seleccionar_objetivo(filas, fecha_desde, fecha_hasta, representados=False)
+    _log(on_log, f"A procesar: {len(objetivo)} comunicación(es).")
+    for idx, com in enumerate(objetivo, start=1):
+        _log(
+            on_log,
+            f"[{idx}/{len(objetivo)}] {com.get('asunto', '')[:60]} "
+            f"(N° {com['id']}, {com.get('recibido', '')})",
+        )
+        if not _abrir_detalle(ve, com["id"]):
+            _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
+            continue
+        res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
+        resultado.comunicaciones.append(res_com)
+        _volver_a_lista(ve, representados=False)
 
 
 def _leer_filas(ve) -> list[dict]:
@@ -1132,7 +1580,6 @@ def _ejecutar_descarga_dfe_impl(
         LOGIN_URL,
         _llenar_cuit_y_avanzar,
         _login_clave_fiscal,
-        _razon_social_activa_mcmp,
     )
 
     carpeta_destino.mkdir(parents=True, exist_ok=True)
@@ -1163,7 +1610,7 @@ def _ejecutar_descarga_dfe_impl(
         paso("ventanilla", "en_curso")
         _log(on_log, "Abriendo Domicilio Fiscal Electrónico…")
         ve = _abrir_dfe(page)
-        _cerrar_popup_dfe(ve, on_log)
+        _cerrar_popup_dfe(ve, on_log, esperar_aparicion=5.0)
         try:
             ve.bring_to_front()
         except Exception:
@@ -1171,48 +1618,53 @@ def _ejecutar_descarga_dfe_impl(
         usar_representados = _cuit_dfe_n(cred.cuit_representado) != _cuit_dfe_n(
             cred.cuit_login
         )
+        etiqueta_repr = ""
         if usar_representados:
             _log(
                 on_log,
                 f"DFE: consultando comunicaciones del representado "
                 f"{_cuit_dfe_fmt(_cuit_dfe_n(cred.cuit_representado))}…",
             )
-            _configurar_dfe_representados(ve, cred.cuit_representado, on_log)
-        try:
-            resultado.razon_social = _razon_social_activa_mcmp(ve) or None
-        except Exception:
-            resultado.razon_social = None
+            etiqueta_repr = _configurar_dfe_representados(
+                ve, cred.cuit_representado, on_log
+            )
+        resultado.razon_social = _razon_social_dfe(
+            ve,
+            cred.cuit_representado,
+            on_log,
+            etiqueta_select=etiqueta_repr,
+        )
         paso("ventanilla", "ok")
 
+        carpeta_destino = _renombrar_carpeta_cuit_dfe(
+            carpeta_destino,
+            cred.cuit_representado,
+            resultado.razon_social,
+            fallback=cred.cuit_login,
+        )
+        resultado.carpeta = str(carpeta_destino)
+        if resultado.razon_social:
+            _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}.")
+
         paso("listar", "en_curso")
-        filas = _preparar_listado_dfe(
-            ve,
-            fecha_desde,
-            fecha_hasta,
-            on_log,
-            representados=usar_representados,
-        )
-        _log(on_log, f"Comunicaciones detectadas: {len(filas)}.")
-        objetivo = _seleccionar_objetivo(
-            filas, fecha_desde, fecha_hasta, representados=usar_representados
-        )
-        _log(on_log, f"A procesar: {len(objetivo)} comunicación(es).")
+        if usar_representados:
+            if fecha_desde and fecha_hasta:
+                _aplicar_rango_representados(ve, fecha_desde, fecha_hasta, on_log)
+            else:
+                _esperar_tabla_representados(ve)
+            _maximizar_pagina_representados(ve, on_log)
         paso("listar", "ok")
 
         paso("descargar", "en_curso")
-        for idx, com in enumerate(objetivo, start=1):
-            _log(on_log, f"[{idx}/{len(objetivo)}] {com.get('asunto','')[:60]} "
-                         f"(N° {com['id']}, {com.get('recibido','')})")
-            if usar_representados:
-                ok_det = _abrir_detalle_representado(ve, com)
-            else:
-                ok_det = _abrir_detalle(ve, com["id"])
-            if not ok_det:
-                _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
-                continue
-            res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
-            resultado.comunicaciones.append(res_com)
-            _volver_a_lista(ve, representados=usar_representados)
+        _descargar_comunicaciones_dfe(
+            ve,
+            carpeta_destino,
+            fecha_desde,
+            fecha_hasta,
+            resultado,
+            on_log,
+            representados=usar_representados,
+        )
         paso("descargar", "ok")
         _log(on_log, f"Listo. Archivos guardados: {resultado.total_archivos} en {carpeta_destino}")
 
@@ -1349,7 +1801,7 @@ def ejecutar_dfe_lote(
             fd = _fecha_de(getattr(fila, "fecha_desde", "") or "")
             fh = _fecha_de(getattr(fila, "fecha_hasta", "") or "")
 
-            # Subcarpeta por CUIT (evita choques de nombres entre contribuyentes).
+            # Subcarpeta por CUIT (se renombra con razón social tras abrir DFE).
             dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
             dest.mkdir(parents=True, exist_ok=True)
 

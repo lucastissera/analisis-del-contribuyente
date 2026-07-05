@@ -84,7 +84,7 @@ Esto es un requisito de **Cursor**, no de esta aplicación. El repo GitHub puede
 
 ```env
 CURSOR_API_KEY=sk-...   # sin comillas
-CURSOR_REPO_URL=https://github.com/usuario/analisismiscomprobantes
+CURSOR_REPO_URL=https://github.com/lucastissera/analisis-del-contribuyente
 # También acepta .git al final o git@github.com:usuario/repo.git
 ```
 

@@ -84,13 +84,13 @@ Convéniente: comprimir en **ZIP** la carpeta `AnalisisIntegralContribuyente` co
 
 Hay tres modos compatibles (portable y servidor web):
 
-1. **Nube (recomendado con varios usuarios):** un único `auth_users.json` en un hosting HTTPS. Cada app lo descarga, lo guarda en caché fuera del sistema y lo actualiza cada ~2 minutos. Configuración: ver **[docs/AUTH_USUARIOS_NUBE.md](docs/AUTH_USUARIOS_NUBE.md)**.
-   - Servidor: variables `AUTH_USERS_URL` y opcional `AUTH_USERS_REMOTE_TOKEN` en `.env`.
-   - Portable: copiá `auth_remote.example.txt` como `auth_remote.txt` junto al `.exe`, o un `.env` con las mismas variables.
+1. **Nube / Neon (recomendado):** la web en Render usa PostgreSQL (Neon). El portable sincroniza vía `GET /api/auth-users` cada ~2 min (caché cifrada en `%LOCALAPPDATA%`). Ver **[docs/AUTH_USUARIOS_NUBE.md](docs/AUTH_USUARIOS_NUBE.md)**.
+   - Portable: `auth_remote.txt` junto al `.exe` (copiá desde `auth_remote.example.txt`).
+   - Servidor: `DATABASE_URL` (Neon) + `AUTH_USERS_REMOTE_TOKEN` para el endpoint de sync.
 
-2. **Archivo local externo:** `AUTH_USERS_PATH` apunta a un JSON fuera del proyecto.
+2. **Archivo local cifrado:** `auth_users.enc` junto al `.exe` (generado con `python tools/encrypt_auth_users.py` o al compilar). **No distribuir** `auth_users.json` en claro.
 
-3. **Archivo junto al sistema (desarrollo / un solo equipo):** `auth_users.json` en la raíz del repo. El build portable puede copiarlo al `dist\` (no subir claves al repo).
+3. **Desarrollo:** `auth_users.json` en la raíz del repo (ignorado por Git; plantilla `auth_users.example.json`).
 
 Si no hay URL remota, JSON válido ni `AUTH_ADMIN_USER` / `AUTH_ADMIN_PASSWORD`, el login no aceptará credenciales.
 
@@ -106,10 +106,10 @@ Ahí están el índice `plantillas.json` y los archivos `.xlsx` / `.csv` asociad
 
 **Build único (recompila y copia claves):**
 
-- **Doble clic o CMD:** `build_windows.bat` — instala dependencias, ejecuta PyInstaller y, si existe `auth_users.json` en la **raíz del repo**, lo copia automáticamente a `dist\AnalisisIntegralContribuyente\auth_users.json` (junto al `.exe`).
+- **Doble clic o CMD:** `build_windows.bat` — instala dependencias, ejecuta PyInstaller y, si existe `auth_users.json` o `auth_users.enc` en la raíz, genera **`auth_users.enc`** cifrado en `dist\AnalisisIntegralContribuyente\`.
 - **O a mano:** `python tools/portable_build.py` (desde la raíz del proyecto).
 
-**Vigilancia automática** (mientras `watch_portable.bat` o `python tools/portable_watch.py` esté en marcha, tras unos **3,5 s** sin nuevos guardados se **recompila** el portable y se copian las claves si hay `auth_users.json` en la raíz):
+**Vigilancia automática** (mientras `watch_portable.bat` o `python tools/portable_watch.py` esté en marcha, tras unos **3,5 s** sin nuevos guardados se **recompila** el portable y regenera `auth_users.enc` si hay `auth_users.json` o `auth_users.enc` en la raíz):
 
 1. `python -m pip install watchdog` (una vez).
 2. Ejecutá **`watch_portable.bat`** o `python tools/portable_watch.py`.
@@ -154,10 +154,10 @@ Marcá cada ítem al publicar una versión nueva. El orden sugiere: código list
 #### Portable Windows
 
 - [ ] ¿Nuevos archivos en `templates/`, `static/`, JSON u otros datos? → actualizá `datas` en `MisComprobantesDesktop.spec` si hace falta.
-- [ ] Ejecutá `build_windows.bat` o `python tools/portable_build.py` (incluye PyInstaller + copia de `auth_users.json` si existe en la raíz).
+- [ ] Ejecutá `build_windows.bat` o `python tools/portable_build.py` (genera `auth_users.enc` cifrado si hay claves en la raíz).
 - [ ] (Opcional) Con `watch_portable.bat` activo, los guardados en el repo actualizan `dist\…` solos; si no, ejecutá `build_windows.bat` o `python tools/portable_build.py` antes de empaquetar el ZIP.
 - [ ] Smoke test en otra carpeta o otra PC: abrir `AnalisisIntegralContribuyente.exe`, login, procesar, plantillas si aplica.
-- [ ] Si distribuís credenciales propias: asegurate de que el build haya copiado `auth_users.json` a `dist\…` (automático con `build_windows.bat` / `portable_build.py`) o documentá el uso de `AUTH_USERS_PATH`.
+- [ ] Usuarios: `auth_users.enc` en `dist\…`, o `auth_remote.txt` apuntando a `/api/auth-users` (Neon vía Render).
 - [ ] Generá el **ZIP** de toda la carpeta `dist\AnalisisIntegralContribuyente\` (no solo el `.exe`).
 - [ ] Nombrá el ZIP con versión o fecha (ej. `AnalisisIntegralContribuyente_2026-05-17.zip`) para saber qué build es.
 
@@ -173,7 +173,7 @@ Marcá cada ítem al publicar una versión nueva. El orden sugiere: código list
 1. Subir estos cambios a GitHub (`git add . && git commit -m "deploy config" && git push`).
 2. Entrar a [Render](https://render.com/) con tu cuenta de GitHub.
 3. Click en **New +** -> **Web Service**.
-4. Elegir el repo `analisismiscomprobantes`.
+4. Elegir el repo `analisis-del-contribuyente` (`lucastissera/analisis-del-contribuyente`).
 5. Completar:
    - **Environment**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt && playwright install chromium`

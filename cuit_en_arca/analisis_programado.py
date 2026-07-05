@@ -273,6 +273,7 @@ def ejecutar_analisis_programado(
     *,
     on_log: Callable[[str], None] | None = None,
     manual: bool = False,
+    headless: bool | None = None,
     _reservado: bool = False,
     _seq: int | None = None,
 ) -> dict[str, Any]:
@@ -375,7 +376,7 @@ def ejecutar_analisis_programado(
         )
         from cuit_en_arca.service import _headless_desde_env
 
-        headless = _headless_desde_env()
+        headless = _headless_desde_env() if headless is None else headless
         from cuit_en_arca.sesion_playwright import SesionPlaywrightCompartida
 
         with SesionPlaywrightCompartida(headless=headless) as sesion:
@@ -599,6 +600,7 @@ def lanzar_ejecucion_ap(
     cfg: ConfigAnalisisProgramado,
     *,
     manual: bool = False,
+    headless: bool | None = None,
 ) -> tuple[bool, str]:
     """Ejecuta en un hilo de fondo. Devuelve (ok, mensaje_error)."""
     global _ejecutando, _ejecucion_seq, _ejecucion_activa_seq
@@ -614,7 +616,9 @@ def lanzar_ejecucion_ap(
 
     def _worker() -> None:
         try:
-            ejecutar_analisis_programado(cfg, manual=manual, _reservado=True, _seq=seq)
+            ejecutar_analisis_programado(
+                cfg, manual=manual, headless=headless, _reservado=True, _seq=seq
+            )
         except Exception:
             _LOG.exception("Error en ejecución de análisis programado")
 

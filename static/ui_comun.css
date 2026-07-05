@@ -197,6 +197,11 @@ html.modo-oscuro .btn-tema .icono-sol {
 .btn-sec:hover {
   filter: brightness(1.05);
 }
+.btn-toggle-navegador.activo {
+  border-color: var(--accent, #2563eb);
+  background: color-mix(in srgb, var(--accent, #2563eb) 18%, var(--bg-panel));
+  font-weight: 600;
+}
 
 /* Isologo y cabecera de página */
 .cabecera {

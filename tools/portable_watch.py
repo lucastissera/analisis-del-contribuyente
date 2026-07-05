@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Vigila cambios en el código y plantillas del proyecto y ejecuta ``portable_build.py``
-(PyInstaller + copia de ``auth_users.json``) con debounce, para que el portable refleje
+(PyInstaller + ``auth_users.enc`` cifrado) con debounce, para que el portable refleje
 los cambios sin pasos manuales.
 
-También reacciona a ``auth_users.json`` en la raíz.
+También reacciona a ``auth_users.json`` / ``auth_users.enc`` en la raíz.
 
 Ignora ``dist/``, ``build/``, ``.git``, cachés de Python, etc., para no entrar en bucle
 cuando PyInstaller escribe la salida.
@@ -27,7 +27,12 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTH_PATH = (ROOT / "auth_users.json").resolve()
+AUTH_PATHS = frozenset(
+    {
+        (ROOT / "auth_users.json").resolve(),
+        (ROOT / "auth_users.enc").resolve(),
+    }
+)
 BUILD_SCRIPT = ROOT / "tools" / "portable_build.py"
 
 _DEBOUNCE_SEC = 3.5
@@ -93,7 +98,7 @@ def _should_watch_path(path_str: str, solo_claves: bool) -> bool:
         return False
     if solo_claves:
         try:
-            return Path(path_str).resolve() == AUTH_PATH
+            return Path(path_str).resolve() in AUTH_PATHS
         except OSError:
             return False
     if parts[0] in _IGNORE_ROOT_DIRS:
@@ -133,7 +138,7 @@ def main() -> int:
     ap.add_argument(
         "--solo-claves",
         action="store_true",
-        help="Solo vigilar auth_users.json (no templates ni .py).",
+        help="Solo vigilar auth_users.json / auth_users.enc (no templates ni .py).",
     )
     args = ap.parse_args()
 
@@ -174,7 +179,7 @@ def main() -> int:
 
     if solo:
         print(
-            f"Solo claves: vigilando {AUTH_PATH.name}\n"
+            f"Solo claves: vigilando auth_users.json y auth_users.enc\n"
             f"Debounce {_DEBOUNCE_SEC:.0f}s. Ctrl+C para salir.\n",
             flush=True,
         )

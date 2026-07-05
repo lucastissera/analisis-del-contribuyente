@@ -1,6 +1,14 @@
 # Copiá este archivo como auth_remote.txt junto al .exe (misma carpeta).
-# Primera línea: URL HTTPS del listado de usuarios (JSON).
-# Segunda línea (opcional): token Bearer para proteger la descarga.
+# Primera línea: URL HTTPS del listado de usuarios (JSON desde Neon vía la web).
+# Segunda línea (opcional): token Bearer (mismo valor que AUTH_USERS_REMOTE_TOKEN en Render).
 #
-# https://tu-servidor.com/privado/auth_users.json
+# SEGURIDAD: el token en texto plano protege la API frente a internet aleatorio, pero
+# cualquiera con acceso a la carpeta del portable puede leerlo. No subas auth_remote.txt
+# a Git ni lo compartas públicamente; rotá el token en Render si se filtra.
+#
+# Producción (Render + Neon):
+# https://analisisdelcontribuyente.onrender.com/api/auth-users
 # tu-token-secreto-largo
+#
+# El portable descarga el listado cada ~2 min y lo guarda cifrado en LOCALAPPDATA.
+# No hace falta auth_users.json en claro.

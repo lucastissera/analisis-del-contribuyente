@@ -43,6 +43,8 @@
         --np-border: #2e9e6b;
         --ap-bg: #fff3e6;
         --ap-border: #e65100;
+        --vl-bg: #fff8e1;
+        --vl-border: #f9a825;
         --admin-bg: #eef6ff;
         --admin-border: #1565c0;
       }
@@ -62,6 +64,8 @@
         --np-border: #3fae7a;
         --ap-bg: #2a1f14;
         --ap-border: #ff9800;
+        --vl-bg: #2a2414;
+        --vl-border: #ffb300;
         --admin-bg: #16243a;
         --admin-border: #3d7dd9;
       }
@@ -107,6 +111,16 @@
         font-size: 2.8rem;
         line-height: 1;
       }
+      .boton-grande .icono.vl-iconos {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+        justify-content: center;
+      }
+      .boton-grande .icono.vl-iconos span {
+        font-size: 2.4rem;
+        line-height: 1;
+      }
       .boton-grande .titulo {
         font-size: 1.35rem;
         font-weight: bold;
@@ -132,6 +146,10 @@
         background: var(--ap-bg);
         border-color: var(--ap-border);
       }
+      .boton-vl {
+        background: var(--vl-bg);
+        border-color: var(--vl-border);
+      }
       .boton-admin {
         background: var(--admin-bg);
         border-color: var(--admin-border);
@@ -156,6 +174,11 @@
           <span class="icono" aria-hidden="true">&#9993;</span>
           <span class="titulo">{{ t('inicio_btn_dfe') }}</span>
           <span class="desc">{{ t('inicio_btn_dfe_desc') }}</span>
+        </a>
+        <a class="boton-grande boton-vl" href="{{ url_for('ventas_liquidaciones') }}">
+          <span class="icono vl-iconos" aria-hidden="true"><span>&#127806;</span><span>&#128004;</span></span>
+          <span class="titulo">{{ t('inicio_btn_vl') }}</span>
+          <span class="desc">{{ t('inicio_btn_vl_desc') }}</span>
         </a>
         <a class="boton-grande boton-np" href="{{ url_for('nuestra_parte') }}">
           <span class="icono" aria-hidden="true">&#128196;</span>

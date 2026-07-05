@@ -334,6 +334,8 @@
         <p class="error" id="form-error" style="display: none"></p>
         <div class="acciones acciones-form">
           <button type="submit" class="btn-principal" id="btn-enviar">{{ t('np_submit') }}</button>
+          {% set input_id = 'np-ver-navegador' %}
+          {% include 'partials/btn_ver_navegador.html' %}
           <button type="button" class="btn-peligro" id="np-btn-limpiar-datos">{{ t('btn_limpiar_datos') }}</button>
         </div>
       </form>
@@ -357,6 +359,7 @@
     <script src="{{ url_for('static', filename='carpeta_web_sync.js') }}"></script>
     <script src="{{ url_for('static', filename='cancelar_descarga.js') }}"></script>
     <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
+    <script src="{{ url_for('static', filename='navegador_vivo.js') }}"></script>
     <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
     <script>
