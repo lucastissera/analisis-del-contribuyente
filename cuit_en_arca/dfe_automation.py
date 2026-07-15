@@ -715,15 +715,30 @@ def _popup_dfe_abierto(ve) -> bool:
             ve.evaluate(
                 """
                 () => {
-                  if (document.body.classList.contains('modal-open')) return true;
-                  for (const id of [
-                    'dfeModal___BV_modal_outer_',
-                    'tieneOficioModal___BV_modal_outer_',
-                  ]) {
-                    const el = document.getElementById(id);
-                    if (!el) continue;
-                    const s = window.getComputedStyle(el);
-                    if (s.display !== 'none' && s.visibility !== 'hidden') return true;
+                  const visible = (el) => {
+                    if (!el || !el.isConnected) return false;
+                    for (
+                      let actual = el;
+                      actual && actual.nodeType === Node.ELEMENT_NODE;
+                      actual = actual.parentElement
+                    ) {
+                      const s = window.getComputedStyle(actual);
+                      if (
+                        s.display === 'none' ||
+                        s.visibility === 'hidden' ||
+                        s.visibility === 'collapse'
+                      ) return false;
+                    }
+                    const r = el.getBoundingClientRect();
+                    return el.getClientRects().length > 0 && r.width > 0 && r.height > 0;
+                  };
+                  for (const el of document.querySelectorAll([
+                    '#dfeModal___BV_modal_footer_',
+                    '#tieneOficioModal___BV_modal_footer_',
+                    '.modal.show',
+                    '[role="dialog"][aria-modal="true"]',
+                  ].join(','))) {
+                    if (visible(el)) return true;
                   }
                   return false;
                 }
@@ -745,6 +760,23 @@ def _cerrar_popups_dfe_js(ve, on_log=None) -> bool:
                 .toLowerCase()
                 .normalize('NFD')
                 .replace(/[\\u0300-\\u036f]/g, '');
+              const visible = (el) => {
+                if (!el || !el.isConnected) return false;
+                for (
+                  let actual = el;
+                  actual && actual.nodeType === Node.ELEMENT_NODE;
+                  actual = actual.parentElement
+                ) {
+                  const s = window.getComputedStyle(actual);
+                  if (
+                    s.display === 'none' ||
+                    s.visibility === 'hidden' ||
+                    s.visibility === 'collapse'
+                  ) return false;
+                }
+                const r = el.getBoundingClientRect();
+                return el.getClientRects().length > 0 && r.width > 0 && r.height > 0;
+              };
               const targets = [
                 {
                   footer: 'tieneOficioModal___BV_modal_footer_',
@@ -757,30 +789,37 @@ def _cerrar_popups_dfe_js(ve, on_log=None) -> bool:
               ];
               for (const { footer, words } of targets) {
                 const foot = document.getElementById(footer);
-                if (!foot) continue;
+                if (!visible(foot)) continue;
                 for (const btn of foot.querySelectorAll('button, a')) {
                   const t = norm(btn.innerText || btn.textContent || '');
-                  if (words.some((w) => t.includes(norm(w)))) {
+                  if (
+                    visible(btn) &&
+                    !btn.disabled &&
+                    words.some((w) => t.includes(norm(w)))
+                  ) {
                     btn.click();
                     return { ok: true, modal: footer, btn: t };
                   }
                 }
               }
-              if (document.body.classList.contains('modal-open')) {
-                for (const foot of document.querySelectorAll(
-                  '[id$="___BV_modal_footer_"]'
-                )) {
-                  for (const btn of foot.querySelectorAll('button')) {
-                    const t = norm(btn.innerText || btn.textContent || '');
-                    if (
+              for (const foot of document.querySelectorAll(
+                '[id$="___BV_modal_footer_"]'
+              )) {
+                if (!visible(foot)) continue;
+                for (const btn of foot.querySelectorAll('button')) {
+                  const t = norm(btn.innerText || btn.textContent || '');
+                  if (
+                    visible(btn) &&
+                    !btn.disabled &&
+                    (
                       t === 'cerrar' ||
                       t === 'entendido' ||
                       t === 'aceptar' ||
                       t.includes('recordar')
-                    ) {
-                      btn.click();
-                      return { ok: true, modal: foot.id || 'modal', btn: t };
-                    }
+                    )
+                  ) {
+                    btn.click();
+                    return { ok: true, modal: foot.id || 'modal', btn: t };
                   }
                 }
               }
@@ -811,9 +850,9 @@ def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
     ):
         try:
             footer = ve.locator(f"#{footer_id}")
-            if not footer.count():
+            if not footer.count() or not footer.is_visible(timeout=800):
                 continue
-            btn = footer.locator("button").filter(has_text=patron).first
+            btn = footer.locator("button:visible").filter(has_text=patron).first
             if btn.count():
                 try:
                     btn.click(force=True, timeout=4000)
@@ -827,8 +866,10 @@ def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
 
     try:
         modal = ve.locator("#tieneOficioModal___BV_modal_outer_, #tieneOficioModal")
-        if modal.count():
-            btn = ve.locator("#tieneOficioModal___BV_modal_footer_ button").filter(
+        if modal.count() and modal.first.is_visible(timeout=800):
+            btn = ve.locator(
+                "#tieneOficioModal___BV_modal_footer_ button:visible"
+            ).filter(
                 has_text=re.compile(r"cerrar", re.I)
             )
             if btn.count():
@@ -843,7 +884,7 @@ def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
         pass
 
     try:
-        btn = ve.locator("#dfeModal___BV_modal_footer_ button").filter(
+        btn = ve.locator("#dfeModal___BV_modal_footer_ button:visible").filter(
             has_text=re.compile(r"recordar", re.I)
         )
         if btn.count():
@@ -873,7 +914,8 @@ def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
     if _popup_dfe_abierto(ve):
         try:
             btn = ve.locator(
-                '[id$="___BV_modal_footer_"] button, .modal.show footer button'
+                '[id$="___BV_modal_footer_"] button:visible, '
+                ".modal.show footer button:visible"
             ).filter(has_text=re.compile(r"cerrar|entendido|aceptar|recordar", re.I))
             if btn.count():
                 try:
