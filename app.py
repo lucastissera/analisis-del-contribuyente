@@ -422,6 +422,8 @@ def _session_idle_and_login():
         "desktop_quit",
         "logout",
         "api_auth_users",
+        "api_cupo_info",
+        "api_cupo_consumir",
         "api_estado_altas",
         "solicitar_acceso",
         "activar_cuenta",
