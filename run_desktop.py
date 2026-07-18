@@ -203,6 +203,29 @@ def _abrir_interfaz(url: str) -> None:
         pass
 
 
+def _servidor_listo(port: int, *, intentos: int = 120) -> bool:
+    """True cuando el servidor Flask ya acepta conexiones en el puerto."""
+    import time
+
+    for _ in range(intentos):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def _cargar_aplicacion(resultado: dict) -> None:
+    try:
+        from app import app as flask_app
+
+        resultado["app"] = flask_app
+    except Exception as exc:
+        resultado["error"] = exc
+        resultado["traceback"] = traceback.format_exc()
+
+
 def main() -> None:
     # Modo selector de carpeta: el propio .exe se relanza con MC_PICK_FOLDER=1
     # para mostrar el diálogo nativo (Tkinter) y devolver la ruta por archivo.
@@ -214,6 +237,17 @@ def main() -> None:
         except Exception:
             pass
         return
+
+    frozen = bool(getattr(sys, "frozen", False))
+    splash = None
+    if frozen:
+        try:
+            from splash_desktop import SplashInicio
+
+            splash = SplashInicio()
+            splash.actualizar()
+        except Exception as exc:
+            _escribir_log(f"No se pudo mostrar pantalla de inicio: {exc}")
 
     os.environ.setdefault("ENABLE_LOCAL_PLANTILLAS_IMPUTACION", "1")
     try:
@@ -237,6 +271,24 @@ def main() -> None:
     url = f"http://127.0.0.1:{port}/"
 
     if not _puerto_disponible(port):
+        import time
+        import urllib.error
+        import urllib.request
+
+        try:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/desktop-quit", timeout=3
+            )
+            for _ in range(40):
+                if _puerto_disponible(port):
+                    break
+                time.sleep(0.15)
+        except (urllib.error.URLError, OSError, TimeoutError):
+            pass
+
+    if not _puerto_disponible(port):
+        if splash is not None:
+            splash.cerrar()
         _avisar_usuario(
             APP_NAME,
             f"La aplicación ya está en ejecución o el puerto {port} está ocupado.\n\n"
@@ -246,18 +298,74 @@ def main() -> None:
         )
         return
 
-    try:
-        from app import app
-    except Exception as exc:
+    resultado: dict = {}
+    cargador = threading.Thread(
+        target=_cargar_aplicacion,
+        args=(resultado,),
+        daemon=True,
+    )
+    cargador.start()
+    while cargador.is_alive():
+        if splash is not None:
+            splash.actualizar()
+        else:
+            threading.Event().wait(0.05)
+
+    if resultado.get("error"):
+        if splash is not None:
+            splash.cerrar()
+        exc = resultado["error"]
         _avisar_usuario(
             f"{APP_NAME} — error al iniciar",
             f"No se pudo cargar la aplicación:\n{exc}\n\n"
             f"Detalle en: {_directorio_log() / APP_LOG_FILENAME}",
         )
-        _escribir_log(traceback.format_exc())
+        _escribir_log(resultado.get("traceback") or traceback.format_exc())
         return
 
-    threading.Timer(2.0, lambda: _abrir_interfaz(url)).start()
+    app = resultado["app"]
+    if app is None:
+        if splash is not None:
+            splash.cerrar()
+        _avisar_usuario(
+            f"{APP_NAME} — error al iniciar",
+            "No se pudo cargar la aplicación.\n\n"
+            f"Detalle en: {_directorio_log() / APP_LOG_FILENAME}",
+        )
+        return
+
+    def _ejecutar_servidor() -> None:
+        try:
+            app.run(
+                host="127.0.0.1",
+                port=port,
+                debug=False,
+                use_reloader=False,
+                threaded=True,
+            )
+        except Exception:
+            _escribir_log(traceback.format_exc())
+            _avisar_usuario(
+                f"{APP_NAME} — error",
+                f"El servidor se detuvo. Ver {_directorio_log() / APP_LOG_FILENAME}",
+            )
+            raise
+
+    servidor = threading.Thread(target=_ejecutar_servidor, daemon=False)
+    servidor.start()
+
+    while not _servidor_listo(port):
+        if splash is not None:
+            splash.actualizar()
+        elif not servidor.is_alive():
+            break
+        else:
+            threading.Event().wait(0.08)
+
+    if splash is not None:
+        splash.cerrar()
+
+    _abrir_interfaz(url)
 
     try:
         from cuit_en_arca.analisis_programado import iniciar_scheduler
@@ -266,7 +374,7 @@ def main() -> None:
     except Exception:
         pass
 
-    if not getattr(sys, "frozen", False):
+    if not frozen:
         print(
             f"\n  {APP_NAME} — análisis local\n"
             f"  Interfaz: {url}\n"
@@ -275,15 +383,7 @@ def main() -> None:
             flush=True,
         )
 
-    try:
-        app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
-    except Exception:
-        _escribir_log(traceback.format_exc())
-        _avisar_usuario(
-            f"{APP_NAME} — error",
-            f"El servidor se detuvo. Ver {_directorio_log() / APP_LOG_FILENAME}",
-        )
-        raise
+    servidor.join()
 
 
 if __name__ == "__main__":

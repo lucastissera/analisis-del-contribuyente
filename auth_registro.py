@@ -66,6 +66,74 @@ _STORE_FILES: dict[str, str] = {
     "altas_completadas": "altas_completadas.json",
 }
 
+_integridad_store_ok: bool | None = None
+_integridad_store_motivo: str = ""
+_ultimo_error_cupo: str = ""
+
+
+def ultimo_error_cupo() -> str:
+    return _ultimo_error_cupo
+
+
+def _set_error_cupo(msg: str) -> None:
+    global _ultimo_error_cupo
+    _ultimo_error_cupo = (msg or "").strip()
+
+
+def _portable_store_cifrado() -> bool:
+    """Portable sin PostgreSQL local: stores en ``.enc`` (integridad + ofuscación)."""
+    if (os.environ.get("AUTH_STORE_ENCRYPT") or "").strip().lower() in (
+        "1",
+        "true",
+        "si",
+        "sí",
+        "yes",
+    ):
+        return True
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        from auth_registro_db import enabled
+
+        return not enabled()
+    except Exception:
+        return True
+
+
+def motivo_integridad_store() -> str:
+    return _integridad_store_motivo
+
+
+def integridad_store_local_ok() -> bool:
+    global _integridad_store_ok
+    if _integridad_store_ok is None:
+        _integridad_store_ok = verificar_integridad_stores_locales()
+    return bool(_integridad_store_ok)
+
+
+def _marcar_integridad_fallida(motivo: str) -> None:
+    global _integridad_store_ok, _integridad_store_motivo
+    _integridad_store_ok = False
+    _integridad_store_motivo = (motivo or "").strip()
+
+
+def verificar_integridad_stores_locales() -> bool:
+    """True si los ``.enc`` locales existentes son íntegros (portable)."""
+    if not _portable_store_cifrado():
+        return True
+    from auth_crypto import AuthStoreCorruptError, ruta_store_cifrado, verificar_integridad_archivo
+
+    for name in _STORE_FILES:
+        json_path = _disk_path(name)
+        enc_path = ruta_store_cifrado(json_path)
+        if enc_path.is_file() and not verificar_integridad_archivo(enc_path):
+            _marcar_integridad_fallida(
+                f"Archivo local alterado o dañado: {enc_path.name}. "
+                "El sistema no puede continuar."
+            )
+            return False
+    return True
+
 
 def _disk_path(name: str) -> Path:
     filename = _STORE_FILES.get(name)
@@ -153,7 +221,9 @@ def info_cupo_cuit(username: str) -> dict[str, Any] | None:
     u_raw = (username or "").strip()
     if not u_raw or es_administrador(u_raw):
         return None
-    u = resolver_clave_overlay(u_raw) or normalizar_cuit(u_raw) or u_raw
+    u = resolver_clave_usuario_overlay(u_raw)
+    if not u:
+        return None
     meta = cargar_usuarios_overlay().get(u)
     if not isinstance(meta, dict) or meta_es_admin(meta):
         return None
@@ -170,29 +240,117 @@ def info_cupo_cuit(username: str) -> dict[str, Any] | None:
 
 
 def cupo_cuit_disponible(username: str) -> int:
-    info = info_cupo_cuit(username)
+    u_raw = (username or "").strip()
+    if not u_raw:
+        return 0
+    u = resolver_clave_usuario_overlay(u_raw) or u_raw
+    try:
+        from auth_registro_db import enabled
+
+        db = enabled()
+    except Exception:
+        db = False
+    if not db:
+        try:
+            from auth import _modo_remoto_activo
+
+            if _modo_remoto_activo():
+                remoto = info_cupo_cuit_remoto(u)
+                if remoto is not None:
+                    return int(remoto.get("cuit_disponibles", 0))
+        except Exception as exc:
+            _LOG.debug("Cupo remoto no disponible para %s: %s", u, exc)
+    info = info_cupo_cuit(u)
     if info is None:
         return 1_000_000_000
     return int(info["cuit_disponibles"])
 
 
+def refrescar_cupo_usuario_remoto(username: str) -> dict[str, Any] | None:
+    """Portable: consulta cupo en el servidor y actualiza caché local."""
+    u = resolver_clave_usuario_overlay((username or "").strip())
+    if not u:
+        return None
+    try:
+        from auth import _modo_remoto_activo
+
+        if _modo_remoto_activo():
+            remoto = info_cupo_cuit_remoto(u)
+            if remoto is not None:
+                return remoto
+    except Exception:
+        pass
+    return info_cupo_cuit(u)
+
+
 def consumir_cuit_exitoso(username: str, cantidad: int = 1) -> bool:
     from auth import es_administrador
 
+    _set_error_cupo("")
     if cantidad < 1:
         return True
     u_raw = (username or "").strip()
     if not u_raw or es_administrador(u_raw):
         return True
-    u = resolver_clave_overlay(u_raw)
-    if not u:
+    u = resolver_clave_usuario_overlay(u_raw) or u_raw
+
+    try:
+        from auth_registro_db import enabled
+    except Exception:
+        enabled = lambda: False  # type: ignore[misc, assignment]
+
+    if enabled():
+        return _consumir_cuit_overlay_local(u, cantidad)
+
+    try:
+        from auth import _modo_remoto_activo
+
+        remoto = _modo_remoto_activo()
+    except Exception:
+        remoto = False
+
+    if remoto:
+        ok = _consumir_cuit_remoto(u, cantidad)
+        if not ok and not _ultimo_error_cupo:
+            _set_error_cupo(
+                "No se pudo registrar el cupo en el servidor. "
+                "Revise auth_remote.txt (URL + token) y la conexión a Internet."
+            )
+        return ok
+
+    ok = _consumir_cuit_overlay_local(u, cantidad)
+    if not ok:
+        _set_error_cupo(
+            f"No se encontró el usuario {u!r} en datos locales de cupo. "
+            "Configure auth_remote.txt junto al .exe para sincronizar con el servidor."
+        )
+    return ok
+
+
+def _consumir_cuit_overlay_local(username: str, cantidad: int = 1) -> bool:
+    """Incrementa ``cuit_usados`` en usuarios_registrados (PostgreSQL o JSON local)."""
+    from auth import es_administrador
+
+    u_raw = (username or "").strip()
+    if not u_raw or es_administrador(u_raw):
         return True
+    u = resolver_clave_usuario_overlay(u_raw)
+    if not u:
+        _LOG.warning(
+            "Cupo no actualizado: no se encontró %r en usuarios_registrados.",
+            u_raw,
+        )
+        return False
     with _lock:
-        path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
-            return True
+            _LOG.warning(
+                "Cupo no actualizado: clave overlay %r (desde %r) ausente en el store.",
+                u,
+                u_raw,
+            )
+            return False
         meta = users[u]
         if not isinstance(meta, dict) or meta_es_admin(meta):
             return True
@@ -201,9 +359,188 @@ def consumir_cuit_exitoso(username: str, cantidad: int = 1) -> bool:
             return False
         meta["cuit_usados"] = usados + cantidad
         meta["cuit_limite"] = limite
-        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _write_store("usuarios_registrados", overlay, path)
+        _guardar_overlay_completo(overlay)
+    _LOG.info(
+        "Cupo CUIT actualizado: %s → %d/%d usados.",
+        u,
+        usados + cantidad,
+        limite,
+    )
     return True
+
+
+def _base_api_remota() -> str:
+    try:
+        from auth import _remote_url
+
+        raw = (_remote_url() or "").strip().rstrip("/")
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    if raw.endswith("/api/auth-users"):
+        return raw[: -len("/api/auth-users")]
+    if "/api/" in raw:
+        return raw.rsplit("/api/", 1)[0]
+    return raw
+
+
+def _url_api_cupo_remota() -> str:
+    base = _base_api_remota()
+    return f"{base}/api/cupo/consumir" if base else ""
+
+
+def _url_api_cupo_info_remota() -> str:
+    base = _base_api_remota()
+    return f"{base}/api/cupo/info" if base else ""
+
+
+def info_cupo_cuit_remoto(username: str) -> dict[str, Any] | None:
+    """Consulta cupo autoritativo en Render/Neon (portables con token)."""
+    import json
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    try:
+        from auth import _remote_token
+    except Exception:
+        return None
+
+    url_base = _url_api_cupo_info_remota()
+    token = (_remote_token() or "").strip()
+    u_raw = (username or "").strip()
+    u = resolver_clave_usuario_overlay(u_raw) or u_raw
+    if not url_base or not token or not u:
+        return None
+    url = f"{url_base}?usuario={quote(u)}"
+    req = Request(
+        url,
+        method="GET",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    import ssl
+
+    ctx = ssl.create_default_context()
+    try:
+        with urlopen(req, timeout=20, context=ctx) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not payload.get("ok"):
+            return None
+        info = {
+            "cuit_limite": payload.get("cuit_limite"),
+            "cuit_usados": payload.get("cuit_usados"),
+            "cuit_disponibles": payload.get("cuit_disponibles"),
+            "cuit_ilimitado": payload.get("cuit_ilimitado", False),
+        }
+        if info.get("cuit_disponibles") is not None:
+            _aplicar_cupo_local_desde_servidor(
+                u,
+                int(payload.get("cuit_usados") or 0),
+            )
+        return info
+    except HTTPError as exc:
+        _LOG.warning("Cupo info remoto HTTP %s para %s", exc.code, u)
+        return None
+    except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        _LOG.debug("Cupo info remoto no disponible para %s: %s", u, exc)
+        return None
+
+
+def _aplicar_cupo_local_desde_servidor(username: str, cuit_usados: int) -> None:
+    """Refleja en overlay local el contador devuelto por /api/cupo/consumir."""
+    u = resolver_clave_usuario_overlay(username)
+    if not u:
+        return
+    try:
+        usados = max(0, min(int(cuit_usados), 1_000_000))
+    except (TypeError, ValueError):
+        return
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return
+        meta = users[u]
+        if not isinstance(meta, dict):
+            return
+        limite, _ = _leer_cupo_meta(meta)
+        meta["cuit_usados"] = usados
+        meta["cuit_limite"] = limite
+        _guardar_overlay_completo(overlay)
+
+
+def _consumir_cuit_remoto(username: str, cantidad: int = 1) -> bool:
+    """Portable sin DATABASE_URL: registra el consumo en el servidor (Neon vía Render)."""
+    import json
+    import ssl
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    try:
+        from auth import _remote_token
+    except Exception:
+        _set_error_cupo("Sync remoto no configurado.")
+        return False
+
+    url = _url_api_cupo_remota()
+    token = (_remote_token() or "").strip()
+    u_raw = (username or "").strip()
+    if not url:
+        _set_error_cupo("Falta la URL del servidor en auth_remote.txt.")
+        return False
+    if not token:
+        _set_error_cupo("Falta el token en auth_remote.txt (2.ª línea).")
+        return False
+    if not u_raw:
+        _set_error_cupo("Usuario de cupo vacío.")
+        return False
+    body = json.dumps(
+        {"usuario": u_raw, "cantidad": max(1, int(cantidad))},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    ctx = ssl.create_default_context()
+    try:
+        with urlopen(req, timeout=25, context=ctx) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            if payload.get("ok"):
+                _LOG.info("Cupo CUIT registrado en servidor para %s.", u_raw)
+                usados = payload.get("cuit_usados")
+                if usados is not None:
+                    _aplicar_cupo_local_desde_servidor(u_raw, int(usados))
+                return True
+            det = str(payload.get("error") or "respuesta_invalida")
+            _set_error_cupo(f"Servidor rechazó el cupo: {det}")
+            return False
+    except HTTPError as exc:
+        det = ""
+        try:
+            det = exc.read().decode("utf-8", errors="replace")[:240]
+        except Exception:
+            pass
+        msg = det or exc.reason or str(exc.code)
+        _set_error_cupo(f"HTTP {exc.code} al registrar cupo: {msg}")
+        _LOG.warning(
+            "Cupo remoto HTTP %s para %s (%s): %s",
+            exc.code,
+            u_raw,
+            url,
+            msg,
+        )
+        return False
+    except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        _set_error_cupo(f"Sin conexión al servidor de cupo: {exc}")
+        _LOG.warning("Cupo remoto no disponible para %s: %s", u_raw, exc)
+        return False
 
 
 def control_cupo_cuit(username: str | None):
@@ -219,12 +556,18 @@ def control_cupo_cuit(username: str | None):
 
     if es_administrador(u):
         return None, None
+    if info_cupo_cuit(u) is None:
+        return None, None
 
     def hay_cupo() -> bool:
         return cupo_cuit_disponible(u) > 0
 
     def on_exitoso() -> None:
-        consumir_cuit_exitoso(u)
+        if not consumir_cuit_exitoso(u):
+            _LOG.warning(
+                "Cupo no actualizado para %s: límite alcanzado o persistencia fallida.",
+                u,
+            )
 
     return hay_cupo, on_exitoso
 
@@ -280,6 +623,27 @@ def resolver_clave_overlay(val: str) -> str | None:
     u = normalizar_cuit(raw)
     if u and u in overlay:
         return u
+    raw_lower = raw.lower()
+    for clave in overlay:
+        if clave.lower() == raw_lower:
+            return clave
+    return None
+
+
+def resolver_clave_usuario_overlay(val: str) -> str | None:
+    """Clave overlay para cupo/uso (misma resolución que lectura y consumo)."""
+    raw = (val or "").strip()
+    if not raw:
+        return None
+    clave = resolver_clave_overlay(raw)
+    if clave:
+        return clave
+    overlay = cargar_usuarios_overlay()
+    nu = normalizar_cuit(raw)
+    if nu and nu in overlay:
+        return nu
+    if raw in overlay:
+        return raw
     return None
 
 
@@ -442,7 +806,17 @@ def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
         _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
         if db:
             return default
-    return _leer_json(_resolve_store_path(name, path), default)
+    json_path = _resolve_store_path(name, path)
+    if _portable_store_cifrado():
+        from auth_crypto import AuthStoreCorruptError, leer_store_secreto, ruta_store_cifrado
+
+        enc_path = ruta_store_cifrado(json_path)
+        try:
+            return leer_store_secreto(enc_path, json_path, default)
+        except AuthStoreCorruptError as exc:
+            _marcar_integridad_fallida(str(exc))
+            raise
+    return _leer_json(json_path, default)
 
 
 def _write_store(name: str, data: Any, path: Path | None = None) -> None:
@@ -462,7 +836,15 @@ def _write_store(name: str, data: Any, path: Path | None = None) -> None:
                 "Revisá la conexión Neon en Render."
             ) from exc
         _LOG.warning("Escritura en disco local como respaldo (%s)", name)
-    _escribir_json(_resolve_store_path(name, path), data)
+    json_path = _resolve_store_path(name, path)
+    if _portable_store_cifrado():
+        from auth_crypto import escribir_store_secreto, ruta_store_cifrado
+
+        if not isinstance(data, dict):
+            raise TypeError(f"store {name} debe ser dict")
+        escribir_store_secreto(ruta_store_cifrado(json_path), data)
+        return
+    _escribir_json(json_path, data)
 
 
 def hash_password(password: str) -> str:
@@ -784,8 +1166,7 @@ def crear_usuario_admin(
 
     ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with _lock:
-        path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict):
             overlay["users"] = {}
@@ -805,8 +1186,7 @@ def crear_usuario_admin(
             "cuit_limite": _cuit_limite_default(),
             "cuit_usados": 0,
         }
-        overlay["updated_at"] = ahora
-        _write_store("usuarios_registrados", overlay, path)
+        _guardar_overlay_completo(overlay)
 
     return {
         "cuit": u,
@@ -1071,8 +1451,7 @@ def actualizar_cuit_limite(cuit: str, limite: int) -> bool:
     except (TypeError, ValueError):
         return False
     with _lock:
-        path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return False
@@ -1081,8 +1460,7 @@ def actualizar_cuit_limite(cuit: str, limite: int) -> bool:
             return False
         meta["cuit_limite"] = nuevo_limite
         _inicializar_cupo_meta(meta)
-        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _write_store("usuarios_registrados", overlay, path)
+        _guardar_overlay_completo(overlay)
     return True
 
 

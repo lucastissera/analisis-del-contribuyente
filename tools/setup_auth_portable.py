@@ -18,6 +18,7 @@ Sync Neon / Render (opcional):
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import shutil
 import sys
@@ -146,12 +147,22 @@ def main() -> int:
         return 0
 
     if not args.solo_remoto and not args.password:
-        print(
-            "ERROR: indicá la contraseña con --password o AUTH_ADMIN_PASSWORD.",
-            file=sys.stderr,
-        )
-        print('Ejemplo: set AUTH_ADMIN_PASSWORD=tu_clave && python tools/setup_auth_portable.py', file=sys.stderr)
-        return 1
+        try:
+            args.password = getpass.getpass("Contraseña del admin local: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nCancelado.", file=sys.stderr)
+            return 130
+        args.password = args.password.strip()
+        if not args.password:
+            print(
+                "ERROR: indicá la contraseña con --password o AUTH_ADMIN_PASSWORD.",
+                file=sys.stderr,
+            )
+            print(
+                'Ejemplo: set AUTH_ADMIN_PASSWORD=tu_clave && python tools/setup_auth_portable.py',
+                file=sys.stderr,
+            )
+            return 1
 
     print("Generando archivos de autenticación cifrados…")
 

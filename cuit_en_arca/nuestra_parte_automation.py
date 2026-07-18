@@ -1826,6 +1826,7 @@ def ejecutar_nuestra_parte_lote(
     sesion: SesionPlaywrightCompartida | None = None,
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
+    usuario_cupo: str | None = None,
     registrar_valor_np: Callable[[], None] | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) de «Nuestra Parte». Tolerante a errores."""
@@ -1841,7 +1842,7 @@ def ejecutar_nuestra_parte_lote(
     _log(on_log, f"Carpeta de destino: {base}")
     resumen_lote: list[dict] = []
 
-    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.cancelacion import confirmar_cupo_cuit_procesado, verificar_cancelacion
     from cuit_en_arca.errores import CancelacionUsuarioError
     from cuit_en_arca.sesion_playwright import (
         SesionPlaywrightCompartida,
@@ -1892,12 +1893,15 @@ def ejecutar_nuestra_parte_lote(
                     on_paso=on_paso,
                     sesion=con_sesion,
                 )
-                if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
-                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+                confirmar_cupo_cuit_procesado(
+                    on_cuit_exitoso,
+                    usuario_cupo=usuario_cupo,
+                    job_id=job_id,
+                    modo_ap=modo_ap,
+                    on_log=on_log,
+                )
                 if on_cuit_fin:
                     on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
-                if on_cuit_exitoso:
-                    on_cuit_exitoso()
                 if registrar_valor_np:
                     registrar_valor_np()
                 resumen_lote.append(

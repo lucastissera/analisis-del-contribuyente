@@ -1,15 +1,21 @@
 """Automatización Ventas y Liquidaciones — LPG / LSG / LSP hacienda (ARCA).
 
 Flujos:
-- **Granos:** Liquidación primaria de granos → primarias y secundarias recibidas.
+- **Granos:** Liquidación primaria de granos → primarias y secundarias (recibidas y emitidas).
+- **Certificados de depósito:** proceso independiente (como depositante), opcional aparte de granos.
 - **Hacienda:** Comprobantes en línea → Hacienda y Carne → por emisor y por receptor
   (100 comprobantes por hoja, paginación completa).
 
-Si se eligen granos y hacienda, se procesan **en serie** con login y pestañas
-independientes (primero granos, después hacienda), para no mezclar servicios en ARCA.
+Carpetas por contribuyente (granos):
+  ``Primarias/Recibidas``, ``Secundarias/Recibidas``, ``Secundarias/Emitidas``,
+  ``Certificados de depósito``.
+
+Cada proceso elegido se ejecuta **en serie** con login y pestañas independientes.
 
 Grabación hacienda: ``build/vl_grabacion/20260704_230138``, ``20260704_233832`` (CERRAR SESIÓN → Salir).
 Grabación granos: ``build/vl_grabacion/20260704_152152``.
+Grabación secundarias emitidas: ``build/vl_grabacion/20260706_170019``.
+Grabación certificados de depósito: ``build/vl_grabacion/20260707_210655``.
 Manual: ``python tools/grabar_vl.py`` o ``explorar_vl.bat``.
 """
 
@@ -46,6 +52,7 @@ from cuit_en_arca.stealth import clic_humano, escribir_como_humano, pausa_humana
 
 VL_TERMINO_BUSQUEDA = "Liquidación primaria de granos"
 LSP_TERMINO_BUSQUEDA = "Comprobantes en línea"
+CARPETA_CERTIFICADOS_DEPOSITO = "Certificados de depósito"
 _VL_ESPERA_MS = 12_000
 _MENU_EMPRESA_RX = re.compile(
     r"liquidaci|consulta|men[uú]|terminar|volver|salir|ingresar",
@@ -515,6 +522,14 @@ def _ir_menu_principal(vl, on_log=None) -> None:
     raise AutomatizacionArcaError("No se encontró el enlace «Menú principal».")
 
 
+def _ir_menu_principal_opcional(vl, on_log=None) -> None:
+    """Vuelve al menú del contribuyente si existe; si no, sigue desde la pantalla actual."""
+    try:
+        _ir_menu_principal(vl, on_log)
+    except AutomatizacionArcaError:
+        _log(on_log, "Sin enlace «Menú principal»; se continúa desde el menú del contribuyente.")
+
+
 def _escribir_fecha_vl(campo, valor: date) -> None:
     texto = valor.strftime("%d/%m/%Y")
     escribir_como_humano(campo, texto)
@@ -657,6 +672,131 @@ def _link_pdf_grilla(vl, indice: int):
     return fila.locator("a").first
 
 
+def _fila_grilla(vl, indice: int):
+    return vl.locator(_SELECTOR_FILAS_GRILLA).nth(indice)
+
+
+def _fila_desde_link_pdf(link):
+    """Fila <tr> que contiene el enlace de descarga (evita desalinear índice link/fila)."""
+    return link.locator("xpath=ancestor::tr[1]")
+
+
+_JS_EXTRAER_COE_FILA = """(row) => {
+  const soloDigitos = (s) => (s || '').replace(/\\D/g, '');
+  const tds = [...row.querySelectorAll('td')];
+  const table = row.closest('table');
+
+  const coeValido = (v) => {
+    const d = soloDigitos(v);
+    return d.length >= 8 ? d : '';
+  };
+
+  if (table) {
+    const headerRows = [
+      ...table.querySelectorAll('tr.jig_header'),
+      ...table.querySelectorAll('thead tr'),
+    ];
+    for (const hr of headerRows) {
+      const headers = [...hr.querySelectorAll('th, td')];
+      for (let i = 0; i < headers.length; i++) {
+        const ht = (headers[i].innerText || '').trim().toLowerCase();
+        if (ht === 'coe' || ht.startsWith('coe') || ht.includes('coe')) {
+          if (tds[i]) {
+            const v = coeValido(tds[i].innerText || '');
+            if (v) return v;
+          }
+        }
+      }
+    }
+  }
+
+  for (const td of tds) {
+    const rotulos = td.querySelectorAll('.rotulo, .label, label, b, strong, span, div');
+    for (const r of rotulos) {
+      if (/^coe$/i.test((r.innerText || '').trim())) {
+        const v = coeValido(td.innerText || '');
+        if (v) return v;
+      }
+    }
+    const text = (td.innerText || '').trim();
+    if (/\\bcoe\\b/i.test(text)) {
+      const v = coeValido(text);
+      if (v) return v;
+    }
+  }
+
+  const full = row.innerText || '';
+  const mLabel = full.match(/\\bcoe\\b\\s*:?\\s*([\\d][\\d\\s.-]{6,22})/i);
+  if (mLabel) {
+    const v = coeValido(mLabel[1]);
+    if (v) return v;
+  }
+
+  const link = row.querySelector('a.usarManito, a.imprimir, a.usarManito.imprimir, a');
+  if (link) {
+    const blob = (link.getAttribute('onclick') || '') + ' ' + (link.getAttribute('href') || '');
+    const m = blob.match(/coe\\s*[=:]\\s*['"]?(\\d+)/i);
+    if (m && m[1].length >= 8) return m[1];
+    const nums = blob.match(/\\d{10,}/g);
+    if (nums && nums.length) return nums[nums.length - 1];
+  }
+
+  for (const td of tds) {
+    const d = soloDigitos(td.innerText || '');
+    if (d.length >= 10 && d.length <= 15) return d;
+  }
+  return '';
+}"""
+
+
+def _normalizar_coe(valor: str | None) -> str | None:
+    """COE de liquidación / certificado: solo dígitos (8+)."""
+    if not valor:
+        return None
+    digits = re.sub(r"\D", "", str(valor).strip())
+    if len(digits) >= 8:
+        return digits
+    return None
+
+
+def _extraer_coe_fila(fila) -> str | None:
+    """COE visible en la fila de la grilla (columna o rótulo «COE»)."""
+    try:
+        raw = fila.evaluate(_JS_EXTRAER_COE_FILA)
+    except Exception:
+        return None
+    coe = _normalizar_coe((raw or "").strip())
+    if not coe:
+        return None
+    return coe
+
+
+def _extraer_numero_comprobante_fila_granos(fila) -> str | None:
+    """Alias: nombre del PDF = COE de la fila en table#tabla4."""
+    return _extraer_coe_fila(fila)
+
+
+def _ruta_pdf_granos(
+    dest: Path,
+    numero_comprobante: str,
+    *,
+    prefijo: str,
+    fila: int,
+    seq: int,
+) -> Path:
+    base = _nombre_seguro(
+        f"{numero_comprobante}.pdf",
+        fallback=f"{prefijo}_{seq}.pdf",
+    )
+    if not base.lower().endswith(".pdf"):
+        base = f"{base}.pdf"
+    ruta = dest / base
+    if ruta.exists():
+        stem = _nombre_seguro(numero_comprobante, fallback=f"{prefijo}_{seq}")
+        ruta = dest / f"{stem}_{fila}.pdf"
+    return ruta
+
+
 def _esperar_grilla_liquidaciones(
     vl, on_log=None, *, timeout_ms: int = _VL_ESPERA_MS
 ) -> bool:
@@ -797,6 +937,7 @@ def _descargar_pdfs_grilla(
     *,
     prefijo: str = "liq",
     on_log=None,
+    offset: int = 0,
 ) -> list[str]:
     """Descarga todos los PDF visibles en table#tabla4 (columna Acción)."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -852,25 +993,38 @@ def _descargar_pdfs_grilla(
                 continue
             if not link.is_visible(timeout=3000):
                 link.scroll_into_view_if_needed(timeout=5000)
-            numero = descargados + 1
-            nombre = _nombre_seguro(
-                f"{prefijo}_{numero}.pdf",
-                fallback=f"{prefijo}_{numero}.pdf",
+            fila_loc = _fila_desde_link_pdf(link)
+            numero_comp = _extraer_coe_fila(fila_loc)
+            seq = descargados + 1 + offset
+            if not numero_comp:
+                numero_comp = f"{prefijo}_{seq}"
+                _log(
+                    on_log,
+                    f"  • No se leyó COE en fila {indice + 1}; se usa {numero_comp}.",
+                )
+            else:
+                _log(on_log, f"  • COE fila {indice + 1}: {numero_comp}")
+            ruta = _ruta_pdf_granos(
+                dest,
+                numero_comp,
+                prefijo=prefijo,
+                fila=indice,
+                seq=seq,
             )
-            ruta = dest / nombre
-            if ruta.exists():
-                ruta = dest / f"{prefijo}_{numero}_{intentos}.pdf"
             if _guardar_pdf_desde_click(vl, link, ruta, on_log, url_grilla=url_grilla):
                 guardados.append(str(ruta))
                 descargados += 1
                 fallos_seguidos = 0
-                _log(on_log, f"  • PDF ({prefijo}) {descargados}/{total_objetivo}: {ruta.name}")
+                _log(
+                    on_log,
+                    f"  • PDF ({prefijo}) {descargados}/{total_objetivo}: {ruta.name}",
+                )
                 _restaurar_vista_grilla(vl, url_grilla, on_log)
             else:
                 fallos_seguidos += 1
                 _log(
                     on_log,
-                    f"  • No se pudo descargar PDF {numero}/{total_objetivo} (fila {indice + 1}).",
+                    f"  • No se pudo descargar PDF {numero_comp} ({descargados + 1}/{total_objetivo}, fila {indice + 1}).",
                 )
                 _restaurar_vista_grilla(vl, url_grilla, on_log)
             pausa_humana(0.25, 0.5)
@@ -892,6 +1046,452 @@ def _descargar_pdfs_grilla(
             f"  • Descarga parcial ({prefijo}): {descargados} de {total_objetivo} PDF.",
         )
     return guardados
+
+
+def _establecer_registros_por_pagina_granos(
+    vl, n: int = 100, on_log=None
+) -> bool:
+    """Intenta mostrar 100 comprobantes por hoja en grillas LPG/LSG."""
+    candidatos = (
+        "select#cantPages",
+        "select[name*='cant' i]",
+        "select[name*='page' i]",
+        "select",
+    )
+    for sel in candidatos:
+        loc = vl.locator(sel).first
+        if not loc.count():
+            continue
+        try:
+            if not loc.is_visible(timeout=1500):
+                continue
+            actual = (loc.input_value() or "").strip()
+            if actual == str(n):
+                return True
+            opciones = loc.locator("option")
+            valores = []
+            for i in range(min(opciones.count(), 20)):
+                val = (opciones.nth(i).get_attribute("value") or "").strip()
+                if val:
+                    valores.append(val)
+            if str(n) in valores:
+                loc.select_option(str(n))
+            elif valores:
+                mejor = max(valores, key=lambda v: int(re.sub(r"\D", "", v) or "0"))
+                if int(re.sub(r"\D", "", mejor) or "0") >= n:
+                    loc.select_option(mejor)
+                else:
+                    continue
+            else:
+                continue
+            pausa_humana(0.8, 1.4)
+            try:
+                vl.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+            except Exception:
+                pass
+            _log(on_log, f"Grilla granos: {n} comprobantes por hoja.")
+            return True
+        except Exception as exc:
+            _log(on_log, f"  • No se pudo cambiar registros por página (granos): {exc}")
+    return False
+
+
+def _pagina_actual_granos(vl) -> int:
+    for loc in (
+        vl.locator("ul.pagination li.active a"),
+        vl.locator("table.pagination td.active, table.pagination span.active"),
+    ):
+        try:
+            if loc.count():
+                txt = (loc.first.inner_text(timeout=500) or "").strip()
+                if txt.isdigit():
+                    return int(txt)
+        except Exception:
+            continue
+    return 1
+
+
+def _paginas_visibles_granos(vl) -> list[int]:
+    paginas: list[int] = []
+    for loc in (
+        vl.locator("ul.pagination li a"),
+        vl.locator("table.pagination a"),
+        vl.locator("a").filter(has_text=re.compile(r"^\d{1,3}$")),
+    ):
+        try:
+            links = loc
+            for i in range(min(links.count(), 40)):
+                txt = (links.nth(i).inner_text(timeout=400) or "").strip()
+                if txt.isdigit():
+                    paginas.append(int(txt))
+        except Exception:
+            continue
+    return sorted(set(paginas)) or [_pagina_actual_granos(vl)]
+
+
+def _ir_pagina_granos(vl, num: int, on_log=None) -> None:
+    if _pagina_actual_granos(vl) == num:
+        return
+    for loc in (
+        vl.locator(f"ul.pagination a[href*='paginationFormSubmit({num})']"),
+        vl.locator("ul.pagination li a").filter(has_text=re.compile(rf"^{num}$")),
+        vl.locator("table.pagination a").filter(has_text=re.compile(rf"^{num}$")),
+        vl.get_by_role("link", name=re.compile(rf"^{num}$")),
+    ):
+        try:
+            if loc.count() and loc.first.is_visible(timeout=2500):
+                clic_humano(loc.first)
+                pausa_humana(0.8, 1.4)
+                try:
+                    vl.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+                except Exception:
+                    pass
+                _log(on_log, f"  • Página {num} de resultados (granos).")
+                return
+        except Exception:
+            continue
+    raise AutomatizacionArcaError(
+        f"No se pudo ir a la página {num} de resultados en liquidaciones de granos."
+    )
+
+
+def _descargar_pdfs_grilla_paginado(
+    vl,
+    dest: Path,
+    *,
+    prefijo: str,
+    on_log=None,
+) -> list[str]:
+    """100 comprobantes por hoja y recorrido de todas las páginas (LSG emitidas, etc.)."""
+    _establecer_registros_por_pagina_granos(vl, 100, on_log)
+    pausa_humana(0.5, 1.0)
+    guardados: list[str] = []
+    visitadas: set[int] = set()
+    rondas_sin_nuevas = 0
+
+    while rondas_sin_nuevas < 2:
+        paginas = _paginas_visibles_granos(vl)
+        pendientes = [p for p in paginas if p not in visitadas]
+        if not pendientes:
+            if not visitadas:
+                nuevos = _descargar_pdfs_grilla(
+                    vl, dest, prefijo=prefijo, on_log=on_log, offset=len(guardados)
+                )
+                guardados.extend(nuevos)
+            rondas_sin_nuevas += 1
+            continue
+        rondas_sin_nuevas = 0
+        for pag in sorted(pendientes):
+            try:
+                _ir_pagina_granos(vl, pag, on_log)
+            except AutomatizacionArcaError as exc:
+                if len(visitadas) == 0:
+                    _log(on_log, f"  • Sin paginación ({prefijo}): {exc}")
+                    nuevos = _descargar_pdfs_grilla(
+                        vl, dest, prefijo=prefijo, on_log=on_log, offset=len(guardados)
+                    )
+                    return nuevos
+                _log(on_log, f"  • Fin de paginación ({prefijo}): {exc}")
+                break
+            visitadas.add(pag)
+            nuevos = _descargar_pdfs_grilla(
+                vl,
+                dest,
+                prefijo=prefijo,
+                on_log=on_log,
+                offset=len(guardados),
+            )
+            guardados.extend(nuevos)
+        paginas_despues = _paginas_visibles_granos(vl)
+        if any(p not in visitadas for p in paginas_despues):
+            _log(on_log, "  • Nuevas hojas detectadas; se continúa la descarga.")
+            continue
+        rondas_sin_nuevas += 1
+
+    if not guardados:
+        _log(on_log, f"No hay PDF para descargar ({prefijo}).")
+    else:
+        _log(on_log, f"Total PDF ({prefijo}): {len(guardados)}.")
+    return guardados
+
+
+_SELECTOR_FILAS_JIG = (
+    "table.jig_table tbody tr.jig_impar, "
+    "table.jig_table tbody tr.jig_par, "
+    "table.jig_table tbody tr[class*='jig_']"
+)
+_SELECTOR_LINKS_PDF_JIG = "table.jig_table tbody tr a.usarManito.imprimir"
+
+
+def _locator_links_pdf_jig(vl):
+    return vl.locator(_SELECTOR_LINKS_PDF_JIG)
+
+
+def _contar_pdfs_tabla_jig(vl) -> int:
+    try:
+        n = _locator_links_pdf_jig(vl).count()
+        if n > 0:
+            return n
+    except Exception:
+        pass
+    filas = vl.locator(_SELECTOR_FILAS_JIG)
+    total = filas.count()
+    con_link = 0
+    for i in range(total):
+        fila = filas.nth(i)
+        try:
+            if fila.locator("a.usarManito.imprimir").count():
+                con_link += 1
+        except Exception:
+            continue
+    return con_link
+
+
+def _fila_jig(vl, indice: int):
+    return vl.locator(_SELECTOR_FILAS_JIG).nth(indice)
+
+
+def _link_pdf_jig(vl, indice: int):
+    links = _locator_links_pdf_jig(vl)
+    if links.count() > indice:
+        return links.nth(indice)
+    fila = _fila_jig(vl, indice)
+    link = fila.locator("a.usarManito.imprimir").first
+    if link.count():
+        return link
+    return fila.locator("a.imprimir").first
+
+
+def _extraer_coe_fila_jig(fila) -> str | None:
+    """COE del certificado de depósito (table.jig_table)."""
+    return _extraer_coe_fila(fila)
+
+
+def _esperar_tabla_jig(vl, on_log=None, *, timeout_ms: int = _VL_ESPERA_MS) -> bool:
+    limite = max(timeout_ms, 4000)
+    try:
+        vl.locator("table.jig_table").first.wait_for(state="visible", timeout=limite)
+        _locator_links_pdf_jig(vl).first.wait_for(state="attached", timeout=limite)
+    except Exception:
+        return False
+    pausa_humana(0.3, 0.6)
+    return _contar_pdfs_tabla_jig(vl) > 0
+
+
+def _restaurar_vista_tabla_jig(vl, url_grilla: str, on_log=None) -> bool:
+    for intento in range(5):
+        if _esperar_tabla_jig(vl, on_log, timeout_ms=_VL_ESPERA_MS):
+            return True
+        url_actual = vl.url or ""
+        try:
+            if url_grilla and url_actual and url_actual != url_grilla:
+                vl.go_back(wait_until="domcontentloaded", timeout=_VL_ESPERA_MS)
+            else:
+                vl.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+            pausa_humana(0.6, 1.1)
+        except Exception as exc:
+            _log(on_log, f"  • Reintentando volver a la grilla jig ({intento + 1}/5): {exc}")
+    return _esperar_tabla_jig(vl, on_log, timeout_ms=_VL_ESPERA_MS)
+
+
+def _descargar_pdfs_tabla_jig(
+    vl,
+    dest: Path,
+    *,
+    prefijo: str = "CDG",
+    on_log=None,
+    offset: int = 0,
+) -> list[str]:
+    """Descarga PDF desde table.jig_table (certificados de depósito)."""
+    dest.mkdir(parents=True, exist_ok=True)
+    guardados: list[str] = []
+
+    if not _esperar_tabla_jig(vl, on_log):
+        _log(on_log, f"No hay PDF para descargar ({prefijo}).")
+        return guardados
+
+    total_objetivo = _contar_pdfs_tabla_jig(vl)
+    if total_objetivo == 0:
+        _log(on_log, f"No hay PDF para descargar ({prefijo}).")
+        return guardados
+
+    url_grilla = vl.url or ""
+    _log(on_log, f"PDFs a descargar ({prefijo}): {total_objetivo}.")
+
+    descargados = 0
+    fallos_seguidos = 0
+    intentos = 0
+    max_intentos = max(total_objetivo * 4, 8)
+
+    while descargados < total_objetivo and intentos < max_intentos:
+        intentos += 1
+        if descargados > 0:
+            if not _restaurar_vista_tabla_jig(vl, url_grilla, on_log):
+                _log(
+                    on_log,
+                    f"  • No se pudo recuperar la grilla tras {descargados}/{total_objetivo} PDF.",
+                )
+                break
+        elif not _esperar_tabla_jig(vl, on_log):
+            _log(on_log, f"  • La grilla de resultados no está lista ({prefijo}).")
+            break
+
+        disponibles = _contar_pdfs_tabla_jig(vl)
+        indice = _indice_siguiente_descarga(descargados, total_objetivo, disponibles)
+        if indice < 0:
+            break
+
+        try:
+            link = _link_pdf_jig(vl, indice)
+            try:
+                if link.count() == 0:
+                    fallos_seguidos += 1
+                    _log(
+                        on_log,
+                        f"  • Sin enlace en fila {indice + 1} ({disponibles} visibles).",
+                    )
+                    continue
+            except Exception:
+                fallos_seguidos += 1
+                continue
+            if not link.is_visible(timeout=3000):
+                link.scroll_into_view_if_needed(timeout=5000)
+            fila_loc = _fila_desde_link_pdf(link)
+            numero_comp = _extraer_coe_fila_jig(fila_loc)
+            seq = descargados + 1 + offset
+            if not numero_comp:
+                numero_comp = f"{prefijo}_{seq}"
+                _log(
+                    on_log,
+                    f"  • No se leyó COE en fila {indice + 1}; se usa {numero_comp}.",
+                )
+            else:
+                _log(on_log, f"  • COE fila {indice + 1}: {numero_comp}")
+            ruta = _ruta_pdf_granos(
+                dest,
+                numero_comp,
+                prefijo=prefijo,
+                fila=indice,
+                seq=seq,
+            )
+            if _guardar_pdf_desde_click(vl, link, ruta, on_log, url_grilla=url_grilla):
+                guardados.append(str(ruta))
+                descargados += 1
+                fallos_seguidos = 0
+                _log(
+                    on_log,
+                    f"  • PDF ({prefijo}) {descargados}/{total_objetivo}: {ruta.name}",
+                )
+                _restaurar_vista_tabla_jig(vl, url_grilla, on_log)
+            else:
+                fallos_seguidos += 1
+                _log(
+                    on_log,
+                    f"  • No se pudo descargar PDF {numero_comp} ({descargados + 1}/{total_objetivo}, fila {indice + 1}).",
+                )
+                _restaurar_vista_tabla_jig(vl, url_grilla, on_log)
+            pausa_humana(0.25, 0.5)
+        except Exception as exc:
+            fallos_seguidos += 1
+            _log(on_log, f"  • Error descargando PDF {descargados + 1}/{total_objetivo}: {exc}")
+            _restaurar_vista_tabla_jig(vl, url_grilla, on_log)
+
+        if fallos_seguidos >= 3:
+            _log(
+                on_log,
+                f"  • Se detiene la descarga ({prefijo}) tras varios intentos fallidos.",
+            )
+            break
+
+    if descargados < total_objetivo and descargados > 0:
+        _log(
+            on_log,
+            f"  • Descarga parcial ({prefijo}): {descargados} de {total_objetivo} PDF.",
+        )
+    return guardados
+
+
+def _consultar_certificados_deposito_depositante(
+    vl, desde: date, hasta: date, on_log=None
+) -> None:
+    """Grabación 20260707_210655: tipo depositante + fechas + Consultar."""
+    sel = vl.locator("select#tipoConsulta").first
+    if not sel.count():
+        raise AutomatizacionArcaError(
+            "No se encontró el selector de tipo de consulta de certificados."
+        )
+    elegido = False
+    try:
+        sel.select_option(label="Certificados como Depositante")
+        elegido = True
+    except Exception:
+        try:
+            sel.select_option(
+                label=re.compile(r"certificados\s+como\s+depositante", re.I)
+            )
+            elegido = True
+        except Exception:
+            pass
+    if not elegido:
+        opciones = sel.locator("option")
+        for i in range(opciones.count()):
+            opt = opciones.nth(i)
+            txt = (opt.inner_text(timeout=400) or "").strip()
+            if re.fullmatch(r"certificados\s+como\s+depositante", txt, re.I):
+                val = opt.get_attribute("value")
+                if val:
+                    sel.select_option(value=val)
+                    elegido = True
+                    break
+    if not elegido:
+        raise AutomatizacionArcaError(
+            "No se pudo elegir «Certificados como Depositante» en el tipo de consulta."
+        )
+    pausa_humana(0.35, 0.7)
+    _log(on_log, "Tipo de consulta: Certificados como Depositante.")
+
+    di = vl.locator("#fechaDesde").first
+    dh = vl.locator("#fechaHasta").first
+    if not di.count() or not dh.count():
+        raise AutomatizacionArcaError(
+            "No se encontraron los campos de fecha para certificados de depósito."
+        )
+    _escribir_fecha_vl(di, desde)
+    _escribir_fecha_vl(dh, hasta)
+    _log(on_log, f"Rango certificados: {desde:%d/%m/%Y} – {hasta:%d/%m/%Y}.")
+
+    for loc in (
+        vl.locator("input[value='Consultar'], input[value='CONSULTAR']"),
+        vl.locator("input.usarManito.bordesRedondos.textoGris"),
+        vl.get_by_role("button", name=re.compile(r"^consultar$", re.I)),
+        vl.locator("input[type='submit'], input[type='button']").filter(
+            has_text=re.compile(r"^consultar$", re.I)
+        ),
+    ):
+        try:
+            candidato = loc.first
+            if candidato.count() and candidato.is_visible(timeout=3000):
+                txt = (candidato.get_attribute("value") or candidato.inner_text(timeout=400) or "").strip()
+                if txt and not re.fullmatch(r"consultar", txt, re.I):
+                    continue
+                clic_humano(candidato)
+                pausa_humana(0.6, 1.2)
+                try:
+                    vl.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+                except Exception:
+                    pass
+                _log(on_log, "Consulta ejecutada (Certificados de depósito).")
+                try:
+                    vl.wait_for_url(
+                        re.compile(r"consultarCertificadosEmitidos", re.I),
+                        timeout=_VL_ESPERA_MS,
+                    )
+                except Exception:
+                    pass
+                return
+        except Exception:
+            continue
+    raise AutomatizacionArcaError("No se encontró el botón «Consultar».")
 
 
 # --------------------------------------------------------------------------- #
@@ -1900,7 +2500,7 @@ def _procesar_liquidaciones_primarias(
     _click_input_menu(vl, r"consulta\s+liquidaciones\s+recibidas(?!\s+de)", on_log)
     _consultar_por_criterio(vl, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_grilla(vl, dest, prefijo="LPG", on_log=on_log)
+    return _descargar_pdfs_grilla(vl, dest, prefijo="LPG_R", on_log=on_log)
 
 
 def _procesar_liquidaciones_secundarias(
@@ -1915,7 +2515,43 @@ def _procesar_liquidaciones_secundarias(
     _click_input_menu(vl, r"consulta\s+de\s+liquidaciones\s+recibidas", on_log)
     _consultar_por_criterio(vl, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_grilla(vl, dest, prefijo="LSG", on_log=on_log)
+    return _descargar_pdfs_grilla(vl, dest, prefijo="LSG_R", on_log=on_log)
+
+
+def _procesar_liquidaciones_secundarias_emitidas(
+    vl,
+    dest: Path,
+    desde: date,
+    hasta: date,
+    on_log=None,
+) -> list[str]:
+    """Grabación 20260706_170019: secundaria → Consulta de Liquidaciones Emitidas."""
+    _ir_menu_principal(vl, on_log)
+    _click_input_menu(vl, r"liquidaci[oó]n\s+secundaria\s+de\s+granos", on_log)
+    _click_input_menu(vl, r"consulta\s+de\s+liquidaciones\s+emitidas", on_log)
+    _consultar_por_criterio(vl, desde, hasta, on_log)
+    pausa_humana(0.8, 1.4)
+    return _descargar_pdfs_grilla_paginado(vl, dest, prefijo="LSG_E", on_log=on_log)
+
+
+def _procesar_certificados_deposito(
+    vl,
+    dest: Path,
+    desde: date,
+    hasta: date,
+    on_log=None,
+) -> list[str]:
+    """Grabación 20260713_205858: certificación electrónica → certificados depositante."""
+    _ir_menu_principal_opcional(vl, on_log)
+    _click_input_menu(vl, r"certificaci[oó]n\s+electr[oó]nica\s+de\s+granos", on_log)
+    _click_input_menu(
+        vl,
+        r"consulta\s+de\s+certificados\s+de\s+dep[oó]?sito",
+        on_log,
+    )
+    _consultar_certificados_deposito_depositante(vl, desde, hasta, on_log)
+    pausa_humana(0.8, 1.4)
+    return _descargar_pdfs_tabla_jig(vl, dest, prefijo="CDG", on_log=on_log)
 
 
 def _fecha_de(texto: str) -> date | None:
@@ -2009,9 +2645,9 @@ def ejecutar_vl_cuit(
 
 
 def _orden_sistemas_vl(sistemas: list[str] | None) -> list[str]:
-    """Granos y hacienda nunca comparten sesión ARCA (uno termina, recién empieza el otro)."""
+    """Cada sistema usa sesión ARCA independiente (uno termina, recién empieza el otro)."""
     sis = sistemas or ["granos"]
-    return [s for s in ("granos", "hacienda") if s in sis]
+    return [s for s in ("granos", "certificados", "hacienda") if s in sis]
 
 
 def _login_vl(page, cred: CredencialesArca, on_log, paso) -> None:
@@ -2098,11 +2734,12 @@ def _ejecutar_vl_impl(
                     )
                     resultado.carpeta = str(carpeta_destino)
                     _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}")
-                    dest_prim = carpeta_destino / "Primarias"
-                    dest_sec = carpeta_destino / "Secundarias"
+                    dest_prim = carpeta_destino / "Primarias" / "Recibidas"
+                    dest_sec_rec = carpeta_destino / "Secundarias" / "Recibidas"
+                    dest_sec_emit = carpeta_destino / "Secundarias" / "Emitidas"
 
                     paso("consulta_prim", "en_curso")
-                    _log(on_log, "Liquidaciones primarias de granos…")
+                    _log(on_log, "Liquidaciones primarias recibidas…")
                     archivos_prim = _procesar_liquidaciones_primarias(
                         vl, dest_prim, fecha_desde, fecha_hasta, on_log
                     )
@@ -2110,13 +2747,51 @@ def _ejecutar_vl_impl(
                     paso("descargar_prim", "ok")
 
                     paso("consulta_sec", "en_curso")
-                    _log(on_log, "Liquidaciones secundarias de granos (Menú principal)…")
+                    _log(on_log, "Liquidaciones secundarias recibidas…")
                     archivos_sec = _procesar_liquidaciones_secundarias(
-                        vl, dest_sec, fecha_desde, fecha_hasta, on_log
+                        vl, dest_sec_rec, fecha_desde, fecha_hasta, on_log
                     )
                     paso("consulta_sec", "ok")
                     paso("descargar_sec", "ok")
-                    archivos.extend(archivos_prim + archivos_sec)
+
+                    paso("consulta_sec_emit", "en_curso")
+                    _log(on_log, "Liquidaciones secundarias emitidas…")
+                    archivos_sec_emit = _procesar_liquidaciones_secundarias_emitidas(
+                        vl, dest_sec_emit, fecha_desde, fecha_hasta, on_log
+                    )
+                    paso("consulta_sec_emit", "ok")
+                    paso("descargar_sec_emit", "ok")
+                    archivos.extend(archivos_prim + archivos_sec + archivos_sec_emit)
+
+                elif sistema == "certificados":
+                    paso("servicio_cert", "en_curso")
+                    _log(on_log, "Abriendo Liquidación primaria de granos (certificados)…")
+                    vl = _abrir_lpg(page)
+                    paso("servicio_cert", "ok")
+
+                    paso("contribuyente_cert", "en_curso")
+                    razon_cert = _seleccionar_contribuyente_lpg(vl, nombre_representado, on_log)
+                    razon = razon or razon_cert
+                    paso("contribuyente_cert", "ok")
+
+                    carpeta_destino = _renombrar_carpeta_cuit_vl(
+                        carpeta_destino,
+                        nombre_representado,
+                        razon_cert,
+                        fallback=cred.cuit_login,
+                    )
+                    resultado.carpeta = str(carpeta_destino)
+                    _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}")
+                    dest_cert_dep = carpeta_destino / CARPETA_CERTIFICADOS_DEPOSITO
+
+                    paso("consulta_cert_dep", "en_curso")
+                    _log(on_log, "Certificados de depósito (como depositante)…")
+                    archivos_cert = _procesar_certificados_deposito(
+                        vl, dest_cert_dep, fecha_desde, fecha_hasta, on_log
+                    )
+                    paso("consulta_cert_dep", "ok")
+                    paso("descargar_cert_dep", "ok")
+                    archivos.extend(archivos_cert)
 
                 elif sistema == "hacienda":
                     razon_hac, archivos_hac, carpeta_destino = _ejecutar_hacienda_vl(
@@ -2177,6 +2852,7 @@ def ejecutar_vl_lote(
     nombre_carpeta_sesion: str | None = None,
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
+    usuario_cupo: str | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
 ) -> Path:
     headless = _headless_desde_env() if headless is None else headless
@@ -2187,7 +2863,7 @@ def ejecutar_vl_lote(
     total = len(filas)
     _log(on_log, f"Carpeta de destino: {base}")
 
-    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.cancelacion import confirmar_cupo_cuit_procesado, verificar_cancelacion
     from cuit_en_arca.errores import CancelacionUsuarioError
     from cuit_en_arca.sesion_playwright import (
         SesionPlaywrightCompartida,
@@ -2241,12 +2917,14 @@ def ejecutar_vl_lote(
                     on_paso=on_paso,
                     sesion=con_sesion,
                 )
-                if job_id and not cupo_consumible_tras_cuit(job_id):
-                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+                confirmar_cupo_cuit_procesado(
+                    on_cuit_exitoso,
+                    usuario_cupo=usuario_cupo,
+                    job_id=job_id,
+                    on_log=on_log,
+                )
                 if on_cuit_fin:
                     on_cuit_fin(nombre_repr or cuit_log, res.razon_social, res.total_archivos, None)
-                if on_cuit_exitoso:
-                    on_cuit_exitoso()
             except CancelacionUsuarioError:
                 raise
             except Exception as exc:

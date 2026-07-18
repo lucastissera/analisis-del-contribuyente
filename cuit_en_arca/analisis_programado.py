@@ -411,6 +411,7 @@ def ejecutar_analisis_programado(
                             sesion=sesion,
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
+                            usuario_cupo=usuario_cupo or None,
                             registrar_valor_mc=registrar_valor_mc,
                         )
                         resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
@@ -457,6 +458,7 @@ def ejecutar_analisis_programado(
                             sesion=sesion,
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
+                            usuario_cupo=usuario_cupo or None,
                             registrar_valor_dfe=registrar_valor_dfe,
                         )
                         resultado["sistemas"]["dfe"]["carpeta"] = str(carpeta_dfe)
@@ -499,6 +501,7 @@ def ejecutar_analisis_programado(
                             sesion=sesion,
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
+                            usuario_cupo=usuario_cupo or None,
                             registrar_valor_np=registrar_valor_np,
                         )
                         resultado["sistemas"]["nuestra_parte"]["carpeta"] = str(carpeta_np)
@@ -544,6 +547,7 @@ def ejecutar_analisis_programado(
                             sesion=sesion,
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
+                            usuario_cupo=usuario_cupo or None,
                         )
                         resultado["sistemas"]["liquidaciones"]["carpeta"] = str(carpeta_vl)
                         marcar_paso_ap("liquidaciones", "ok")

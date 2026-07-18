@@ -1901,6 +1901,14 @@
           <a href="/descargar/{{ download_id }}">{{ t('download_adjusted', name=nombre_salida) }}</a>
         </p>
         {% endif %}
+        {% if apoc_txt_download_id %}
+        <p style="margin-top: 8px;">
+          <a href="/descargar/{{ apoc_txt_download_id }}">{{ t('download_apoc_txt', name=apoc_txt_nombre) }}</a>
+        </p>
+        {% endif %}
+        {% if advertencia_apoc %}
+        <p class="subtitulo-detalle" style="margin-top: 8px;">{{ advertencia_apoc }}</p>
+        {% endif %}
       </div>
       {% endif %}
 
@@ -1913,6 +1921,7 @@
     <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
     <script src="{{ url_for('static', filename='navegador_vivo.js') }}"></script>
     <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='log_autoscroll.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
     <script>
       (function () {
@@ -2302,8 +2311,12 @@
           }
           mostrarPasos(st.pasos);
           if (logBox && st.log && st.log.length) {
-            logBox.textContent = st.log.join("\n");
-            logBox.scrollTop = logBox.scrollHeight;
+            if (window.McLogAutoscroll) {
+              McLogAutoscroll.updateLog(logBox, st.log.join("\n"));
+            } else {
+              logBox.textContent = st.log.join("\n");
+              logBox.scrollTop = logBox.scrollHeight;
+            }
           }
         }
 
@@ -2395,7 +2408,10 @@
         form.addEventListener("submit", function (ev) {
           ev.preventDefault();
           if (resultado) resultado.innerHTML = "";
-          if (logBox) logBox.textContent = "";
+          if (logBox) {
+            if (window.McLogAutoscroll) McLogAutoscroll.updateLog(logBox, "", { forceStick: true });
+            else logBox.textContent = "";
+          }
 
           var fileInput = document.getElementById("planilla_arca");
           var hasFile = fileInput && fileInput.files && fileInput.files.length;
@@ -2534,7 +2550,10 @@
             carpetaLabelId: "arca-carpeta-label",
             onListo: function () {
               if (btn) btn.disabled = false;
-              if (logBox) logBox.textContent = "";
+              if (logBox) {
+            if (window.McLogAutoscroll) McLogAutoscroll.updateLog(logBox, "", { forceStick: true });
+            else logBox.textContent = "";
+          }
               var res = document.getElementById("arca-resultado");
               if (res) res.innerHTML = "";
               var prog = document.getElementById("arca-progreso");

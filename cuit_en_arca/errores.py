@@ -25,6 +25,10 @@ class AutomatizacionArcaError(ArcaProcesoError):
     """Fallo en navegación, selectores o descarga (detalle en args)."""
 
 
+class OpcionPlanillaNoDisponibleError(ArcaProcesoError):
+    """El valor de la planilla no figura entre las opciones de ARCA; se omite la fila."""
+
+
 class AutomatizacionNoDisponibleError(ArcaProcesoError):
     """Playwright/Chromium no instalado o deshabilitado en este entorno."""
 

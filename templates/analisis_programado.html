@@ -252,6 +252,7 @@
     <script src="{{ url_for('static', filename='limpiar_datos.js') }}"></script>
     <script src="{{ url_for('static', filename='navegador_vivo.js') }}"></script>
     <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+    <script src="{{ url_for('static', filename='log_autoscroll.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
     <script>
       var CONFIG = {{ (config or {})|tojson }};
@@ -689,8 +690,12 @@
           msg.textContent = st.mensaje || "";
           pintaPasos(st.pasos);
           if (st.log && st.log.length) {
-            logBox.textContent = st.log.join("\n");
-            logBox.scrollTop = logBox.scrollHeight;
+            if (window.McLogAutoscroll) {
+              McLogAutoscroll.updateLog(logBox, st.log.join("\n"));
+            } else {
+              logBox.textContent = st.log.join("\n");
+              logBox.scrollTop = logBox.scrollHeight;
+            }
           }
           function refrescarEstadoProgramacion() {
             fetch("{{ url_for('analisis_programado_estado') }}")

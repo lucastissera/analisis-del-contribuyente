@@ -34,6 +34,10 @@ a = Analysis(
             "Formato imputacion contable/Formato imputacion contable.xlsx",
             "Formato imputacion contable",
         ),
+        (
+            "Formato Facturador/Formato Comprobantes en Linea.xlsx",
+            "Formato Facturador",
+        ),
     ]
     + _pw_datas
     + _gr_datas,
@@ -46,7 +50,9 @@ a = Analysis(
         "auth",
         "auth_crypto",
         "app_branding",
+        "splash_desktop",
         "sumar_imp_total",
+        "apoc_listado",
         "plantillas_imputacion",
         "i18n",
         "cuit_en_arca",
@@ -63,6 +69,9 @@ a = Analysis(
         "cuit_en_arca.dfe_automation",
         "cuit_en_arca.progreso_dfe",
         "cuit_en_arca.vl_automation",
+        "cuit_en_arca.facturador_automation",
+        "cuit_en_arca.planilla_facturador",
+        "cuit_en_arca.progreso_facturador",
         "cuit_en_arca.progreso_vl",
         "cuit_en_arca.planilla_vl",
         "cuit_en_arca.razon_social",
@@ -79,6 +88,7 @@ a = Analysis(
         "cuit_en_arca.playwright_env",
         "PIL",
         "PIL.Image",
+        "PIL.ImageTk",
         "tkinter",
         "tkinter.filedialog",
         "playwright",

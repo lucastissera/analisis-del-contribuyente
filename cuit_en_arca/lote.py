@@ -23,7 +23,7 @@ from cuit_en_arca.planilla_lote import (
     leer_planilla_lote_con_errores,
 )
 from cuit_en_arca.service import _headless_desde_env, _requiere_playwright
-from cuit_en_arca.stealth import pausa_entre_filas_lote
+from cuit_en_arca.stealth import pausa_entre_filas_lote, pausa_humana
 from cuit_en_arca.validacion import parsear_fecha_argentina
 
 OnProgresoLote = Callable[[int, int, str, bool], None]
@@ -69,13 +69,33 @@ def _carpeta_mis_comprobantes(
     return destino
 
 
-def _nombre_seguro(cuit: str, tipo: str, nombre_sug: str) -> str:
+def _sufijo_archivo_fila(fila: FilaPlanillaArca) -> str:
+    """Evita colisiones cuando el mismo CUIT aparece en varias filas del lote."""
+    def _compact(s: str) -> str:
+        return "".join(ch for ch in (s or "") if ch.isdigit())
+
+    d = _compact(fila.fecha_desde)
+    h = _compact(fila.fecha_hasta)
+    if d and h:
+        return f"f{fila.fila_excel}_{d}_{h}"
+    return f"f{fila.fila_excel}"
+
+
+def _nombre_seguro(
+    cuit: str,
+    tipo: str,
+    nombre_sug: str,
+    *,
+    sufijo: str | None = None,
+) -> str:
     base = nombre_sug if nombre_sug else f"mis_comprobantes_{tipo}"
     if not base.lower().endswith((".xlsx", ".csv")):
         ext = ".csv" if ".csv" in base.lower() else ".xlsx"
         base = f"{base}{ext}"
     stem = base.rsplit(".", 1)[0]
     ext = base.rsplit(".", 1)[-1]
+    if sufijo:
+        stem = f"{stem}_{sufijo}"
     return f"{cuit}_{tipo}_{stem}.{ext}"
 
 
@@ -124,6 +144,7 @@ def ejecutar_lote_arca(
     sesion: SesionPlaywrightCompartida | None = None,
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
+    usuario_cupo: str | None = None,
     registrar_valor_mc: Callable[[int, int], None] | None = None,
 ) -> ResultadoLoteArca:
     _requiere_playwright()
@@ -163,7 +184,7 @@ def ejecutar_lote_arca(
 
     headless = _headless_desde_env() if headless is None else headless
 
-    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.cancelacion import confirmar_cupo_cuit_procesado, verificar_cancelacion
     from cuit_en_arca.errores import CancelacionUsuarioError
 
     _log_lote(on_log, f"Lote: {total} fila(s) a procesar.")
@@ -177,6 +198,25 @@ def ejecutar_lote_arca(
 
     def _procesar_lote(con_sesion: SesionPlaywrightCompartida | None) -> None:
         nonlocal descargas_ok
+        apoc_estado: tuple[set[str], bytes, str] | None = None
+
+        def _asegurar_listado_apoc() -> tuple[set[str], bytes, str]:
+            nonlocal apoc_estado
+            if apoc_estado is None:
+                from apoc_listado import NOMBRE_TXT_APOC, obtener_listado_apoc
+
+                try:
+                    apoc_estado = obtener_listado_apoc(on_log=on_log)
+                    if dir_proc is not None:
+                        _, txt_bytes, nombre_txt = apoc_estado
+                        (dir_proc / nombre_txt).write_bytes(txt_bytes)
+                        _log_lote(on_log, f"  • Listado APOC guardado: {nombre_txt}")
+                except Exception as exc:
+                    advertencias.append(f"Listado APOC: no se pudo descargar ({exc})")
+                    _log_lote(on_log, f"Advertencia APOC: {exc}")
+                    apoc_estado = (set(), b"", NOMBRE_TXT_APOC)
+            return apoc_estado
+
         for i, fila in enumerate(filas):
             if job_id:
                 verificar_cancelacion(job_id)
@@ -184,6 +224,12 @@ def ejecutar_lote_arca(
                 verificar_cancelacion(ap=True)
             if i > 0:
                 pausa_entre_filas_lote()
+                if con_sesion is not None:
+                    try:
+                        con_sesion.cerrar_paginas()
+                    except Exception:
+                        pass
+                    pausa_humana(0.35, 0.7)
 
             if on_reiniciar_pasos:
                 on_reiniciar_pasos()
@@ -251,11 +297,17 @@ def ejecutar_lote_arca(
                 continue
 
             cuit = fila.cuit_representado
+            sufijo_fila = _sufijo_archivo_fila(fila)
             razon_social_arca = (resultado.razon_social or "").strip()
             nuevos: list[tuple[str, bytes, bool]] = []  # (nombre, datos, emitidos)
             if resultado.emitidos:
                 data_e, nom_e = resultado.emitidos
-                nombre_e = _nombre_seguro(cuit, "emitidos", nom_e)
+                nombre_e = _nombre_seguro(cuit, "emitidos", nom_e, sufijo=sufijo_fila)
+                if nombre_e in archivos:
+                    _log_lote(
+                        on_log,
+                        f"  • Emitidos (fila {fila.fila_excel}): reemplaza archivo previo «{nombre_e}».",
+                    )
                 archivos[nombre_e] = data_e
                 nuevos.append((nombre_e, data_e, True))
                 if carpeta is not None:
@@ -263,7 +315,12 @@ def ejecutar_lote_arca(
                 _log_lote(on_log, f"  • Emitidos guardado: {nombre_e}")
             if resultado.recibidos:
                 data_r, nom_r = resultado.recibidos
-                nombre_r = _nombre_seguro(cuit, "recibidos", nom_r)
+                nombre_r = _nombre_seguro(cuit, "recibidos", nom_r, sufijo=sufijo_fila)
+                if nombre_r in archivos:
+                    _log_lote(
+                        on_log,
+                        f"  • Recibidos (fila {fila.fila_excel}): reemplaza archivo previo «{nombre_r}».",
+                    )
                 archivos[nombre_r] = data_r
                 nuevos.append((nombre_r, data_r, False))
                 if carpeta is not None:
@@ -288,12 +345,19 @@ def ejecutar_lote_arca(
                     elif modo_ap:
                         verificar_cancelacion(ap=True)
                     try:
-                        # Las imputaciones contables, por ahora, solo a recibidos.
+                        # Las imputaciones contables y APOC, por ahora, solo a recibidos.
+                        cuits_apoc: set[str] | None = None
+                        con_columna_apoc = False
+                        if not es_emit:
+                            cuits_apoc, _, _ = _asegurar_listado_apoc()
+                            con_columna_apoc = True
                         excel_proc, resumen = procesar_comprobantes_a_excel_y_resumen(
                             datos,
                             nombre,
                             emitidos=es_emit,
                             mapa_imputaciones=None if es_emit else mapa_imputaciones,
+                            cuits_apoc=cuits_apoc,
+                            con_columna_apoc=con_columna_apoc,
                         )
                         # El procesado siempre es un Excel, aunque el original sea .csv.
                         nombre_proc = f"{nombre.rsplit('.', 1)[0]}.xlsx"
@@ -325,11 +389,18 @@ def ejecutar_lote_arca(
                 else:
                     _log_lote(on_log, "Procesamiento completado.")
 
-            if _cuit_mc_procesado_exitoso(resultado):
-                if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
-                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
-                if on_cuit_exitoso:
-                    on_cuit_exitoso()
+            if _cuit_mc_procesado_exitoso(resultado) and nuevos:
+                confirmar_cupo_cuit_procesado(
+                    on_cuit_exitoso,
+                    usuario_cupo=usuario_cupo,
+                    job_id=job_id,
+                    modo_ap=modo_ap,
+                    on_log=on_log,
+                )
+                _log_lote(
+                    on_log,
+                    f"Cupo CUIT descontado (fila {fila.fila_excel}, CUIT {cuit}).",
+                )
                 if registrar_valor_mc:
                     mce, mcr = contadores_mc_desde_resultado(resultado)
                     registrar_valor_mc(mce, mcr)

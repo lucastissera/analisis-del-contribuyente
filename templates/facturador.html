@@ -1,0 +1,968 @@
+<!doctype html>
+
+<html lang="{{ current_lang }}">
+
+  <head>
+
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>{{ t('fact_page_title') }}</title>
+
+    <link
+
+      rel="icon"
+
+      type="image/png"
+
+      href="{{ url_for('static', filename='logo.png') }}"
+
+      id="favicon"
+
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+
+    />
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+
+    <script>
+
+      (function () {
+
+        try {
+
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+
+          var fav = document.getElementById("favicon");
+
+          if (fav) {
+
+            fav.href = oscuro
+
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+
+              : fav.getAttribute("data-icon-claro") || fav.href;
+
+          }
+
+        } catch (e) {}
+
+      })();
+
+    </script>
+
+    <style>
+
+      :root {
+
+        --bg-body: #ffffff;
+
+        --bg-panel: #fafafa;
+
+        --text-primary: #1a1a1a;
+
+        --text-muted: #444;
+
+        --border: #bbb;
+
+        --border-soft: #ccc;
+
+        --color-link: #1565c0;
+
+        --color-error: #b00020;
+
+        --color-success: #1b5e20;
+
+        --btn-bg: #111;
+
+        --btn-text: #fff;
+
+        --fact-bg: #e8f5e9;
+
+        --fact-border: #2e7d32;
+
+      }
+
+      html.modo-oscuro {
+
+        color-scheme: dark;
+
+        --bg-body: #0f1014;
+
+        --bg-panel: #1a1c22;
+
+        --text-primary: #eceef3;
+
+        --text-muted: #aeb4c0;
+
+        --border: #3d424d;
+
+        --border-soft: #4a505c;
+
+        --color-link: #8ab4ff;
+
+        --color-error: #ff8a95;
+
+        --color-success: #81c995;
+
+        --btn-bg: #3d7dd9;
+
+        --btn-text: #0c1118;
+
+        --fact-bg: #15291f;
+
+        --fact-border: #3fae7a;
+
+      }
+
+      body {
+
+        font-family: Arial, sans-serif;
+
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+
+        background: var(--bg-body);
+
+        color: var(--text-primary);
+
+      }
+
+      .pagina { max-width: 920px; margin: 0 auto; }
+
+      .intro { color: var(--text-muted); line-height: 1.5; margin-bottom: 1.2rem; }
+
+      .panel {
+
+        border: 1px solid var(--border);
+
+        border-radius: 12px;
+
+        padding: 1.1rem 1.2rem;
+
+        background: var(--bg-panel);
+
+        margin-bottom: 1.2rem;
+
+      }
+
+      .panel h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+
+      .panel .help { color: var(--text-muted); font-size: 0.92rem; margin-bottom: 0.9rem; line-height: 1.45; }
+
+      input[type="file"] { width: 100%; }
+
+      .acciones-form { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; }
+
+      .btn-primario {
+
+        background: var(--btn-bg);
+
+        color: var(--btn-text);
+
+        border: none;
+
+        padding: 0.65rem 1.4rem;
+
+        border-radius: 8px;
+
+        font-size: 1rem;
+
+        cursor: pointer;
+
+      }
+
+      .btn-primario:disabled { opacity: 0.55; cursor: not-allowed; }
+
+      .error-box, .error {
+
+        color: var(--color-error);
+
+        margin: 1rem 0;
+
+        padding: 0.75rem;
+
+        border: 1px solid var(--color-error);
+
+        border-radius: 8px;
+
+      }
+
+      .progreso { display: none; margin-top: 1.2rem; }
+
+      .barra { height: 10px; background: #ddd; border-radius: 6px; overflow: hidden; margin: 0.5rem 0; }
+
+      html.modo-oscuro .barra { background: #333; }
+
+      .barra-fill { height: 100%; width: 0; background: var(--fact-border); transition: width 0.25s; }
+
+      .pasos { list-style: none; padding: 0; margin: 0.8rem 0; }
+
+      .pasos li { margin: 0.2rem 0; font-size: 0.95rem; }
+
+      .pasos .ico { display: inline-block; width: 1.4rem; }
+
+      .paso-ok .ico { color: var(--color-success); }
+
+      .paso-error .ico { color: var(--color-error); font-weight: bold; }
+
+      .paso-pendiente { color: var(--text-muted); }
+
+      .log {
+
+        margin-top: 0.8rem;
+
+        max-height: 260px;
+
+        overflow: auto;
+
+        background: var(--bg-body);
+
+        border: 1px solid var(--border-soft);
+
+        border-radius: 8px;
+
+        padding: 0.6rem 0.8rem;
+
+        font-family: Consolas, "Courier New", monospace;
+
+        font-size: 0.82rem;
+
+        white-space: pre-wrap;
+
+        line-height: 1.4;
+
+      }
+
+      .resultado-ok {
+
+        display: none;
+
+        margin-top: 1rem;
+
+        padding: 0.9rem 1rem;
+
+        border: 1px solid var(--color-success);
+
+        border-radius: 10px;
+
+        color: var(--color-success);
+
+      }
+
+      .filas-express {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        margin-top: 0.9rem;
+      }
+      .fila-express {
+        position: relative;
+        padding: 0.7rem 2.4rem 0.7rem 0.8rem;
+        background: var(--bg-body);
+        border: 1px solid var(--border-soft);
+        border-radius: 8px;
+      }
+      .campos-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.6rem;
+      }
+      .campos-grid label {
+        display: block;
+        font-size: 0.82rem;
+      }
+      .campos-grid label strong {
+        display: block;
+        margin-bottom: 0.2rem;
+        font-size: 0.82rem;
+      }
+      .campos-grid input,
+      .campos-grid select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.35rem 0.45rem;
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      .campos-sesion {
+        margin-top: 0.5rem;
+      }
+      .fila-quitar {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 1.7rem;
+        height: 1.7rem;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--bg-panel);
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+      }
+      .btn-agregar {
+        margin-top: 0.8rem;
+        padding: 0.45rem 0.8rem;
+        border: 1px dashed var(--fact-border);
+        background: transparent;
+        color: var(--text-primary);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      .clave-wrap {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      .clave-wrap input {
+        flex: 1;
+      }
+      .clave-toggle {
+        flex-shrink: 0;
+        padding: 0.3rem 0.55rem;
+        border: 1px solid var(--border-soft);
+        border-radius: 6px;
+        background: var(--bg-panel);
+        color: var(--text-primary);
+        cursor: pointer;
+        font-size: 0.78rem;
+      }
+
+    </style>
+
+  </head>
+
+  <body>
+
+    <div class="pagina">
+
+      {% with mostrar_volver=true %}{% include 'partials/barra_superior.html' %}{% endwith %}
+
+      {% with titulo=t('page_title'), subtitulo=t('fact_heading'), variante='inicio' %}
+
+      {% include 'partials/cabecera_isologo.html' %}
+
+      {% endwith %}
+
+
+
+      <p class="intro">{{ t('fact_intro') | safe }}</p>
+
+
+
+      {% if error %}
+
+      <div class="error-box">{{ error }}</div>
+
+      {% endif %}
+
+
+
+      <form id="form-fact" method="post" action="{{ url_for('facturador_emitir') }}" enctype="multipart/form-data">
+
+        <div class="panel">
+
+          <h2>{{ t('fact_import_titulo') }}</h2>
+
+          <p class="help">{{ t('fact_import_help') | safe }}</p>
+
+          <p>
+
+            <a href="{{ url_for('facturador_plantilla') }}">{{ t('fact_import_descargar') }}</a>
+
+          </p>
+
+          <label for="fact_excel"><strong>{{ t('fact_import_label_file') }}</strong></label>
+
+          <input type="file" id="fact_excel" name="fact_excel" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+
+        </div>
+
+        <div class="panel">
+
+          <h2>{{ t('fact_express_titulo') }}</h2>
+
+          <p class="help">{{ t('fact_express_help') | safe }}</p>
+
+          <div class="campos-sesion campos-grid">
+
+            <label><strong>{{ t('fact_express_cuit') }}</strong>
+
+              <input name="express_cuit_login" type="text" autocomplete="off" inputmode="numeric" placeholder="11 dígitos" />
+
+            </label>
+
+            <label><strong>{{ t('fact_express_clave') }}</strong>
+
+              <div class="clave-wrap">
+
+                <input class="clave-input" name="express_clave_fiscal" type="password" autocomplete="new-password" />
+
+                <button type="button" class="clave-toggle" data-label-mostrar="{{ t('clave_mostrar') }}" data-label-ocultar="{{ t('clave_ocultar') }}" aria-label="{{ t('clave_mostrar') }}">{{ t('clave_mostrar') }}</button>
+
+              </div>
+
+            </label>
+
+            <label><strong>{{ t('fact_express_repr') }}</strong>
+
+              <input name="express_representado" type="text" autocomplete="off" placeholder="{{ t('fact_express_repr_ph') }}" />
+
+            </label>
+
+            <label><strong>{{ t('fact_express_pv') }}</strong>
+
+              <input name="express_punto_venta" type="text" autocomplete="off" />
+
+            </label>
+
+          </div>
+
+          <div id="filas-express" class="filas-express">
+
+            <div class="fila-express" data-fila-express>
+
+              <div class="campos-grid">
+
+                <label><strong>{{ t('fact_express_fecha') }}</strong>
+
+                  <input name="express_fecha" type="text" autocomplete="off" placeholder="{{ t('fact_express_fecha_ph') }}" />
+
+                </label>
+
+                <label><strong>{{ t('fact_express_tipo') }}</strong>
+
+                  <select name="express_tipo">
+
+                    <option value="">—</option>
+
+                    {% for tipo in tipos_comprobante %}
+
+                    <option value="{{ tipo }}">{{ tipo }}</option>
+
+                    {% endfor %}
+
+                  </select>
+
+                </label>
+
+                <label><strong>{{ t('fact_express_concepto') }}</strong>
+
+                  <select name="express_concepto">
+
+                    <option value="">—</option>
+
+                    <option value="Servicios">{{ t('fact_express_concepto_servicios') }}</option>
+
+                    <option value="Productos">{{ t('fact_express_concepto_productos') }}</option>
+
+                  </select>
+
+                </label>
+
+                <label><strong>{{ t('fact_express_producto') }}</strong>
+
+                  <input name="express_producto" type="text" autocomplete="off" />
+
+                </label>
+
+                <label><strong>{{ t('fact_express_cantidad') }}</strong>
+
+                  <input name="express_cantidad" type="text" autocomplete="off" inputmode="decimal" />
+
+                </label>
+
+                <label><strong>{{ t('fact_express_precio') }}</strong>
+
+                  <input name="express_precio" type="text" autocomplete="off" inputmode="decimal" />
+
+                </label>
+
+              </div>
+
+              <button type="button" class="fila-quitar" title="{{ t('fact_express_quitar') }}">&times;</button>
+
+            </div>
+
+          </div>
+
+          <button type="button" id="agregar-fila-express" class="btn-agregar">+ {{ t('fact_express_agregar') }}</button>
+
+        </div>
+
+        <div class="acciones-form">
+
+          <button type="submit" class="btn-primario" id="btn-enviar">{{ t('fact_submit') }}</button>
+
+          {% set input_id = 'fact-ver-navegador' %}
+
+          {% include 'partials/btn_ver_navegador.html' %}
+
+          <button type="button" class="btn-sec btn-cancelar-descarga" id="fact-btn-cancelar">{{ t('fact_btn_cancelar') }}</button>
+
+        </div>
+
+      </form>
+
+
+
+      <div class="progreso panel" id="progreso">
+
+        <h2>{{ t('fact_progress_label') }}</h2>
+
+        <div class="barra"><div class="barra-fill" id="barra-fill"></div></div>
+
+        <div id="mensaje-progreso" class="help"></div>
+
+        <ul class="pasos" id="pasos"></ul>
+
+        <div class="resultado-ok" id="resultado-ok"></div>
+
+        <p class="error" id="error-progreso" style="display:none"></p>
+
+        <h2 style="font-size: 1rem; margin-top: 1rem">{{ t('fact_log_titulo') }}</h2>
+
+        <div class="log" id="log"></div>
+
+      </div>
+
+
+
+      {% include 'partials/pie_legal.html' %}
+
+    </div>
+
+
+
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+
+    <script src="{{ url_for('static', filename='navegador_vivo.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='cancelar_descarga.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='log_autoscroll.js') }}"></script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+
+    <script>
+
+      var I18N = {
+
+        fact_submit: {{ t('fact_submit')|tojson }},
+
+        fact_working: {{ t('fact_working')|tojson }},
+
+        fact_ok_titulo: {{ t('fact_ok_titulo')|tojson }},
+
+        fact_paso_error: {{ t('fact_paso_error')|tojson }},
+
+        sinDatos: {{ t('fact_err_sin_datos')|tojson }},
+
+        quitar: {{ t('fact_express_quitar')|tojson }},
+
+        cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
+
+        msgCancelado: {{ t('msg_descarga_cancelada')|tojson }}
+
+      };
+
+      (function filasExpress() {
+
+        var cont = document.getElementById("filas-express");
+
+        var btnAdd = document.getElementById("agregar-fila-express");
+
+        if (!cont || !btnAdd) return;
+
+        function plantillaFila() {
+
+          var primera = cont.querySelector("[data-fila-express]");
+
+          return primera ? primera.cloneNode(true) : null;
+
+        }
+
+        function limpiarFila(fila) {
+
+          fila.querySelectorAll("input").forEach(function (inp) {
+
+            inp.value = "";
+
+          });
+
+          fila.querySelectorAll("select").forEach(function (sel) {
+
+            sel.selectedIndex = 0;
+
+          });
+
+        }
+
+        btnAdd.addEventListener("click", function () {
+
+          var tpl = plantillaFila();
+
+          if (!tpl) return;
+
+          limpiarFila(tpl);
+
+          cont.appendChild(tpl);
+
+        });
+
+        cont.addEventListener("click", function (ev) {
+
+          var btn = ev.target.closest(".fila-quitar");
+
+          if (!btn) return;
+
+          var filas = cont.querySelectorAll("[data-fila-express]");
+
+          if (filas.length <= 1) {
+
+            limpiarFila(filas[0]);
+
+            return;
+
+          }
+
+          btn.closest("[data-fila-express]").remove();
+
+        });
+
+      })();
+
+      (function () {
+
+        var form = document.getElementById("form-fact");
+
+        var btn = document.getElementById("btn-enviar");
+
+        var prog = document.getElementById("progreso");
+
+        var barra = document.getElementById("barra-fill");
+
+        var msg = document.getElementById("mensaje-progreso");
+
+        var pasosUl = document.getElementById("pasos");
+
+        var logBox = document.getElementById("log");
+
+        var okBox = document.getElementById("resultado-ok");
+
+        var errProg = document.getElementById("error-progreso");
+
+        var timer = null;
+
+        var pollActivo = false;
+
+
+
+        function detenerPollFact() {
+
+          pollActivo = false;
+
+          if (timer) {
+
+            clearInterval(timer);
+
+            timer = null;
+
+          }
+
+        }
+
+
+
+        function pintaPasos(pasos) {
+
+          if (!pasos || !pasos.length) return;
+
+          pasosUl.innerHTML = "";
+
+          var fallo = null;
+
+          pasos.forEach(function (p) {
+
+            if (p.estado === "error") fallo = p;
+
+            var li = document.createElement("li");
+
+            var ico = "○";
+
+            li.className = "";
+
+            if (p.estado === "ok") { ico = "✓"; li.className = "paso-ok"; }
+
+            else if (p.estado === "en_curso") { ico = "⏳"; }
+
+            else if (p.estado === "error") { ico = "✗"; li.className = "paso-error"; }
+
+            else { li.className = "paso-pendiente"; }
+
+            li.innerHTML = '<span class="ico">' + ico + "</span> " + p.etiqueta;
+
+            pasosUl.appendChild(li);
+
+          });
+
+          if (fallo) {
+
+            errProg.style.display = "block";
+
+            errProg.textContent = (I18N.fact_paso_error || "Detenido en:") + " " + fallo.etiqueta;
+
+          }
+
+        }
+
+
+
+        function hayDatosExpress() {
+
+          var cuit = (form.querySelector('[name="express_cuit_login"]') || {}).value || "";
+
+          var clave = (form.querySelector('[name="express_clave_fiscal"]') || {}).value || "";
+
+          var pv = (form.querySelector('[name="express_punto_venta"]') || {}).value || "";
+
+          if (!cuit.trim() && !clave.trim() && !pv.trim()) return false;
+
+          var filas = document.querySelectorAll("#filas-express [data-fila-express]");
+
+          for (var i = 0; i < filas.length; i++) {
+
+            var f = filas[i];
+
+            var tipo = (f.querySelector('[name="express_tipo"]') || {}).value || "";
+
+            var concepto = (f.querySelector('[name="express_concepto"]') || {}).value || "";
+
+            var producto = (f.querySelector('[name="express_producto"]') || {}).value || "";
+
+            var cant = (f.querySelector('[name="express_cantidad"]') || {}).value || "";
+
+            var precio = (f.querySelector('[name="express_precio"]') || {}).value || "";
+
+            if (tipo.trim() || concepto.trim() || producto.trim() || cant.trim() || precio.trim()) {
+
+              return true;
+
+            }
+
+          }
+
+          return Boolean(cuit.trim() || clave.trim() || pv.trim());
+
+        }
+
+
+
+        form.addEventListener("submit", function (ev) {
+
+          ev.preventDefault();
+
+          var archivo = document.getElementById("fact_excel");
+
+          var tieneArchivo = archivo && archivo.files && archivo.files.length > 0;
+
+          if (!tieneArchivo && !hayDatosExpress()) {
+
+            errProg.style.display = "block";
+
+            errProg.textContent = I18N.sinDatos || "Sin datos";
+
+            return;
+
+          }
+
+          btn.disabled = true;
+
+          btn.textContent = I18N.fact_working || "Procesando…";
+
+          prog.style.display = "block";
+
+          okBox.style.display = "none";
+
+          errProg.style.display = "none";
+
+          logBox.textContent = "";
+
+          pasosUl.innerHTML = "";
+
+          var fd = new FormData(form);
+
+          fetch(form.action, {
+
+            method: "POST",
+
+            body: fd,
+
+            credentials: "same-origin",
+
+            headers: { "X-Requested-With": "fetch" },
+
+          })
+
+            .then(function (r) { return r.json(); })
+
+            .then(function (data) {
+
+              if (data.error) {
+
+                errProg.style.display = "block";
+
+                errProg.textContent = data.error;
+
+                btn.disabled = false;
+
+                btn.textContent = I18N.fact_submit || "Emitir";
+
+                return;
+
+              }
+
+              var jobId = data.job_id;
+
+              pollActivo = true;
+
+              McCancelarDescarga.setDetenerPoll(detenerPollFact);
+
+              McCancelarDescarga.registrar("fact", jobId);
+
+              timer = setInterval(function () {
+
+                if (!pollActivo) return;
+
+                fetch("{{ url_for('facturador_estado', job_id='__ID__') }}".replace("__ID__", jobId), {
+
+                  credentials: "same-origin",
+
+                })
+
+                  .then(function (r) { return r.json(); })
+
+                  .then(function (st) {
+
+                    if (!pollActivo) return;
+
+                    barra.style.width = (st.porcentaje || 0) + "%";
+
+                    msg.textContent = st.mensaje || "";
+
+                    pintaPasos(st.pasos);
+
+                    if (st.log && window.McLogAutoscroll) {
+                      McLogAutoscroll.updateLog(logBox, st.log.join("\n"));
+                    } else if (st.log) {
+                      logBox.textContent = st.log.join("\n");
+                      logBox.scrollTop = logBox.scrollHeight;
+                    }
+
+                    if (st.estado === "ok" || (st.ok > 0 && st.estado !== "cancelado")) {
+
+                      detenerPollFact();
+
+                      McCancelarDescarga.limpiar();
+
+                      okBox.style.display = "block";
+
+                      okBox.innerHTML = "<strong>" + (I18N.fact_ok_titulo || "Listo") + "</strong><br>" +
+
+                        (st.ok || 0) + " emitida(s), " + (st.fallidos || 0) + " con error.";
+
+                      if (st.resumen && st.resumen.length) {
+
+                        var ul = "<ul>";
+
+                        st.resumen.forEach(function (r) {
+
+                          ul += "<li>Fila " + r.fila + ": " + (r.error || r.comprobante || "OK") + "</li>";
+
+                        });
+
+                        okBox.innerHTML += ul + "</ul>";
+
+                      }
+
+                      btn.disabled = false;
+
+                      btn.textContent = I18N.fact_submit || "Emitir";
+
+                    } else if (st.estado === "error" || st.estado === "cancelado") {
+
+                      detenerPollFact();
+
+                      McCancelarDescarga.limpiar();
+
+                      if (!errProg.textContent) {
+
+                        errProg.style.display = "block";
+
+                        errProg.textContent = st.error || st.mensaje;
+
+                      }
+
+                      btn.disabled = false;
+
+                      btn.textContent = I18N.fact_submit || "Emitir";
+
+                    }
+
+                  })
+
+                  .catch(function () {});
+
+              }, 1200);
+
+            })
+
+            .catch(function () {
+
+              btn.disabled = false;
+
+              btn.textContent = I18N.fact_submit || "Emitir";
+
+            });
+
+        });
+
+
+
+        McCancelarDescarga.enlazar(document.getElementById("fact-btn-cancelar"), {
+
+          confirm: I18N.cancelarConfirm,
+
+          submitBtn: btn,
+
+          submitLabel: I18N.fact_submit,
+
+          progreso: prog,
+
+          errProg: errProg,
+
+          okBox: okBox,
+
+          mensajeCancelado: I18N.msgCancelado,
+
+        });
+
+      })();
+
+    </script>
+
+  </body>
+
+</html>
+
+

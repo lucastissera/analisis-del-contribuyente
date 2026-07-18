@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable
 
 _lock = threading.Lock()
 _cancelados: set[str] = set()
@@ -63,3 +64,41 @@ def cupo_consumible_tras_cuit(
     if job_id and cancelacion_solicitada(job_id):
         return False
     return True
+
+
+def confirmar_cupo_cuit_procesado(
+    on_cuit_exitoso: Callable[[], None] | None,
+    *,
+    usuario_cupo: str | None = None,
+    job_id: str | None = None,
+    modo_ap: bool = False,
+    on_log: Callable[[str], None] | None = None,
+) -> None:
+    """Descuenta 1 CUIT del cupo al terminar bien una fila de un lote.
+
+    Se invoca fila a fila: los CUIT ya confirmados conservan el descuento aunque
+    el resto del lote falle o el job quede en estado de error parcial.
+    """
+    from cuit_en_arca.errores import CancelacionUsuarioError
+
+    if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
+        raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+    u = (usuario_cupo or "").strip()
+    if u:
+        from auth import es_administrador
+        from auth_registro import consumir_cuit_exitoso, ultimo_error_cupo
+
+        if not es_administrador(u) and not consumir_cuit_exitoso(u):
+            msg = ultimo_error_cupo() or (
+                f"Cupo no registrado para {u}. Revise auth_remote.txt y conexión."
+            )
+            import logging
+
+            logging.getLogger(__name__).warning(msg)
+            if on_log:
+                try:
+                    on_log(f"AVISO CUPO: {msg}")
+                except Exception:
+                    pass
+    elif on_cuit_exitoso:
+        on_cuit_exitoso()

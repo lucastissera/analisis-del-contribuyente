@@ -130,7 +130,9 @@ def main() -> int:
     _instalar_chromium_portable()
     print(
         f"\nListo: {DIST_DIR}\n"
-        "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n",
+        "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n"
+        "IMPORTANTE cupo: copiá auth_remote.example.txt → auth_remote.txt junto al .exe\n"
+        "  (URL Render + token = AUTH_USERS_REMOTE_TOKEN). Sin esto el cupo NO se descuenta en Neon.\n",
         flush=True,
     )
     return 0

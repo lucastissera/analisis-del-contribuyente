@@ -9,6 +9,8 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from app_branding import APP_NAME
+
 _APP_ROOT = Path(__file__).resolve().parent
 try:
     from dotenv import load_dotenv
@@ -88,6 +90,13 @@ try:
     iniciar_sincronizacion_usuarios()
 except Exception:
     pass
+
+try:
+    from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
+
+    verificar_integridad_stores_locales()
+except Exception as exc:
+    logging.getLogger(__name__).warning("Verificación de stores locales: %s", exc)
 
 try:
     from auth_registro import asegurar_admin_en_db
@@ -225,9 +234,71 @@ _bootstrap_analisis_programado_scheduler()
 # Cada petición (refresco, nueva pestaña con la misma app, navegación) renueva el plazo.
 _SESSION_IDLE_SEC = 30 * 60
 
+# Escritorio (.exe): sin latido visible durante este tiempo → apagar el proceso.
+_DESKTOP_GRACE_SEC = 25
+_desktop_ultima_ui = time.time()
+_desktop_ventana_visible = True
+_desktop_watchdog_armado = False
+_desktop_cerrando = False
+
 
 def _es_app_escritorio() -> bool:
     return getattr(sys, "frozen", False)
+
+
+def _peticion_desde_localhost() -> bool:
+    ra = (request.remote_addr or "").replace("::ffff:", "")
+    return ra in ("127.0.0.1", "::1")
+
+
+def _registrar_ui_desktop_viva(*, ventana_visible: bool | None = None) -> None:
+    """Marca la ventana del navegador como activa (latido o navegación)."""
+    global _desktop_ultima_ui, _desktop_watchdog_armado, _desktop_ventana_visible
+
+    if not _es_app_escritorio() or not _peticion_desde_localhost():
+        return
+    if ventana_visible is False:
+        _desktop_ventana_visible = False
+        return
+    if ventana_visible is True:
+        _desktop_ventana_visible = True
+    elif not _desktop_ventana_visible:
+        return
+    _desktop_ultima_ui = time.time()
+    if not _desktop_watchdog_armado:
+        _desktop_watchdog_armado = True
+        _iniciar_watchdog_desktop()
+
+
+def _iniciar_watchdog_desktop() -> None:
+    """Cierra el .exe si la ventana visible dejó de enviar latidos (p. ej. tocó la X)."""
+
+    def _loop() -> None:
+        global _desktop_cerrando
+        while True:
+            time.sleep(4)
+            if _desktop_cerrando or not _es_app_escritorio():
+                return
+            if not _desktop_ventana_visible:
+                continue
+            try:
+                from cuit_en_arca.trabajos_activos import hay_trabajos_arca_en_curso
+
+                if hay_trabajos_arca_en_curso():
+                    continue
+            except Exception:
+                pass
+            if time.time() - _desktop_ultima_ui > _DESKTOP_GRACE_SEC:
+                _desktop_cerrando = True
+                logging.getLogger(__name__).info(
+                    "Aplicación de escritorio sin ventana activa; cerrando proceso."
+                )
+                _iniciar_cierre_proceso_desktop()
+                return
+
+    threading.Thread(
+        target=_loop, daemon=True, name="desktop-watchdog"
+    ).start()
 
 
 def _nombre_carpeta_web_sesion(prefijo: str, raw: str | None = None) -> str | None:
@@ -287,6 +358,15 @@ def _requiere_admin():
         abort(403)
 
 
+def _headless_desde_peticion() -> bool:
+    """Navegador visible solo para administrador (portable); resto siempre headless."""
+    from cuit_en_arca.service import headless_desde_form
+
+    if not session.get("es_admin"):
+        return True
+    return headless_desde_form(request.form.get("ver_navegador"))
+
+
 def _mensaje_error_cursor(lg: str, exc: CursorCloudError) -> str:
     if exc.code == "usage_limit_exceeded":
         return tr(
@@ -303,6 +383,23 @@ def _session_idle_and_login():
         request.path and request.path.startswith("/static")
     ):
         return None
+
+    try:
+        from auth_registro import integridad_store_local_ok, motivo_integridad_store
+
+        if not integridad_store_local_ok():
+            lg = normalize_lang(session.get("lang"))
+            msg = motivo_integridad_store() or tr(lg, "err_store_corrupt")
+            if request.endpoint in ("login", "logout", "set_lang", "desktop_alive", "desktop_quit"):
+                return None
+            if request.headers.get("X-Requested-With") == "fetch":
+                return jsonify({"error": msg}), 503
+            return render_template("login.html", login_error_msg=msg), 503
+    except Exception:
+        pass
+
+    if request.endpoint not in ("desktop_alive", "desktop_quit", "logout"):
+        _registrar_ui_desktop_viva()
 
     now = time.time()
     username = session.get("user")
@@ -321,6 +418,7 @@ def _session_idle_and_login():
     if request.endpoint in (
         "login",
         "set_lang",
+        "desktop_alive",
         "desktop_quit",
         "logout",
         "api_auth_users",
@@ -449,10 +547,25 @@ def _verificar_cupo_inicio(lg: str) -> str | None:
     user = _usuario_cupo_web()
     if not user:
         return None
-    from auth_registro import cupo_cuit_disponible
+    if getattr(sys, "frozen", False):
+        from auth import _modo_remoto_activo, _remote_token, forzar_sync_usuarios_remoto
 
+        if not _modo_remoto_activo() or not _remote_token():
+            return tr(lg, "err_cupo_portable_sin_remoto")
+        forzar_sync_usuarios_remoto()
+    from auth_registro import (
+        cupo_cuit_disponible,
+        refrescar_cupo_usuario_remoto,
+        ultimo_error_cupo,
+    )
+
+    if getattr(sys, "frozen", False):
+        refrescar_cupo_usuario_remoto(user)
     if cupo_cuit_disponible(user) > 0:
         return None
+    err = ultimo_error_cupo()
+    if err and getattr(sys, "frozen", False):
+        return err
     return _mensaje_cupo_agotado(lg)
 
 
@@ -512,6 +625,31 @@ def _mapa_imputaciones_desde_peticion(
             return None, str(exc), None, None
 
     return None, None, None, None
+
+
+MIME_TXT = "text/plain; charset=latin-1"
+
+
+def _listado_apoc_para_mcr_recibidos(
+    lg: str,
+) -> tuple[set[str], bytes | None, str, str | None]:
+    """
+    Descarga el listado APOC de AFIP para cruzar con comprobantes recibidos.
+    Devuelve (cuits, bytes_txt, nombre_txt, advertencia_si_fallo).
+    """
+    from apoc_listado import NOMBRE_TXT_APOC, obtener_listado_apoc
+
+    try:
+        cuits, txt_bytes, nombre_txt = obtener_listado_apoc()
+        return cuits, txt_bytes, nombre_txt, None
+    except Exception as exc:
+        app.logger.warning("Listado APOC no disponible: %s", exc)
+        return (
+            set(),
+            None,
+            NOMBRE_TXT_APOC,
+            tr(lg, "apoc_advertencia_descarga"),
+        )
 
 
 @app.context_processor
@@ -1176,13 +1314,20 @@ def login():
         pwd = request.form.get("password") or ""
         motivo = verificar_acceso(user, pwd)
         if motivo is None:
-            from auth import _resolver_clave_usuario
+            from auth import _resolver_clave_usuario, forzar_sync_usuarios_remoto
 
             session["user"] = _resolver_clave_usuario(user)
             session["es_admin"] = es_administrador(session["user"])
             session["last_activity"] = time.time()
             session.permanent = True
             session.modified = True
+            try:
+                forzar_sync_usuarios_remoto()
+                from auth_registro import refrescar_cupo_usuario_remoto
+
+                refrescar_cupo_usuario_remoto(session["user"])
+            except Exception:
+                pass
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
         lg = normalize_lang(session.get("lang"))
         login_error_pending = motivo == "pending_approval"
@@ -1239,6 +1384,8 @@ def _aplicar_borrado_cookie_sesion(resp: Response) -> Response:
 
 def _iniciar_cierre_proceso_desktop() -> None:
     """Cierra navegador (modo app), borra cookies locales y termina el .exe."""
+    global _desktop_cerrando
+    _desktop_cerrando = True
 
     def _salir() -> None:
         time.sleep(0.6)
@@ -1259,11 +1406,29 @@ def _iniciar_cierre_proceso_desktop() -> None:
 
 def _respuesta_cierre_desktop() -> Response:
     """Cierra el proceso; la ventana del navegador se termina por PID/perfil."""
+    lg = normalize_lang(session.get("lang"))
+    msg = tr(lg, "logout_cerrando")
     _limpiar_sesion_flask()
-    resp = Response("", mimetype="text/html; charset=utf-8")
+    html = (
+        "<!doctype html><html lang='es'><head><meta charset='utf-8'>"
+        f"<title>{APP_NAME}</title></head><body><p>{msg}</p></body></html>"
+    )
+    resp = Response(html, mimetype="text/html; charset=utf-8")
     _aplicar_borrado_cookie_sesion(resp)
     _iniciar_cierre_proceso_desktop()
     return resp
+
+
+@app.route("/desktop/alive", methods=["GET", "POST"])
+def desktop_alive():
+    """Latido de la ventana del .exe (solo localhost)."""
+    if not _es_app_escritorio():
+        abort(404)
+    if not _peticion_desde_localhost():
+        abort(403)
+    visible = request.headers.get("X-Desktop-Visible", "1") != "0"
+    _registrar_ui_desktop_viva(ventana_visible=visible)
+    return "", 204
 
 
 @app.get("/logout")
@@ -1422,6 +1587,16 @@ def procesar():
 
     con_cols_imp = mapa_imputaciones is not None and has_r
 
+    cuits_apoc: set[str] = set()
+    apoc_txt_bytes: bytes | None = None
+    apoc_txt_nombre = "FacturasApocrifas.txt"
+    advertencia_apoc: str | None = None
+    con_columna_apoc = has_r
+    if has_r:
+        cuits_apoc, apoc_txt_bytes, apoc_txt_nombre, advertencia_apoc = (
+            _listado_apoc_para_mcr_recibidos(lg)
+        )
+
     if has_r and has_e:
         nombre_r = Path(f_rec.filename).name
         nombre_e = Path(f_emit.filename).name
@@ -1508,11 +1683,21 @@ def procesar():
             resumen_imputacion_emit=res_imp_e,
             con_columnas_imputacion_en_contrapartes=con_cols_imp,
             mapa_imputaciones=mapa_imputaciones,
+            cuits_apoc=cuits_apoc,
+            con_columna_apoc=True,
         )
         contenido = salida.getvalue()
         nombre_salida = f"{Path(nombre_r).stem}_{Path(nombre_e).stem}_ajustado.xlsx"
         download_id = uuid4().hex
         DESCARGAS[download_id] = (contenido, nombre_salida, MIME_XLSX)
+        apoc_txt_download_id = None
+        if apoc_txt_bytes:
+            apoc_txt_download_id = uuid4().hex
+            DESCARGAS[apoc_txt_download_id] = (
+                apoc_txt_bytes,
+                apoc_txt_nombre,
+                MIME_TXT,
+            )
 
         return render_template(
             "index.html",
@@ -1546,6 +1731,9 @@ def procesar():
             imputacion_activa=con_cols_imp,
             resumen_imputacion_recibidos=res_imp_r,
             resumen_imputacion_emitidos=res_imp_e,
+            apoc_txt_download_id=apoc_txt_download_id,
+            apoc_txt_nombre=apoc_txt_nombre,
+            advertencia_apoc=advertencia_apoc,
         )
 
     emitidos = bool(has_e)
@@ -1609,12 +1797,22 @@ def procesar():
         resumen_imputacion=res_imp,
         con_columnas_imputacion_en_contrapartes=con_cols_imp,
         mapa_imputaciones=mapa_imputaciones,
+        cuits_apoc=cuits_apoc if not emitidos else None,
+        con_columna_apoc=con_columna_apoc and not emitidos,
     )
     contenido = salida.getvalue()
 
     nombre_salida = f"{Path(nombre).stem}_ajustado.xlsx"
     download_id = uuid4().hex
     DESCARGAS[download_id] = (contenido, nombre_salida, MIME_XLSX)
+    apoc_txt_download_id = None
+    if con_columna_apoc and apoc_txt_bytes:
+        apoc_txt_download_id = uuid4().hex
+        DESCARGAS[apoc_txt_download_id] = (
+            apoc_txt_bytes,
+            apoc_txt_nombre,
+            MIME_TXT,
+        )
 
     resumen_total_periodo = totales_resumen_por_periodo(totales_por_periodo)
 
@@ -1639,6 +1837,9 @@ def procesar():
         nombre_salida=nombre_salida,
         imputacion_activa=con_cols_imp,
         resumen_imputacion=res_imp,
+        apoc_txt_download_id=apoc_txt_download_id,
+        apoc_txt_nombre=apoc_txt_nombre,
+        advertencia_apoc=advertencia_apoc,
     )
 
 
@@ -1825,11 +2026,10 @@ def arca_descarga_lote():
     on_paso = callback_paso(job_id)
     on_log = envolver_log_con_entrega(callback_log_lote(job_id), entrega)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    usuario_cupo_job = _usuario_cupo_web()
     registrar_valor_mc, _reg_dfe, _reg_np = _registro_valor_sesion()
 
-    from cuit_en_arca.service import headless_desde_form
-
-    headless = headless_desde_form(request.form.get("ver_navegador"))
+    headless = _headless_desde_peticion()
 
     def _on_reiniciar() -> None:
         reiniciar_pasos(job_id)
@@ -1850,6 +2050,7 @@ def arca_descarga_lote():
                 nombre_carpeta_sesion=nombre_sesion_mc,
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
+                usuario_cupo=usuario_cupo_job,
                 registrar_valor_mc=registrar_valor_mc,
                 headless=headless,
             )
@@ -2000,9 +2201,8 @@ def dfe_descargar():
         return render_template("dfe.html", error=err_cupo)
 
     from cuit_en_arca.dfe_automation import ejecutar_dfe_lote
-    from cuit_en_arca.service import headless_desde_form
 
-    headless = headless_desde_form(request.form.get("ver_navegador"))
+    headless = _headless_desde_peticion()
 
     carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
 
@@ -2032,6 +2232,7 @@ def dfe_descargar():
     on_log = envolver_log_con_entrega(callback_log_dfe(job_id), entrega)
     on_paso = callback_paso_dfe(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    usuario_cupo_job = _usuario_cupo_web()
     _reg_mc, registrar_valor_dfe, _reg_np = _registro_valor_sesion()
 
     def _reinit() -> None:
@@ -2067,6 +2268,7 @@ def dfe_descargar():
                 nombre_carpeta_sesion=nombre_sesion_dfe,
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
+                usuario_cupo=usuario_cupo_job,
                 registrar_valor_dfe=registrar_valor_dfe,
             )
             if entrega:
@@ -2183,7 +2385,9 @@ def vl_descargar():
         return render_template("ventas_liquidaciones.html", error=err_cupo)
 
     sistemas = [
-        s for s in request.form.getlist("vl_sistemas") if s in ("granos", "hacienda")
+        s
+        for s in request.form.getlist("vl_sistemas")
+        if s in ("granos", "certificados", "hacienda")
     ]
     if not sistemas:
         msg = tr(lg, "vl_err_sin_sistema")
@@ -2191,10 +2395,9 @@ def vl_descargar():
             return jsonify({"error": msg}), 400
         return render_template("ventas_liquidaciones.html", error=msg)
 
-    from cuit_en_arca.service import headless_desde_form
     from cuit_en_arca.vl_automation import ejecutar_vl_lote
 
-    headless = headless_desde_form(request.form.get("ver_navegador"))
+    headless = _headless_desde_peticion()
 
     carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
 
@@ -2224,6 +2427,7 @@ def vl_descargar():
     on_log = envolver_log_con_entrega(callback_log_vl(job_id), entrega)
     on_paso = callback_paso_vl(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    usuario_cupo_job = _usuario_cupo_web()
 
     def _reinit() -> None:
         reiniciar_pasos_vl(job_id)
@@ -2259,6 +2463,7 @@ def vl_descargar():
                 nombre_carpeta_sesion=nombre_sesion_vl,
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
+                usuario_cupo=usuario_cupo_job,
             )
             if entrega:
                 entrega.escanear()
@@ -2280,6 +2485,184 @@ def vl_descargar():
 @app.get("/vl-estado/<job_id>")
 def vl_estado(job_id: str):
     estado = obtener_job_vl(job_id)
+    if estado is None:
+        return jsonify({"error": "job_not_found"}), 404
+    return jsonify(estado)
+
+
+# --------------------------------------------------------------------------- #
+# Facturador (solo administrador)
+# --------------------------------------------------------------------------- #
+def _facturador_contexto_plantilla() -> dict:
+    from cuit_en_arca.planilla_facturador import listar_tipos_comprobante_modelo
+
+    return {"tipos_comprobante": listar_tipos_comprobante_modelo()}
+
+
+def _filas_facturador_desde_peticion(lg: str):
+    """Devuelve (filas, errores_planilla, mensaje_error)."""
+    from cuit_en_arca.planilla_facturador import (
+        construir_filas_express,
+        leer_planilla_facturador_con_errores,
+    )
+
+    f = request.files.get("fact_excel")
+    has_file = bool(f and getattr(f, "filename", None) and str(f.filename).strip())
+    if has_file:
+        nombre = Path(f.filename).name
+        if not nombre.lower().endswith(".xlsx"):
+            return [], [], tr(lg, "err_only_xlsx_csv")
+        try:
+            filas, errores = leer_planilla_facturador_con_errores(io.BytesIO(f.read()))
+        except ArcaProcesoError as exc:
+            return [], [], str(exc)
+        if not filas:
+            return [], errores, "; ".join(errores) or tr(lg, "fact_err_sin_datos")
+        return filas, errores, None
+
+    hay_algo = any(
+        (v or "").strip()
+        for v in (
+            request.form.get("express_cuit_login"),
+            request.form.get("express_clave_fiscal"),
+            request.form.get("express_representado"),
+            request.form.get("express_punto_venta"),
+            *request.form.getlist("express_producto"),
+            *request.form.getlist("express_tipo"),
+            *request.form.getlist("express_cantidad"),
+            *request.form.getlist("express_precio"),
+        )
+    )
+    if not hay_algo:
+        return [], [], tr(lg, "fact_err_sin_datos")
+
+    filas, errores = construir_filas_express(
+        cuit_login=request.form.get("express_cuit_login") or "",
+        clave_fiscal=request.form.get("express_clave_fiscal") or "",
+        representado=request.form.get("express_representado") or "",
+        punto_venta=request.form.get("express_punto_venta") or "",
+        fechas=request.form.getlist("express_fecha"),
+        tipos=request.form.getlist("express_tipo"),
+        conceptos=request.form.getlist("express_concepto"),
+        productos=request.form.getlist("express_producto"),
+        cantidades=request.form.getlist("express_cantidad"),
+        precios=request.form.getlist("express_precio"),
+    )
+    if not filas:
+        return [], errores, "; ".join(errores) or tr(lg, "fact_err_express_incompleto")
+    return filas, errores, None
+
+
+@app.get("/facturador")
+def facturador():
+    _requiere_admin()
+    return render_template("facturador.html", **_facturador_contexto_plantilla())
+
+
+@app.get("/facturador/plantilla")
+def facturador_plantilla():
+    _requiere_admin()
+    from cuit_en_arca.facturador_automation import ruta_plantilla_facturador_excel
+
+    ruta = ruta_plantilla_facturador_excel()
+    if not ruta.is_file():
+        abort(404)
+    return send_file(
+        ruta,
+        as_attachment=True,
+        download_name="Formato Comprobantes en Linea.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/facturador/emitir")
+def facturador_emitir():
+    _requiere_admin()
+    lg = normalize_lang(session.get("lang"))
+    es_fetch = request.headers.get("X-Requested-With") == "fetch"
+    ctx = _facturador_contexto_plantilla()
+
+    if not _mostrar_ui_cuit_arca():
+        msg = tr(lg, "err_arca_disabled")
+        if es_fetch:
+            return jsonify({"error": msg}), 403
+        return render_template("facturador.html", error=msg, **ctx), 403
+
+    filas, _errores, err_msg = _filas_facturador_desde_peticion(lg)
+    if err_msg:
+        if es_fetch:
+            return jsonify({"error": err_msg}), 400
+        return render_template("facturador.html", error=err_msg, **ctx), 400
+
+    from cuit_en_arca.cancelacion import reset_cancelacion
+    from cuit_en_arca.facturador_automation import ejecutar_facturador_lote
+    from cuit_en_arca.progreso_facturador import (
+        callback_log_facturador,
+        callback_paso_facturador,
+        crear_job_facturador,
+        finalizar_job_facturador,
+        marcar_cancelado_facturador,
+        progreso_facturador,
+        reiniciar_pasos_facturador,
+    )
+
+    job_id = uuid4().hex
+    reset_cancelacion(job_id)
+    crear_job_facturador(job_id, len(filas))
+    reiniciar_pasos_facturador(job_id)
+    on_log = callback_log_facturador(job_id)
+    on_paso = callback_paso_facturador(job_id)
+    headless = _headless_desde_peticion()
+
+    def _worker() -> None:
+        try:
+            progreso_facturador(job_id, 0, len(filas), "Iniciando…")
+            resultado = ejecutar_facturador_lote(
+                filas,
+                headless=headless,
+                on_log=on_log,
+                on_paso=on_paso,
+                on_progreso=lambda a, t, m: progreso_facturador(job_id, a, t, m),
+                job_id=job_id,
+            )
+            resumen = [
+                {
+                    "fila": r.fila_excel,
+                    "representado": r.representado,
+                    "tipo": r.tipo_comprobante,
+                    "comprobante": r.comprobante,
+                    "error": r.error,
+                }
+                for r in resultado.filas
+            ]
+            finalizar_job_facturador(
+                job_id,
+                ok=resultado.ok,
+                fallidos=resultado.fallidos,
+                resumen=resumen,
+            )
+        except Exception as exc:
+            from cuit_en_arca.cancelacion import DescargaCanceladaError
+
+            if isinstance(exc, DescargaCanceladaError):
+                marcar_cancelado_facturador(job_id, str(exc))
+            else:
+                finalizar_job_facturador(
+                    job_id, ok=0, fallidos=len(filas), resumen=[], error=str(exc)
+                )
+
+    threading.Thread(target=_worker, daemon=True).start()
+    if es_fetch:
+        return jsonify({"job_id": job_id, "total": len(filas)})
+    return render_template("facturador.html", fact_job_id=job_id, **ctx)
+
+
+@app.get("/facturador/estado/<job_id>")
+def facturador_estado(job_id: str):
+    _requiere_admin()
+    from cuit_en_arca.progreso_facturador import obtener_estado_facturador
+
+    estado = obtener_estado_facturador(job_id)
     if estado is None:
         return jsonify({"error": "job_not_found"}), 404
     return jsonify(estado)
@@ -2366,9 +2749,8 @@ def np_descargar():
         return render_template("nuestra_parte.html", error=err_cupo)
 
     from cuit_en_arca.nuestra_parte_automation import ejecutar_nuestra_parte_lote
-    from cuit_en_arca.service import headless_desde_form
 
-    headless = headless_desde_form(request.form.get("ver_navegador"))
+    headless = _headless_desde_peticion()
     carpeta_form = (request.form.get("carpeta_destino") or "").strip() or None
 
     job_id = uuid4().hex
@@ -2397,6 +2779,7 @@ def np_descargar():
     on_log = envolver_log_con_entrega(callback_log_np(job_id), entrega)
     on_paso = callback_paso_np(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
+    usuario_cupo_job = _usuario_cupo_web()
     _reg_mc, _reg_dfe, registrar_valor_np = _registro_valor_sesion()
 
     def _reinit() -> None:
@@ -2432,6 +2815,7 @@ def np_descargar():
                 nombre_carpeta_sesion=nombre_sesion_np,
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
+                usuario_cupo=usuario_cupo_job,
                 registrar_valor_np=registrar_valor_np,
             )
             if entrega:
@@ -2605,6 +2989,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
 
 @app.get("/analisis-programado")
 def analisis_programado():
+    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config
 
     cfg = cargar_config()
@@ -2616,6 +3001,7 @@ def analisis_programado():
 
 @app.get("/analisis-programado/plantilla")
 def analisis_programado_plantilla():
+    _requiere_admin()
     from cuit_en_arca.analisis_programado import ruta_plantilla_excel
 
     ruta = ruta_plantilla_excel()
@@ -2631,6 +3017,7 @@ def analisis_programado_plantilla():
 
 @app.get("/analisis-programado/estado")
 def analisis_programado_estado():
+    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config, scheduler_estado
 
     cfg = cargar_config()
@@ -2641,6 +3028,7 @@ def analisis_programado_estado():
 
 @app.get("/analisis-programado/ejecucion")
 def analisis_programado_ejecucion():
+    _requiere_admin()
     from cuit_en_arca.progreso_analisis_programado import obtener_ejecucion_ap
 
     return jsonify(obtener_ejecucion_ap())
@@ -2648,6 +3036,7 @@ def analisis_programado_ejecucion():
 
 @app.post("/analisis-programado/guardar")
 def analisis_programado_guardar():
+    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config, guardar_config
 
     lg = normalize_lang(session.get("lang"))
@@ -2687,8 +3076,8 @@ def analisis_programado_guardar():
 @app.post("/analisis-programado/ejecutar-ahora")
 def analisis_programado_ejecutar_ahora():
     from cuit_en_arca.analisis_programado import cargar_config, lanzar_ejecucion_ap
-    from cuit_en_arca.service import headless_desde_form
 
+    _requiere_admin()
     lg = normalize_lang(session.get("lang"))
     es_fetch = request.headers.get("X-Requested-With") == "fetch"
 
@@ -2715,7 +3104,7 @@ def analisis_programado_ejecutar_ahora():
     ok, msg = lanzar_ejecucion_ap(
         cfg,
         manual=True,
-        headless=headless_desde_form(request.form.get("ver_navegador")),
+        headless=_headless_desde_peticion(),
     )
     if not ok:
         err = tr(lg, "ap_err_en_curso")
@@ -2750,6 +3139,7 @@ def cancelar_descarga():
     msg = tr(lg, "msg_descarga_cancelada")
 
     if tipo == "ap":
+        _requiere_admin()
         solicitar_cancelacion_ap()
         marcar_cancelado_ap(msg)
     elif job_id:
@@ -2760,6 +3150,10 @@ def cancelar_descarga():
             marcar_cancelado_vl(job_id, msg)
         elif tipo == "np":
             marcar_cancelado_np(job_id, msg)
+        elif tipo == "fact":
+            from cuit_en_arca.progreso_facturador import marcar_cancelado_facturador
+
+            marcar_cancelado_facturador(job_id, msg)
         else:
             marcar_cancelado(job_id, msg)
     else:
@@ -2780,8 +3174,57 @@ def api_auth_users():
     return jsonify(export_users_payload())
 
 
+@app.get("/api/cupo/info")
+def api_cupo_info():
+    """Consulta cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
+    if not verificar_token_remoto(request.headers.get("Authorization")):
+        return jsonify({"error": "unauthorized"}), 401
+    usuario = (request.args.get("usuario") or "").strip()
+    if not usuario:
+        return jsonify({"error": "usuario_requerido"}), 400
+    from auth_registro import info_cupo_cuit, resolver_clave_usuario_overlay
+
+    clave = resolver_clave_usuario_overlay(usuario) or usuario
+    info = info_cupo_cuit(clave)
+    if info is None:
+        return jsonify({"error": "sin_cupo", "usuario": clave}), 404
+    return jsonify({"ok": True, "usuario": clave, **info})
+
+
+@app.post("/api/cupo/consumir")
+def api_cupo_consumir():
+    """Registra consumo de cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
+    if not verificar_token_remoto(request.headers.get("Authorization")):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    usuario = (data.get("usuario") or "").strip()
+    try:
+        cantidad = max(1, int(data.get("cantidad") or 1))
+    except (TypeError, ValueError):
+        cantidad = 1
+    if not usuario:
+        return jsonify({"error": "usuario_requerido"}), 400
+    from auth_registro import consumir_cuit_exitoso, info_cupo_cuit, resolver_clave_usuario_overlay
+
+    clave = resolver_clave_usuario_overlay(usuario) or usuario
+    if info_cupo_cuit(clave) is None:
+        return jsonify({"error": "sin_cupo", "usuario": clave}), 404
+    if not consumir_cuit_exitoso(clave, cantidad):
+        return jsonify({"error": "cupo_agotado", "usuario": clave}), 409
+    info = info_cupo_cuit(clave) or {}
+    return jsonify(
+        {
+            "ok": True,
+            "usuario": clave,
+            "cuit_usados": info.get("cuit_usados"),
+            "cuit_disponibles": info.get("cuit_disponibles"),
+        }
+    )
+
+
 @app.post("/analisis-programado/limpiar")
 def analisis_programado_limpiar():
+    _requiere_admin()
     from cuit_en_arca.analisis_programado import limpiar_configuracion_completa
     from cuit_en_arca.progreso_analisis_programado import resetear_ejecucion_ap
 

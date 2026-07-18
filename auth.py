@@ -202,12 +202,19 @@ def _remote_url() -> str:
     return url_txt
 
 
+def _normalizar_token_remoto(token: str) -> str:
+    t = (token or "").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t
+
+
 def _remote_token() -> str:
-    token = (os.environ.get("AUTH_USERS_REMOTE_TOKEN") or "").strip()
+    token = _normalizar_token_remoto(os.environ.get("AUTH_USERS_REMOTE_TOKEN") or "")
     if token:
         return token
     _, token_txt = _leer_auth_remote_txt()
-    return token_txt
+    return _normalizar_token_remoto(token_txt)
 
 
 def _refresh_sec() -> int:
@@ -312,8 +319,19 @@ def _leer_cache() -> tuple[dict[str, CuentaUsuario], float]:
             else:
                 fetched_at = candidato.stat().st_mtime
             return cuentas, fetched_at
-        except OSError as exc:
-            _LOG.warning("Caché de usuarios inválida en %s: %s", candidato, exc)
+        except Exception as exc:
+            from auth_crypto import AuthStoreCorruptError
+
+            if isinstance(exc, AuthStoreCorruptError):
+                try:
+                    from auth_registro import _marcar_integridad_fallida
+
+                    _marcar_integridad_fallida(str(exc))
+                except Exception:
+                    pass
+                return {}, 0.0
+            if isinstance(exc, OSError):
+                _LOG.warning("Caché de usuarios inválida en %s: %s", candidato, exc)
     return {}, 0.0
 
 
@@ -348,6 +366,80 @@ def _fetch_remoto() -> tuple[dict[str, CuentaUsuario], dict[str, Any] | None]:
     except (json.JSONDecodeError, TimeoutError, OSError, ValueError) as exc:
         _LOG.warning("Error al descargar usuarios remotos: %s", exc)
     return {}, None
+
+
+_OVERLAY_SYNC_KEYS = (
+    "password",
+    "email",
+    "nombre",
+    "telefono_area",
+    "telefono_numero",
+    "valido_desde",
+    "valido_hasta",
+    "activo",
+    "pendiente_aprobacion",
+    "cuit_limite",
+    "cuit_usados",
+    "rol",
+    "es_admin",
+    "admin",
+    "uso_mce_comprobantes",
+    "uso_mcr_comprobantes",
+    "uso_dfe_notificaciones",
+    "uso_np_cuits",
+)
+
+
+def _sync_overlay_cupo_desde_remoto(payload: dict[str, Any] | None) -> None:
+    """Portable: refleja cupo y suscripción del servidor en usuarios_registrados local."""
+    if not isinstance(payload, dict):
+        return
+    remoto = payload.get("users")
+    if not isinstance(remoto, dict) or not remoto:
+        return
+    try:
+        from auth_registro import (
+            _cargar_overlay_completo,
+            _guardar_overlay_completo,
+            _inicializar_cupo_meta,
+            _lock,
+            meta_es_admin,
+        )
+    except Exception:
+        _LOG.debug("Sync overlay cupo omitido (auth_registro no disponible)", exc_info=True)
+        return
+
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict):
+            overlay["users"] = {}
+            users = overlay["users"]
+        changed = False
+        for clave, meta in remoto.items():
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
+                if not meta_es_admin(meta):
+                    continue
+            pwd = str(meta.get("password") or meta.get("clave") or "").strip()
+            if not pwd and not meta_es_admin(meta):
+                continue
+            dest = users.get(clave)
+            if not isinstance(dest, dict):
+                dest = {}
+                users[clave] = dest
+            for key in _OVERLAY_SYNC_KEYS:
+                if key in meta:
+                    dest[key] = meta[key]
+            _inicializar_cupo_meta(dest)
+            changed = True
+        if changed:
+            _guardar_overlay_completo(overlay)
+            _LOG.info(
+                "Overlay de cupo sincronizado desde servidor (%d usuario(s)).",
+                len(remoto),
+            )
 
 
 def _leer_payload_env_json() -> dict[str, Any] | None:
@@ -497,6 +589,7 @@ def _actualizar_cache_remota(*, forzar: bool = False) -> dict[str, CuentaUsuario
     if cuentas:
         merged = _fusionar_cuentas(locales, cuentas)
         _guardar_cache(merged, origen=_remote_url(), meta=meta)
+        _sync_overlay_cupo_desde_remoto(meta)
         with _lock:
             _cache_usuarios = merged
             _cache_obtenido_en = time.time()
@@ -538,6 +631,13 @@ def _loop_sincronizacion() -> None:
         except Exception:
             _LOG.exception("Error en sincronización de usuarios")
         time.sleep(_refresh_sec())
+
+
+def forzar_sync_usuarios_remoto() -> bool:
+    """Sincroniza usuarios + overlay de cupo desde el servidor (portables)."""
+    if not _modo_remoto_activo():
+        return False
+    return bool(_actualizar_cache_remota(forzar=True))
 
 
 def iniciar_sincronizacion_usuarios() -> None:

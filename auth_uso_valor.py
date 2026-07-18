@@ -32,29 +32,26 @@ def _leer_uso_meta(meta: dict[str, Any]) -> dict[str, int]:
 
 
 def _incrementar_uso(username: str, **campos: int) -> None:
-    from auth_registro import (
-        _lock,
-        _path_usuarios_overlay,
-        _read_store,
-        _write_store,
-        meta_es_admin,
-        resolver_clave_overlay,
-    )
     from auth import es_administrador
-    from datetime import datetime, timezone
+    from auth_registro import (
+        _cargar_overlay_completo,
+        _guardar_overlay_completo,
+        _lock,
+        meta_es_admin,
+        resolver_clave_usuario_overlay,
+    )
 
     u_raw = (username or "").strip()
     if not u_raw or es_administrador(u_raw):
         return
-    u = resolver_clave_overlay(u_raw)
+    u = resolver_clave_usuario_overlay(u_raw)
     if not u:
         return
     incrementos = {k: max(0, int(v)) for k, v in campos.items() if int(v) > 0}
     if not incrementos:
         return
     with _lock:
-        path = _path_usuarios_overlay()
-        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
             return
@@ -68,8 +65,7 @@ def _incrementar_uso(username: str, **campos: int) -> None:
             uso[key] = min(uso[key] + val, 1_000_000_000)
         for key in _USO_KEYS:
             meta[key] = uso[key]
-        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        _write_store("usuarios_registrados", overlay, path)
+        _guardar_overlay_completo(overlay)
 
 
 def contar_comprobantes_en_archivo(datos: bytes, nombre: str) -> int:

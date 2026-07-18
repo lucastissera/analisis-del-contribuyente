@@ -185,12 +185,17 @@
           <span class="titulo">{{ t('inicio_btn_np') }}</span>
           <span class="desc">{{ t('inicio_btn_np_desc') }}</span>
         </a>
+        {% if es_administrador %}
+        <a class="boton-grande boton-admin" href="{{ url_for('facturador') }}">
+          <span class="icono" aria-hidden="true">&#128179;</span>
+          <span class="titulo">{{ t('inicio_btn_fact') }}</span>
+          <span class="desc">{{ t('inicio_btn_fact_desc') }}</span>
+        </a>
         <a class="boton-grande boton-ap" href="{{ url_for('analisis_programado') }}">
           <span class="icono" aria-hidden="true">&#128197;</span>
           <span class="titulo">{{ t('inicio_btn_ap') }}</span>
           <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
         </a>
-        {% if es_administrador %}
         <a class="boton-grande boton-admin" href="{{ url_for('admin_altas_usuarios') }}">
           <span class="icono" aria-hidden="true">&#128100;</span>
           <span class="titulo">{{ t('inicio_btn_admin_altas') }}</span>

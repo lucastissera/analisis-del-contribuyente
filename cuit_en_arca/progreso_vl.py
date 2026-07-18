@@ -17,9 +17,18 @@ PASOS_VL_GRANOS: tuple[tuple[str, str], ...] = (
     ("servicio_granos", "Abrir liquidaciones de granos"),
     ("contribuyente_granos", "Seleccionar contribuyente (granos)"),
     ("consulta_prim", "Consulta liquidaciones primarias recibidas"),
-    ("descargar_prim", "Descargar PDF primarias"),
+    ("descargar_prim", "Descargar PDF primarias recibidas"),
     ("consulta_sec", "Consulta liquidaciones secundarias recibidas"),
-    ("descargar_sec", "Descargar PDF secundarias"),
+    ("descargar_sec", "Descargar PDF secundarias recibidas"),
+    ("consulta_sec_emit", "Consulta liquidaciones secundarias emitidas"),
+    ("descargar_sec_emit", "Descargar PDF secundarias emitidas"),
+)
+
+PASOS_VL_CERTIFICADOS: tuple[tuple[str, str], ...] = (
+    ("servicio_cert", "Abrir liquidaciones de granos (certificados)"),
+    ("contribuyente_cert", "Seleccionar contribuyente (certificados)"),
+    ("consulta_cert_dep", "Consulta certificados de depósito (depositante)"),
+    ("descargar_cert_dep", "Descargar PDF certificados de depósito"),
 )
 
 PASOS_VL_HACIENDA: tuple[tuple[str, str], ...] = (
@@ -43,6 +52,8 @@ def pasos_vl_para(sistemas: list[str] | None) -> tuple[tuple[str, str], ...]:
     out: list[tuple[str, str]] = [PASOS_VL_LOGIN]
     if "granos" in sis:
         out.extend(PASOS_VL_GRANOS)
+    if "certificados" in sis:
+        out.extend(PASOS_VL_CERTIFICADOS)
     if "hacienda" in sis:
         out.extend(PASOS_VL_HACIENDA)
     return tuple(out)

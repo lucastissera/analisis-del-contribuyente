@@ -308,7 +308,6 @@ html.modo-oscuro .logo-sistema.logo-oscuro {
   margin-bottom: 0.65rem;
 }
 .cabecera--inicio .isologo-wrap .logo-sistema {
-  display: block;
   width: 100%;
   height: auto;
   max-width: none;

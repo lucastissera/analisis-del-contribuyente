@@ -173,6 +173,129 @@ def _nombre_carpeta_cuit_dfe(
     return cuit_fmt
 
 
+_DFE_ENCABEZADO_CUIT_RE = re.compile(
+    r"\[\s*(\d{2}\s*-\s*\d{8}\s*-\s*\d)\s*\]"
+)
+
+
+def _texto_encabezado_titular_dfe(ve) -> str:
+    """Texto «NOMBRE [xx-xxxxxxxx-x]» del margen superior derecho en DFE."""
+    try:
+        return str(
+            ve.evaluate(
+                """() => {
+              const re = /\\[\\s*\\d{2}\\s*-\\s*\\d{8}\\s*-\\s*\\d\\s*\\]/;
+              const candidatos = [];
+              const push = (t) => {
+                const s = (t || '').replace(/\\s+/g, ' ').trim();
+                if (s && s.length >= 15 && s.length <= 120 && re.test(s)) {
+                  candidatos.push(s);
+                }
+              };
+              for (const sel of [
+                '[class*="usuario"]', '[class*="user"]', '[class*="header"]',
+                'header', 'nav', '.navbar', '.topbar', '.barra-superior'
+              ]) {
+                for (const el of document.querySelectorAll(sel)) {
+                  push(el.textContent || '');
+                }
+              }
+              if (!candidatos.length) {
+                for (const el of document.querySelectorAll('body *')) {
+                  const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+                  if (!t || t.length < 15 || t.length > 120 || !re.test(t)) continue;
+                  let hoja = true;
+                  for (const h of el.querySelectorAll('*')) {
+                    const ht = (h.textContent || '').replace(/\\s+/g, ' ').trim();
+                    if (ht && ht.length >= 15 && re.test(ht)) { hoja = false; break; }
+                  }
+                  if (hoja) candidatos.push(t);
+                }
+              }
+              candidatos.sort((a, b) => a.length - b.length);
+              return candidatos[0] || '';
+            }"""
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _titular_encabezado_dfe(ve) -> tuple[str, str] | None:
+    """Devuelve (nombre, cuit_11) del titular visible en el encabezado DFE."""
+    raw = _texto_encabezado_titular_dfe(ve)
+    if not raw:
+        return None
+    m = _DFE_ENCABEZADO_CUIT_RE.search(raw)
+    if not m:
+        return None
+    cuit_n = re.sub(r"\D", "", m.group(1))
+    if len(cuit_n) != 11:
+        return None
+    nombre = _parsear_nombre_opcion_arca(raw, cuit_n)
+    if not nombre:
+        return None
+    return nombre, cuit_n
+
+
+def _hay_representados_seleccionables_dfe(ve) -> bool:
+    """True si la pestaña representados tiene un desplegable con opciones reales."""
+    try:
+        return bool(
+            ve.evaluate(
+                """() => {
+              const panel = document.querySelector("#representados-comunicaciones-tab");
+              if (!panel) return false;
+              for (const sel of panel.querySelectorAll("select")) {
+                for (const opt of sel.options) {
+                  const t = (opt.textContent || opt.label || opt.value || "").trim();
+                  if (t && t.replace(/\\D/g, '').length >= 11) return true;
+                }
+              }
+              return false;
+            }"""
+            )
+        )
+    except Exception:
+        return False
+
+
+def _dfe_modo_titular(cred, ve) -> bool:
+    """True si la consulta corresponde al titular (sin pestaña representados)."""
+    cuit_repr_n = _cuit_dfe_n(cred.cuit_representado or cred.cuit_login)
+    cuit_login_n = _cuit_dfe_n(cred.cuit_login)
+    if cuit_repr_n == cuit_login_n:
+        return True
+    enc = _titular_encabezado_dfe(ve)
+    if enc and cuit_repr_n == enc[1]:
+        return True
+    if not _hay_representados_seleccionables_dfe(ve):
+        return cuit_repr_n in {cuit_login_n, enc[1] if enc else ""}
+    return False
+
+
+def _parsear_nombre_opcion_arca(texto: str, cuit_n: str) -> str:
+    """Extrae razón social de un texto de opción ARCA (select, botón, encabezado)."""
+    from cuit_en_arca.automation_playwright import _limpiar_razon_social
+
+    raw = (texto or "").strip()
+    if not raw:
+        return ""
+
+    fmt = _cuit_dfe_fmt(cuit_n) if len(cuit_n) == 11 else cuit_n
+    resto = re.sub(r"\([\d\s\-]+\)", " ", raw)
+    for token in (fmt, cuit_n, fmt.replace("-", "")):
+        if token:
+            resto = re.sub(re.escape(token), " ", resto, flags=re.I)
+    resto = re.sub(r"[\(\)\[\]:]", " ", resto)
+    resto = re.sub(r"\s+", " ", resto).strip(" -–—|,")
+    rs = _limpiar_razon_social(resto)
+    if rs and rs != cuit_n and not re.fullmatch(r"[\d\-]+", rs):
+        return rs
+    return ""
+
+
 def _razon_social_dfe(
     ve,
     cuit_repr: str,
@@ -189,6 +312,23 @@ def _razon_social_dfe(
     candidatos: list[str] = []
     if etiqueta_select:
         candidatos.append(etiqueta_select)
+
+    try:
+        enc = _titular_encabezado_dfe(ve)
+        if enc:
+            nombre_enc, cuit_enc = enc
+            cuit_n = _cuit_dfe_n(cuit_repr)
+            if not cuit_n or cuit_n == cuit_enc:
+                candidatos.append(f"{nombre_enc} [{_cuit_dfe_fmt(cuit_enc)}]")
+    except Exception:
+        pass
+
+    try:
+        raw_enc = _texto_encabezado_titular_dfe(ve)
+        if raw_enc:
+            candidatos.append(raw_enc)
+    except Exception:
+        pass
 
     try:
         txt = ve.evaluate(
@@ -213,6 +353,27 @@ def _razon_social_dfe(
         pass
 
     try:
+        extra = ve.evaluate(
+            """() => {
+              const out = [];
+              for (const sel of ["h1", "h2", ".panel-heading", ".titular-nombre"]) {
+                for (const el of document.querySelectorAll(sel)) {
+                  const t = (el.textContent || "").trim();
+                  if (t && t.length < 160) out.push(t);
+                }
+              }
+              return out.join("\\n");
+            }"""
+        )
+        if extra:
+            for linea in str(extra).splitlines():
+                linea = linea.strip()
+                if linea:
+                    candidatos.append(linea)
+    except Exception:
+        pass
+
+    try:
         rs_mcmp = _razon_social_activa_mcmp(ve)
         if rs_mcmp:
             candidatos.append(rs_mcmp)
@@ -220,12 +381,15 @@ def _razon_social_dfe(
         pass
 
     cuit_n = _cuit_dfe_n(cuit_repr)
+    vistos: set[str] = set()
     for raw in candidatos:
-        rs = _limpiar_razon_social(raw)
+        rs = _parsear_nombre_opcion_arca(raw, cuit_n)
         if not rs:
             continue
-        if rs == cuit_n or re.fullmatch(r"[\d\-]+", rs):
+        clave = rs.lower()
+        if clave in vistos:
             continue
+        vistos.add(clave)
         _log(on_log, f"Razón social DFE: {rs}.")
         return rs
     return None
@@ -716,6 +880,14 @@ def _popup_dfe_abierto(ve) -> bool:
                 """
                 () => {
                   if (document.body.classList.contains('modal-open')) return true;
+                  for (const el of document.querySelectorAll(
+                    '[id$="___BV_modal_outer_"], .modal.show, .modal.fade.show'
+                  )) {
+                    const s = window.getComputedStyle(el);
+                    if (s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0') {
+                      return true;
+                    }
+                  }
                   for (const id of [
                     'dfeModal___BV_modal_outer_',
                     'tieneOficioModal___BV_modal_outer_',
@@ -725,13 +897,52 @@ def _popup_dfe_abierto(ve) -> bool:
                     const s = window.getComputedStyle(el);
                     if (s.display !== 'none' && s.visibility !== 'hidden') return true;
                   }
-                  return false;
+                  return !!document.querySelector('.modal-backdrop');
                 }
                 """
             )
         )
     except Exception:
         return False
+
+
+def _esperar_popup_cerrado_dfe(ve, *, timeout_ms: int = 4000) -> bool:
+    limite = time.time() + timeout_ms / 1000.0
+    while time.time() < limite:
+        if not _popup_dfe_abierto(ve):
+            return True
+        pausa_humana(0.12, 0.22)
+    return not _popup_dfe_abierto(ve)
+
+
+def _forzar_limpieza_modales_dfe_js(ve, on_log=None) -> bool:
+    """Quita backdrop y clase modal-open si el cierre por botón no alcanzó."""
+    try:
+        limpio = ve.evaluate(
+            """
+            () => {
+              document.querySelectorAll('[id$="___BV_modal_outer_"]').forEach((el) => {
+                el.style.display = 'none';
+                el.setAttribute('aria-hidden', 'true');
+                el.classList.remove('show');
+              });
+              document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+              document.body.classList.remove('modal-open');
+              document.body.style.overflow = '';
+              document.body.style.paddingRight = '';
+              document.body.style.removeProperty('padding-right');
+              return !document.body.classList.contains('modal-open')
+                && !document.querySelector('.modal-backdrop');
+            }
+            """
+        )
+        if limpio:
+            _log(on_log, "Popup DFE: limpieza de modal/backdrop aplicada.")
+            pausa_humana(0.2, 0.35)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _cerrar_popups_dfe_js(ve, on_log=None) -> bool:
@@ -794,6 +1005,7 @@ def _cerrar_popups_dfe_js(ve, on_log=None) -> bool:
                 f"Popup cerrado ({result.get('modal')}: {result.get('btn')}).",
             )
             pausa_humana(0.25, 0.45)
+            _esperar_popup_cerrado_dfe(ve, timeout_ms=3500)
             return True
     except Exception:
         pass
@@ -821,6 +1033,7 @@ def _cerrar_un_popup_dfe(ve, on_log=None) -> bool:
                     clic_humano(btn)
                 _log(on_log, f"Popup cerrado ({footer_id}).")
                 pausa_humana(0.25, 0.45)
+                _esperar_popup_cerrado_dfe(ve, timeout_ms=3500)
                 return True
         except Exception:
             pass
@@ -906,10 +1119,24 @@ def _cerrar_popup_dfe(
         else:
             pausa_humana(0.15, 0.3)
 
-    for _ in range(5):
+    for _ in range(8):
         if not _cerrar_un_popup_dfe(ve, on_log):
             break
+        pausa_humana(0.2, 0.35)
+        if not _popup_dfe_abierto(ve):
+            return
+
+    if _popup_dfe_abierto(ve):
+        _forzar_limpieza_modales_dfe_js(ve, on_log)
         pausa_humana(0.15, 0.3)
+
+    if _popup_dfe_abierto(ve):
+        for _ in range(3):
+            if _cerrar_un_popup_dfe(ve, on_log):
+                _esperar_popup_cerrado_dfe(ve, timeout_ms=2500)
+            if not _popup_dfe_abierto(ve):
+                return
+        _forzar_limpieza_modales_dfe_js(ve, on_log)
 
     if _popup_dfe_abierto(ve):
         _log(on_log, "Aviso: puede quedar un popup de DFE sin cerrar.")
@@ -1172,11 +1399,8 @@ def _abrir_detalle_representado(ve, com: dict) -> bool:
         except Exception:
             return False
     pausa_humana(0.45, 0.85)
-    try:
-        ve.wait_for_load_state("domcontentloaded", timeout=8_000)
-    except Exception:
-        pass
-    return True
+    _esperar_vista_detalle_dfe(ve)
+    return _en_vista_detalle_dfe(ve)
 
 
 def _aplicar_rango(
@@ -1299,8 +1523,10 @@ def _descargar_comunicaciones_dfe(
                         f"(N° {com['id']}, {com.get('recibido', '')})",
                     )
                     if not _abrir_detalle_representado(ve, com):
-                        _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
-                        continue
+                        _log(
+                            on_log,
+                            f"  • No se pudo abrir el detalle de la comunicación {com['id']}.",
+                        )
                     res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
                     resultado.comunicaciones.append(res_com)
                     _volver_a_lista(ve, representados=True)
@@ -1328,9 +1554,6 @@ def _descargar_comunicaciones_dfe(
             f"[{idx}/{len(objetivo)}] {com.get('asunto', '')[:60]} "
             f"(N° {com['id']}, {com.get('recibido', '')})",
         )
-        if not _abrir_detalle(ve, com["id"]):
-            _log(on_log, f"  • No se pudo abrir la comunicación {com['id']}.")
-            continue
         res_com = _descargar_o_imprimir(ve, com, carpeta_destino, on_log)
         resultado.comunicaciones.append(res_com)
         _volver_a_lista(ve, representados=False)
@@ -1343,12 +1566,24 @@ def _leer_filas(ve) -> list[dict]:
             """
             () => {
               const out = [];
+              const push = (id, asunto, recibido, sistema_id) => {
+                if (!id || out.some((x) => x.id === id)) return;
+                out.push({ id, asunto, recibido, sistema_id: sistema_id || ('sistema[' + id + ']') });
+              };
               document.querySelectorAll("tr[role='row'][aria-rowindex]").forEach((tr) => {
                 const idEl = tr.querySelector("[id^='fechaNotificacion[']");
-                if (!idEl) return;
-                const m = (idEl.id || "").match(/\\[(\\d+)\\]/);
-                if (!m) return;
-                const asunto = (tr.querySelector("td[aria-colindex='2']")?.innerText || "").trim();
+                const link = tr.querySelector('a[id^="sistema["]');
+                let id = "";
+                if (idEl) {
+                  const m = (idEl.id || "").match(/\\[(\\d+)\\]/);
+                  if (m) id = m[1];
+                }
+                if (!id && link) {
+                  const m = (link.id || "").match(/sistema\\[(\\d+)\\]/);
+                  if (m) id = m[1];
+                }
+                if (!id) return;
+                const asunto = (tr.querySelector("td[aria-colindex='2']")?.innerText || link?.innerText || "").trim();
                 let recibido = "";
                 for (const col of ["7", "6", "5"]) {
                   const txt = (tr.querySelector(`td[aria-colindex='${col}']`)?.innerText || "").trim();
@@ -1357,7 +1592,7 @@ def _leer_filas(ve) -> list[dict]:
                     break;
                   }
                 }
-                out.push({ id: m[1], asunto, recibido });
+                push(id, asunto, recibido, link ? link.id : "");
               });
               return out;
             }
@@ -1389,6 +1624,13 @@ def _leer_filas(ve) -> list[dict]:
         except Exception:
             asunto = ""
         recibido = ""
+        sistema_id = ""
+        try:
+            lnk = f.locator("a[id^='sistema[']").first
+            if lnk.count():
+                sistema_id = lnk.get_attribute("id") or ""
+        except Exception:
+            sistema_id = ""
         for col in ("7", "6", "5"):
             try:
                 txt = f.locator(f"td[aria-colindex='{col}']").first.inner_text(timeout=200).strip()
@@ -1397,30 +1639,178 @@ def _leer_filas(ve) -> list[dict]:
                     break
             except Exception:
                 continue
-        out.append({"id": cid, "asunto": asunto, "recibido": recibido})
+        out.append({"id": cid, "asunto": asunto, "recibido": recibido, "sistema_id": sistema_id})
     return out
 
 
-def _abrir_detalle(ve, cid: str) -> bool:
+def _en_vista_detalle_dfe(ve) -> bool:
+    """True si la ventanilla muestra el detalle de una comunicación (no la grilla)."""
+    try:
+        return bool(
+            ve.evaluate(
+                """() => {
+              if (document.querySelector('a#adjunto-nombre')) return true;
+              const volver = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+                .some((el) => /^\\s*volver\\s*$/i.test((el.innerText || el.textContent || '').trim()));
+              if (volver) return true;
+              const cuerpo = document.querySelector(
+                '.comunicacion-detalle, #comunicacion-detalle, [class*="detalle-comunicacion"], [class*="detalleComunicacion"]'
+              );
+              if (cuerpo) return true;
+              const hayGrilla = !!document.querySelector("tr [id^='fechaNotificacion[']");
+              const tituloDet = Array.from(document.querySelectorAll('h1, h2, h3, .panel-heading'))
+                .some((el) => /comunicaci[oó]n|notificaci[oó]n|detalle/i.test(el.innerText || ''));
+              return tituloDet && !hayGrilla;
+            }"""
+            )
+        )
+    except Exception:
+        return False
+
+
+def _esperar_vista_detalle_dfe(ve, *, timeout_ms: int = 10_000) -> None:
+    try:
+        ve.wait_for_function(
+            """() => {
+              if (document.querySelector('a#adjunto-nombre')) return true;
+              return Array.from(document.querySelectorAll('button, a, [role="button"]'))
+                .some((el) => /^\\s*volver\\s*$/i.test((el.innerText || el.textContent || '').trim()));
+            }""",
+            timeout=timeout_ms,
+        )
+    except Exception:
+        try:
+            ve.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        except Exception:
+            pass
+    pausa_humana(0.25, 0.45)
+
+
+def _localizar_adjuntos_dfe(ve):
+    selectores = (
+        "a#adjunto-nombre",
+        "a[id*='adjunto'][href]",
+        "a[href*='adjunto']",
+        ".adjunto a[href]",
+        "a[title*='.pdf' i]",
+        "a[title*='.txt' i]",
+    )
+    for sel in selectores:
+        loc = ve.locator(sel)
+        try:
+            if loc.count():
+                return loc
+        except Exception:
+            continue
+    return ve.locator("a#adjunto-nombre")
+
+
+def _abrir_detalle(ve, com: dict) -> bool:
+    cid = str(com.get("id") or "").strip()
+    if not cid:
+        return False
+    if _en_vista_detalle_dfe(ve):
+        return True
+
+    candidatos = []
+    vistos: set[str] = set()
+
+    def _agregar(loc) -> None:
+        try:
+            if not loc.count():
+                return
+            key = loc.first.evaluate(
+                "(el) => el.id || el.getAttribute('href') || (el.innerText || '').slice(0,80)"
+            )
+        except Exception:
+            key = str(len(candidatos))
+        if key in vistos:
+            return
+        vistos.add(key)
+        candidatos.append(loc.first)
+
+    sistema_id = (com.get("sistema_id") or f"sistema[{cid}]").strip()
+    _agregar(ve.locator(f"a[id='{sistema_id}']"))
+    _agregar(ve.locator(f"a[id='sistema[{cid}]']"))
+
     fila = ve.locator(f"tr:has([id='fechaNotificacion[{cid}]'])").first
     if not fila.count():
         fila = ve.locator(f"tr:has([id='adjunto[{cid}]'])").first
-    if not fila.count():
-        return False
-    celda = fila.locator("td[aria-colindex='2']").first
-    try:
-        clic_humano(celda)
-    except Exception:
+    if fila.count():
         try:
-            celda.click(timeout=4000)
+            fila.scroll_into_view_if_needed(timeout=5000)
+            fila.dblclick(timeout=5000)
+            _esperar_vista_detalle_dfe(ve)
+            if _en_vista_detalle_dfe(ve):
+                return True
         except Exception:
-            return False
-    pausa_humana(0.5, 0.9)
+            pass
+        for sel in (
+            "a[id^='sistema[']",
+            f"[id='adjunto[{cid}]'] a",
+            f"[id='adjunto[{cid}]']",
+            "td[aria-colindex='2'] a",
+            "td[aria-colindex='2'] span a",
+            "td[aria-colindex='2']",
+        ):
+            _agregar(fila.locator(sel))
+
+    asunto = (com.get("asunto") or "").strip()
+    if asunto:
+        frag = re.escape(asunto[:30])
+        _agregar(
+            ve.locator("a[id^='sistema[']").filter(
+                has_text=re.compile(frag, re.I)
+            )
+        )
+
     try:
-        ve.wait_for_load_state("domcontentloaded", timeout=8_000)
+        clic_js = ve.evaluate(
+            """
+            ([cid, sistemaId]) => {
+              const ids = [sistemaId, 'sistema[' + cid + ']'].filter(Boolean);
+              for (const id of ids) {
+                const a = document.getElementById(id);
+                if (a) { a.click(); return 'link'; }
+              }
+              const tr =
+                document.querySelector(`[id='fechaNotificacion[${cid}]']`)?.closest('tr') ||
+                document.querySelector(`[id='adjunto[${cid}]']`)?.closest('tr');
+              if (!tr) return '';
+              const link =
+                tr.querySelector('a[id^="sistema["]') ||
+                tr.querySelector('td[aria-colindex="2"] a') ||
+                tr.querySelector('td[aria-colindex="2"]');
+              if (link) { link.click(); return 'celda'; }
+              return '';
+            }
+            """,
+            [cid, sistema_id],
+        )
+        if clic_js:
+            _esperar_vista_detalle_dfe(ve)
+            if _en_vista_detalle_dfe(ve):
+                return True
     except Exception:
         pass
-    return True
+
+    for loc in candidatos:
+        try:
+            loc.scroll_into_view_if_needed(timeout=5000)
+            loc.wait_for(state="visible", timeout=5000)
+            clic_humano(loc)
+            _esperar_vista_detalle_dfe(ve)
+            if _en_vista_detalle_dfe(ve):
+                return True
+        except Exception:
+            try:
+                loc.click(timeout=5000)
+                _esperar_vista_detalle_dfe(ve)
+                if _en_vista_detalle_dfe(ve):
+                    return True
+            except Exception:
+                continue
+    return False
 
 
 def _volver_a_lista(ve, *, representados: bool = False) -> None:
@@ -1439,14 +1829,43 @@ def _volver_a_lista(ve, *, representados: bool = False) -> None:
         if volver.count():
             clic_humano(volver.first)
             pausa_humana(0.5, 0.9)
+            _esperar_tabla_comunicaciones(ve, timeout_ms=_DFE_ESPERA_TABLA_MS)
             return
     except Exception:
         pass
     try:
         ve.go_back()
         pausa_humana(0.5, 0.9)
+        _esperar_tabla_comunicaciones(ve, timeout_ms=_DFE_ESPERA_TABLA_MS)
     except Exception:
         pass
+
+
+def _imprimir_pantalla_dfe(
+    ve,
+    com: dict,
+    dest: Path,
+    on_log=None,
+    *,
+    sufijo: str = "",
+) -> str | None:
+    cid = com["id"]
+    asunto = com.get("asunto", "")
+    recibido = com.get("recibido", "")
+    try:
+        pausa_humana(0.3, 0.5)
+        png = ve.screenshot(full_page=True)
+        iso = _fecha_a_iso(recibido)
+        base = (
+            f"{iso + '_' if iso else ''}"
+            f"{_nombre_seguro(asunto, fallback='comunicacion')}_{cid}{sufijo}"
+        )
+        ruta = dest / (base[:120] + ".pdf")
+        _png_a_pdf(png, ruta)
+        return str(ruta)
+    except Exception as exc:
+        _log(on_log, f"  • No se pudo imprimir a PDF la comunicación {cid}: {exc}")
+        return None
 
 
 def _descargar_o_imprimir(ve, com: dict, dest: Path, on_log=None) -> ComunicacionDfe:
@@ -1455,38 +1874,53 @@ def _descargar_o_imprimir(ve, com: dict, dest: Path, on_log=None) -> Comunicacio
     recibido = com.get("recibido", "")
     res = ComunicacionDfe(numero=cid, asunto=asunto, fecha=recibido, tipo="pantalla_pdf")
 
-    anchors = ve.locator("a#adjunto-nombre")
-    na = anchors.count()
-    if na > 0:
-        res.tipo = "adjunto"
-        for i in range(na):
-            a = anchors.nth(i)
-            nombre = (a.get_attribute("title") or "").strip()
-            try:
-                with ve.expect_download(timeout=30_000) as di:
-                    a.click()
-                d = di.value
-                fn = _nombre_seguro(nombre or d.suggested_filename, fallback=f"adjunto_{cid}_{i}")
-                ruta = dest / fn
-                if ruta.exists():
-                    ruta = dest / f"{ruta.stem}_{i}{ruta.suffix}"
-                d.save_as(str(ruta))
-                res.archivos.append(str(ruta))
-                _log(on_log, f"  • Adjunto descargado: {ruta.name}")
-            except Exception as exc:
-                _log(on_log, f"  • No se pudo descargar adjunto de {cid}: {exc}")
-    else:
-        # Comunicación informativa → imprimir pantalla a PDF.
-        try:
-            png = ve.screenshot(full_page=True)
-            iso = _fecha_a_iso(recibido)
-            base = f"{iso + '_' if iso else ''}{_nombre_seguro(asunto, fallback='comunicacion')}_{cid}"
-            ruta = dest / (base[:120] + ".pdf")
-            _png_a_pdf(png, ruta)
-            res.archivos.append(str(ruta))
-            _log(on_log, f"  • Pantalla impresa a PDF: {ruta.name}")
-        except Exception as exc:
-            _log(on_log, f"  • No se pudo imprimir a PDF la comunicación {cid}: {exc}")
+    detalle_abierto = _en_vista_detalle_dfe(ve)
+    if not detalle_abierto:
+        detalle_abierto = _abrir_detalle(ve, com)
+
+    if detalle_abierto:
+        anchors = _localizar_adjuntos_dfe(ve)
+        na = anchors.count()
+        if na > 0:
+            res.tipo = "adjunto"
+            for i in range(na):
+                a = anchors.nth(i)
+                nombre = (
+                    (a.get_attribute("title") or "").strip()
+                    or (a.inner_text(timeout=500) or "").strip()
+                )
+                try:
+                    with ve.expect_download(timeout=30_000) as di:
+                        clic_humano(a)
+                    d = di.value
+                    fn = _nombre_seguro(
+                        nombre or d.suggested_filename, fallback=f"adjunto_{cid}_{i}"
+                    )
+                    ruta = dest / fn
+                    if ruta.exists():
+                        ruta = dest / f"{ruta.stem}_{i}{ruta.suffix}"
+                    d.save_as(str(ruta))
+                    res.archivos.append(str(ruta))
+                    _log(on_log, f"  • Adjunto descargado: {ruta.name}")
+                except Exception as exc:
+                    _log(on_log, f"  • No se pudo descargar adjunto de {cid}: {exc}")
+            return res
+
+        ruta = _imprimir_pantalla_dfe(ve, com, dest, on_log)
+        if ruta:
+            res.archivos.append(ruta)
+            _log(on_log, f"  • Pantalla impresa a PDF: {Path(ruta).name}")
+        return res
+
+    _log(
+        on_log,
+        f"  • No se abrió el detalle de la comunicación {cid}; "
+        "se guarda captura de respaldo de la grilla.",
+    )
+    ruta = _imprimir_pantalla_dfe(ve, com, dest, on_log, sufijo="_grilla")
+    if ruta:
+        res.archivos.append(ruta)
+        _log(on_log, f"  • Captura de respaldo: {Path(ruta).name}")
     return res
 
 
@@ -1615,9 +2049,7 @@ def _ejecutar_descarga_dfe_impl(
             ve.bring_to_front()
         except Exception:
             pass
-        usar_representados = _cuit_dfe_n(cred.cuit_representado) != _cuit_dfe_n(
-            cred.cuit_login
-        )
+        usar_representados = not _dfe_modo_titular(cred, ve)
         etiqueta_repr = ""
         if usar_representados:
             _log(
@@ -1628,9 +2060,24 @@ def _ejecutar_descarga_dfe_impl(
             etiqueta_repr = _configurar_dfe_representados(
                 ve, cred.cuit_representado, on_log
             )
+        else:
+            enc = _titular_encabezado_dfe(ve)
+            if enc:
+                _log(
+                    on_log,
+                    f"DFE: consultando comunicaciones del titular "
+                    f"{enc[0]} ({_cuit_dfe_fmt(enc[1])}).",
+                )
+            else:
+                _log(
+                    on_log,
+                    f"DFE: consultando comunicaciones del titular "
+                    f"{_cuit_dfe_fmt(_cuit_dfe_n(cred.cuit_login))}.",
+                )
+        cuit_carpeta = cred.cuit_representado or cred.cuit_login
         resultado.razon_social = _razon_social_dfe(
             ve,
-            cred.cuit_representado,
+            cuit_carpeta,
             on_log,
             etiqueta_select=etiqueta_repr,
         )
@@ -1638,13 +2085,12 @@ def _ejecutar_descarga_dfe_impl(
 
         carpeta_destino = _renombrar_carpeta_cuit_dfe(
             carpeta_destino,
-            cred.cuit_representado,
+            cuit_carpeta,
             resultado.razon_social,
             fallback=cred.cuit_login,
         )
         resultado.carpeta = str(carpeta_destino)
-        if resultado.razon_social:
-            _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}.")
+        _log(on_log, f"Carpeta contribuyente: {carpeta_destino.name}.")
 
         paso("listar", "en_curso")
         if usar_representados:
@@ -1745,6 +2191,7 @@ def ejecutar_dfe_lote(
     sesion: SesionPlaywrightCompartida | None = None,
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
+    usuario_cupo: str | None = None,
     registrar_valor_dfe: Callable[[int], None] | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) del DFE y guarda todo en ``DFE yyyy-mm-dd``.
@@ -1761,7 +2208,7 @@ def ejecutar_dfe_lote(
     _log(on_log, f"Carpeta de destino: {base}")
     resumen_lote: list[dict] = []
 
-    from cuit_en_arca.cancelacion import cupo_consumible_tras_cuit, verificar_cancelacion
+    from cuit_en_arca.cancelacion import confirmar_cupo_cuit_procesado, verificar_cancelacion
     from cuit_en_arca.errores import CancelacionUsuarioError
     from cuit_en_arca.sesion_playwright import (
         SesionPlaywrightCompartida,
@@ -1793,6 +2240,13 @@ def ejecutar_dfe_lote(
                     on_progreso(idx, total, msg)
                 continue
 
+            if con_sesion is not None:
+                try:
+                    con_sesion.cerrar_paginas()
+                except Exception:
+                    pass
+                pausa_humana(0.35, 0.7)
+
             cred = CredencialesArca(
                 cuit_login=cuit_log,
                 clave_fiscal=getattr(fila, "clave_fiscal", ""),
@@ -1802,7 +2256,9 @@ def ejecutar_dfe_lote(
             fh = _fecha_de(getattr(fila, "fecha_hasta", "") or "")
 
             # Subcarpeta por CUIT (se renombra con razón social tras abrir DFE).
-            dest = base / _nombre_seguro(cuit_repr, fallback=cuit_log or f"cuit_{idx}")
+            dest = base / _nombre_carpeta_cuit_dfe(
+                cuit_repr, None, fallback=cuit_log or f"cuit_{idx}"
+            )
             dest.mkdir(parents=True, exist_ok=True)
 
             try:
@@ -1816,12 +2272,15 @@ def ejecutar_dfe_lote(
                     on_paso=on_paso,
                     sesion=con_sesion,
                 )
-                if not cupo_consumible_tras_cuit(job_id, modo_ap=modo_ap):
-                    raise CancelacionUsuarioError("Descarga cancelada por el usuario.")
+                confirmar_cupo_cuit_procesado(
+                    on_cuit_exitoso,
+                    usuario_cupo=usuario_cupo,
+                    job_id=job_id,
+                    modo_ap=modo_ap,
+                    on_log=on_log,
+                )
                 if on_cuit_fin:
                     on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
-                if on_cuit_exitoso:
-                    on_cuit_exitoso()
                 if registrar_valor_dfe:
                     registrar_valor_dfe(int(res.total_archivos or 0))
                 resumen_lote.append(

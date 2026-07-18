@@ -104,6 +104,21 @@ AUTH_USERS_REFRESH_SEC=120
 | `AUTH_STORE_KEY` | Clave Fernet opcional (avanzado; por defecto usa cifrado embebido). |
 | `AUTH_ADMIN_USER` / `AUTH_ADMIN_PASSWORD` | Un solo usuario de respaldo. |
 
+## Protección en portables (cupo y licencia)
+
+Con **`auth_remote.txt`** configurado:
+
+| Capa | Qué hace |
+|------|-----------|
+| **Stores `.enc`** | Cupo y altas locales en `%LOCALAPPDATA%\DepuracionExcelComprobantes\` se guardan cifrados (`usuarios_registrados.enc`, etc.). Si alguien edita el archivo, la app **deja de funcionar** y muestra error en el login. |
+| **Servidor autoritativo** | El descuento de cupo va a Render/Neon (`POST /api/cupo/consumir`). Editar archivos locales **no** engaña al panel admin. |
+| **Consulta remota** | Antes de procesar, el portable puede consultar cupo real (`GET /api/cupo/info`). |
+| **Caché login** | `auth_users_cache.enc` también verifica integridad al descifrar. |
+
+**Importante:** el cifrado embebido impide cambios casuales (Bloc de notas), pero **no** es DRM absoluto: un atacante avanzado podría extraer la clave del `.exe`. La defensa comercial fuerte es el **servidor + Neon** como fuente de verdad del cupo.
+
+Para forzar cifrado también en desarrollo: `AUTH_STORE_ENCRYPT=1`.
+
 ## Protección mínima
 
 1. Solo **HTTPS**.

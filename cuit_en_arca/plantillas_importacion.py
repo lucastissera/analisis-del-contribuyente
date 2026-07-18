@@ -56,3 +56,10 @@ def ruta_plantilla_imputacion_contable_excel() -> Path:
         "Formato imputacion contable",
         "Formato imputacion contable.xlsx",
     )
+
+
+def ruta_plantilla_facturador_excel() -> Path:
+    return ruta_plantilla_excel(
+        "Formato Facturador",
+        "Formato Comprobantes en Linea.xlsx",
+    )

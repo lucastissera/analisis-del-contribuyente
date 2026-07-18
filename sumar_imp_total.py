@@ -625,6 +625,8 @@ ATTR_IMPUTACION_COLUMNAS = "imputacion_resuelta_cols"
 # CUIT con documento válido pero ausente en la planilla de imputación → columnas vacías
 _COLUMNA_COD_IMPUTACION_COMPROBANTES = "Cód. imputación"
 _COLUMNA_NOM_IMPUTACION_COMPROBANTES = "Imputación contable"
+_COLUMNA_APOC_COMPROBANTES = "Verificación APOC"
+_MENSAJE_PROVEEDOR_APOC = "Proveedor en base APOC"
 
 
 def _es_celda_candidata_documento_cuit(val: object) -> bool:
@@ -1214,6 +1216,54 @@ def agregar_columnas_imputacion_a_dataframe_comprobantes(
             nombres.append(n)
     out[_COLUMNA_COD_IMPUTACION_COMPROBANTES] = codigos
     out[_COLUMNA_NOM_IMPUTACION_COMPROBANTES] = nombres
+    return out
+
+
+def agregar_columna_apoc_a_dataframe_comprobantes(
+    df: pd.DataFrame,
+    cuits_apoc: set[str],
+    *,
+    emitidos: bool,
+) -> pd.DataFrame:
+    """
+    Añade ``Verificación APOC`` con el mensaje «Proveedor en base APOC» cuando el
+    CUIT emisor (recibidos) figura en el listado AFIP. Solo aplica a recibidos.
+    """
+    out = df.copy()
+    if emitidos:
+        return out
+    col_doc = "Nro. Doc. Emisor"
+    if col_doc not in out.columns:
+        return out
+    valores: list[str] = []
+    for val in out[col_doc]:
+        k = _normalizar_clave_cuit_doc(val)
+        if k and k in cuits_apoc:
+            valores.append(_MENSAJE_PROVEEDOR_APOC)
+        else:
+            valores.append("")
+    out[_COLUMNA_APOC_COMPROBANTES] = valores
+    return out
+
+
+def preparar_dataframe_comprobantes_excel(
+    df: pd.DataFrame,
+    *,
+    emitidos: bool,
+    mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+    cuits_apoc: set[str] | None = None,
+    con_columna_apoc: bool = False,
+) -> pd.DataFrame:
+    """Imputación contable (si aplica) y luego verificación APOC en comprobantes recibidos."""
+    out = df
+    if mapa_imputaciones is not None and not emitidos:
+        out = agregar_columnas_imputacion_a_dataframe_comprobantes(
+            out, mapa_imputaciones, emitidos=False
+        )
+    if con_columna_apoc and not emitidos:
+        out = agregar_columna_apoc_a_dataframe_comprobantes(
+            out, cuits_apoc or set(), emitidos=False
+        )
     return out
 
 
@@ -1948,13 +1998,17 @@ def escribir_excel_informe_completo(
     resumen_imputacion: list[dict[str, Any]] | None = None,
     con_columnas_imputacion_en_contrapartes: bool = False,
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+    cuits_apoc: set[str] | None = None,
+    con_columna_apoc: bool = False,
 ) -> None:
     temp = io.BytesIO()
-    df_xl = df_ajustado
-    if mapa_imputaciones is not None and not emitidos:
-        df_xl = agregar_columnas_imputacion_a_dataframe_comprobantes(
-            df_ajustado, mapa_imputaciones, emitidos=False
-        )
+    df_xl = preparar_dataframe_comprobantes_excel(
+        df_ajustado,
+        emitidos=emitidos,
+        mapa_imputaciones=mapa_imputaciones,
+        cuits_apoc=cuits_apoc,
+        con_columna_apoc=con_columna_apoc,
+    )
     df_xl.to_excel(temp, index=False, engine="openpyxl", sheet_name=_SHEET_COMPR)
     temp.seek(0)
     wb = load_workbook(temp)
@@ -2024,17 +2078,19 @@ def escribir_excel_informe_dual(
     resumen_imputacion_emit: list[dict[str, Any]] | None = None,
     con_columnas_imputacion_en_contrapartes: bool = False,
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+    cuits_apoc: set[str] | None = None,
+    con_columna_apoc: bool = False,
 ) -> None:
     """Un solo libro con comprobantes, resumen, distribución y contrapartes para recibidos y emitidos."""
     wb = Workbook()
     ws0 = wb.active
     ws0.title = "Comprobantes recibidos"
-    df_r_xl = (
-        agregar_columnas_imputacion_a_dataframe_comprobantes(
-            df_recibidos, mapa_imputaciones, emitidos=False
-        )
-        if mapa_imputaciones is not None
-        else df_recibidos
+    df_r_xl = preparar_dataframe_comprobantes_excel(
+        df_recibidos,
+        emitidos=False,
+        mapa_imputaciones=mapa_imputaciones,
+        cuits_apoc=cuits_apoc,
+        con_columna_apoc=con_columna_apoc,
     )
     df_e_xl = df_emitidos
     for row in dataframe_to_rows(df_r_xl, index=False, header=True):
@@ -2204,6 +2260,8 @@ def procesar_comprobantes_a_excel_y_resumen(
     emitidos: bool,
     ui_lang: str = "es",
     mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
+    cuits_apoc: set[str] | None = None,
+    con_columna_apoc: bool = False,
 ) -> tuple[bytes, dict]:
     """Igual que ``procesar_comprobantes_a_excel`` pero devuelve también un
     resumen ``{"razon_social", "por_mes": {YYYY-MM: {neto, no_grav_exento, iva, total}}}`` para
@@ -2256,6 +2314,8 @@ def procesar_comprobantes_a_excel_y_resumen(
         resumen_imputacion=resumen_imputacion,
         con_columnas_imputacion_en_contrapartes=con_cols_imp,
         mapa_imputaciones=mapa_imputaciones,
+        cuits_apoc=cuits_apoc,
+        con_columna_apoc=con_columna_apoc and not emitidos,
     )
     resumen = {
         "razon_social": _razon_social_propia(df_ajustado, emitidos),

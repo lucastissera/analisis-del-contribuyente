@@ -105,6 +105,49 @@ def coinciden_nombre_base(a: str, b: str) -> bool:
     return False
 
 
+def coinciden_representado_parcial(buscado: str, opcion: str) -> bool:
+    """True si todas las palabras del Excel (≥2) aparecen en la opción ARCA."""
+    palabras = [p for p in _preparar_texto(buscado).split() if len(p) >= 2]
+    if len(palabras) < 2:
+        return coinciden_nombre_base(buscado, opcion)
+    tokens_opcion = _preparar_texto(opcion).split()
+    return all(p in tokens_opcion for p in palabras)
+
+
+def resolver_representado_parcial(nombre_buscado: str, opciones: list[str]) -> str | None:
+    """
+    Elige representado en ARCA aunque el Excel traiga menos nombres/apellidos.
+
+    Si solo hay una opción ARCA que contiene todas las palabras del Excel, la acepta.
+    """
+    nombre = (nombre_buscado or "").strip()
+    if not nombre:
+        return None
+    visibles = [(o or "").strip() for o in opciones if (o or "").strip()]
+    if not visibles:
+        return None
+
+    try:
+        elegido = resolver_razon_social(nombre, visibles)
+        if elegido:
+            return elegido
+    except AmbiguedadRazonSocialError:
+        pass
+
+    parciales = [o for o in visibles if coinciden_representado_parcial(nombre, o)]
+    if len(parciales) == 1:
+        return parciales[0]
+    if len(parciales) > 1:
+        raise AmbiguedadRazonSocialError(nombre, parciales, falta_tipo=False)
+
+    por_nombre = [o for o in visibles if coinciden_nombre_base(o, nombre)]
+    if len(por_nombre) == 1:
+        return por_nombre[0]
+    if len(por_nombre) > 1:
+        raise AmbiguedadRazonSocialError(nombre, por_nombre, falta_tipo=True)
+    return None
+
+
 def coinciden_razones_social(a: str, b: str) -> bool:
     """Compatibilidad: nombre base + tipo si ambos lo tienen."""
     if not coinciden_nombre_base(a, b):

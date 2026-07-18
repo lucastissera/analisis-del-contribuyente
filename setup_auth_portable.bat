@@ -36,22 +36,6 @@ if errorlevel 1 (
 
 
 
-if not defined AUTH_ADMIN_PASSWORD (
-
-  set /p "AUTH_ADMIN_PASSWORD=Contrasena del admin local: "
-
-)
-
-if not defined AUTH_ADMIN_PASSWORD (
-
-  echo ERROR: falta la contrasena.
-
-  goto fin_error
-
-)
-
-
-
 set "AUTH_ADMIN_USER=Lucas"
 
 echo.
