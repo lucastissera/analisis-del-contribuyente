@@ -295,6 +295,7 @@
       {% endwith %}
 
       <p class="intro">{{ t('vl_intro')|safe }}</p>
+      <p class="intro">{{ t('vl_resumen_excel')|safe }}</p>
 
       <form id="form-vl" method="post" action="{{ url_for('vl_descargar') }}" enctype="multipart/form-data" autocomplete="off">
         <input type="hidden" id="vl-carpeta-destino" name="carpeta_destino" value="" />

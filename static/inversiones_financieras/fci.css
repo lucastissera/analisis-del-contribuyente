@@ -1,0 +1,233 @@
+/* Estilos del módulo FCI (adaptado de Análisis Inversiones Financieras) */
+.pagina-fci .fci-main {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.pagina-fci .fci-archivo-moneda {
+  margin-bottom: 0.75rem;
+}
+
+.pagina-fci .fci-moneda-field {
+  max-width: 22rem;
+}
+
+.pagina-fci .fci-moneda-field label {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.pagina-fci .fci-moneda-field select {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.pagina-fci .fci-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.pagina-fci .btn-primary,
+.pagina-fci .btn-secondary {
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.pagina-fci .btn-primary {
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border: 1px solid var(--btn-border);
+}
+
+.pagina-fci .btn-secondary {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.pagina-fci button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagina-fci #errMsg {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: rgba(176, 0, 32, 0.08);
+  border: 1px solid rgba(176, 0, 32, 0.35);
+  border-radius: 8px;
+  color: var(--color-error);
+  font-size: 0.9rem;
+}
+
+.pagina-fci .results-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 480px) {
+  .pagina-fci .results-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pagina-fci .results-grid .wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.pagina-fci .result-item {
+  padding: 0.85rem 1rem;
+  background: var(--bg-body);
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+}
+
+.pagina-fci .result-item .label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.pagina-fci .result-item .valor {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.pagina-fci .valor.ok {
+  color: var(--color-success);
+}
+
+.pagina-fci .valor.loss {
+  color: var(--color-error);
+}
+
+.pagina-fci .lotes-iniciales {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pagina-fci .lote-inicial-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 0.5rem 0.65rem;
+  align-items: end;
+  padding: 0.75rem 0.85rem;
+  background: var(--bg-body);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+@media (max-width: 620px) {
+  .pagina-fci .lote-inicial-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pagina-fci .lote-inicial-row .lote-remove-wrap {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
+.pagina-fci .lote-inicial-row .field {
+  min-width: 0;
+}
+
+.pagina-fci .lote-inicial-row label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.pagina-fci .lote-inicial-row input {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.pagina-fci .btn-remove-lote {
+  padding: 0.45rem 0.65rem;
+  min-width: 2.25rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pagina-fci .lote-inicial-row input[type="date"] {
+  color-scheme: light;
+}
+
+html.modo-oscuro .pagina-fci .lote-inicial-row input[type="date"] {
+  color-scheme: dark;
+}
+
+.pagina-fci .lote-inicial-row input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.pagina-fci .lotes-iniciales:empty {
+  min-height: 4.5rem;
+}
+
+.pagina-fci .fci-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.pagina-fci .fci-tabla-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+.pagina-fci .fci-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.pagina-fci .fci-tabla th,
+.pagina-fci .fci-tabla td {
+  border: 1px solid var(--border-soft);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.pagina-fci .fci-tabla th {
+  background: var(--bg-body);
+  font-weight: 600;
+}
+
+.pagina-fci .fci-tabla td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pagina-fci .fci-tabla-vacio {
+  margin-top: 0.5rem;
+}

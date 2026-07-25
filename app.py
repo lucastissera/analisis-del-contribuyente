@@ -1505,6 +1505,11 @@ def procesador_cruce_lic_mcr():
             "index.html",
             error=tr(lg, "err_cruce_lic_mcr_solo_xlsx"),
         )
+    mapa_imputaciones, err_imp, _datos_imp, _imp_nombre = (
+        _mapa_imputaciones_desde_peticion(lg)
+    )
+    if err_imp:
+        return render_template("index.html", error=err_imp)
     try:
         contenido, meta = procesar_cruce_lic_mcr(
             f_lic.read(),
@@ -1512,6 +1517,7 @@ def procesador_cruce_lic_mcr():
             lic_nombre=nombre_lic,
             mcr_nombre=nombre_mcr,
             ui_lang=lg,
+            mapa_imputaciones=mapa_imputaciones,
         )
     except ValueError as exc:
         return render_template("index.html", error=str(exc))
@@ -1530,6 +1536,7 @@ def procesador_cruce_lic_mcr():
         cruce_total_mcr=meta["total_mcr"],
         cruce_total_lic=meta["total_lic"],
         cruce_total_faltantes=meta["total_cruce"],
+        cruce_con_imputacion=meta.get("con_imputacion", False),
         download_id=download_id,
         nombre_salida=nombre_salida,
     )
@@ -2430,6 +2437,7 @@ def vl_descargar():
     on_paso = callback_paso_vl(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     usuario_cupo_job = _usuario_cupo_web()
+    generar_resumen_excel_vl = "certificados" in sistemas
 
     def _reinit() -> None:
         reiniciar_pasos_vl(job_id)
@@ -2454,6 +2462,7 @@ def vl_descargar():
             carpeta = ejecutar_vl_lote(
                 filas,
                 sistemas=sistemas,
+                generar_resumen_excel=generar_resumen_excel_vl,
                 headless=headless,
                 on_log=on_log,
                 on_paso=on_paso,
@@ -2490,6 +2499,15 @@ def vl_estado(job_id: str):
     if estado is None:
         return jsonify({"error": "job_not_found"}), 404
     return jsonify(estado)
+
+
+# --------------------------------------------------------------------------- #
+# Inversiones financieras — Análisis FCI (solo administrador)
+# --------------------------------------------------------------------------- #
+@app.get("/inversiones-financieras")
+def inversiones_financieras():
+    _requiere_admin()
+    return render_template("inversiones_financieras.html")
 
 
 # --------------------------------------------------------------------------- #

@@ -154,6 +154,14 @@
         background: var(--admin-bg);
         border-color: var(--admin-border);
       }
+      .boton-inv {
+        background: #e8f4ec;
+        border-color: #2e7d32;
+      }
+      html.modo-oscuro .boton-inv {
+        background: #152318;
+        border-color: #4caf50;
+      }
     </style>
   </head>
   <body>
@@ -195,6 +203,11 @@
           <span class="icono" aria-hidden="true">&#128197;</span>
           <span class="titulo">{{ t('inicio_btn_ap') }}</span>
           <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
+        </a>
+        <a class="boton-grande boton-inv" href="{{ url_for('inversiones_financieras') }}">
+          <span class="icono" aria-hidden="true">&#128200;</span>
+          <span class="titulo">{{ t('inicio_btn_inv') }}</span>
+          <span class="desc">{{ t('inicio_btn_inv_desc') }}</span>
         </a>
         <a class="boton-grande boton-admin" href="{{ url_for('admin_altas_usuarios') }}">
           <span class="icono" aria-hidden="true">&#128100;</span>

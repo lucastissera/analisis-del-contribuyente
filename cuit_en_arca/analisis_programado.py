@@ -541,6 +541,7 @@ def ejecutar_analisis_programado(
                         carpeta_vl = ejecutar_vl_lote(
                             vl,
                             sistemas=["granos", "hacienda"],
+                            generar_resumen_excel=True,
                             headless=headless,
                             on_log=log,
                             carpeta_base=base / "Ventas y Liquidaciones",

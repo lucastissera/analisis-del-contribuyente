@@ -69,6 +69,8 @@ a = Analysis(
         "cuit_en_arca.dfe_automation",
         "cuit_en_arca.progreso_dfe",
         "cuit_en_arca.vl_automation",
+        "liquidaciones_pdf",
+        "pdfplumber",
         "cuit_en_arca.facturador_automation",
         "cuit_en_arca.planilla_facturador",
         "cuit_en_arca.progreso_facturador",

@@ -1277,6 +1277,57 @@
                   </div>
                 </div>
               </div>
+              <div class="importacion-bloque" id="bloque-cruce-imputacion">
+                <h3>{{ t('cruce_imputacion_label') }}</h3>
+                <p class="subtitulo-detalle">
+                  {{ t('processor_section_imputaciones_help_1')|safe }}
+                  <a href="{{ url_for('procesador_plantilla_imputacion') }}" download="Formato imputacion contable.xlsx">{{ t('processor_imputacion_descargar_modelo') }}</a>.
+                  {{ t('cruce_imputacion_help')|safe }}
+                </p>
+                <div class="zona-soltar-wrap">
+                  <div
+                    class="zona-soltar-archivo"
+                    id="zona-soltar-cruce-imputaciones"
+                    role="group"
+                    aria-label="{{ t('drop_zone_aria') }} — {{ t('cruce_imputacion_label') }}"
+                  >
+                    <input
+                      id="excel-imputaciones-cruce"
+                      name="excel_imputaciones"
+                      type="file"
+                      accept=".xlsx,.csv"
+                      class="input-archivo-oculto"
+                      form="form-cruce-lic-mcr"
+                    />
+                    <p class="zona-soltar-texto" id="ayuda-soltar-cruce-imputaciones">
+                      {{ t('drop_text_1')|safe }}
+                      <button type="button" class="btn-elegir-archivo" id="btn-elegir-cruce-imputaciones">{{ t('choose_file_btn') }}</button>{{ t('drop_text_2') }}
+                    </p>
+                    <p
+                      class="zona-soltar-nombre archivo-seleccionado-vacio"
+                      id="nombre-archivo-cruce-imputaciones"
+                      aria-live="polite"
+                    ></p>
+                  </div>
+                </div>
+                {% if plantillas_imputacion_ui %}
+                <div class="plantillas-imputacion-local">
+                  <label for="select-plantilla-imputacion-cruce"><strong>{{ t('plantilla_select_label') }}</strong></label><br />
+                  <select
+                    name="plantilla_imputacion_id"
+                    id="select-plantilla-imputacion-cruce"
+                    class="select-plantilla-imputacion"
+                    autocomplete="off"
+                    form="form-cruce-lic-mcr"
+                  >
+                    <option value="">{{ t('plantilla_select_none') }}</option>
+                    {% for pl in plantillas_imputacion_lista %}
+                    <option value="{{ pl.id }}">{{ pl.nombre }} — {{ pl.nombre_original }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                {% endif %}
+              </div>
               <div class="acciones-form">
                 <button type="submit">{{ t('cruce_submit') }}</button>
               </div>
@@ -1295,6 +1346,9 @@
                 {{ t('cruce_resultado_resumen', mcr=cruce_total_mcr, lic=cruce_total_lic, faltantes=cruce_total_faltantes) }}
               </p>
               <p class="subtitulo-detalle">{{ t('cruce_resultado_descarga')|safe }}</p>
+              {% if cruce_con_imputacion %}
+              <p class="subtitulo-detalle">{{ t('cruce_resultado_descarga_imputacion')|safe }}</p>
+              {% endif %}
               <p style="margin-top: 1rem">
                 <a class="btn-principal" href="{{ url_for('descargar', download_id=download_id) }}" download="{{ nombre_salida }}">{{ t('download_adjusted', name=nombre_salida) }}</a>
               </p>
@@ -2105,6 +2159,31 @@
           document.getElementById("nombre-archivo-cruce-mcr"),
           document.getElementById("btn-elegir-cruce-mcr")
         );
+
+        var inputIC = document.getElementById("excel-imputaciones-cruce");
+        var zonaIC = document.getElementById("zona-soltar-cruce-imputaciones");
+        var nombreIC = document.getElementById("nombre-archivo-cruce-imputaciones");
+        var btnIC = document.getElementById("btn-elegir-cruce-imputaciones");
+        if (inputIC && zonaIC && nombreIC) {
+          wireZona(zonaIC, inputIC, nombreIC, btnIC);
+        }
+
+        var selImpCruce = document.getElementById("select-plantilla-imputacion-cruce");
+        if (inputIC && selImpCruce && nombreIC) {
+          selImpCruce.addEventListener("change", function () {
+            if (selImpCruce.value) {
+              try {
+                inputIC.value = "";
+              } catch (e) {}
+              vaciarNombre(nombreIC);
+            }
+          });
+          inputIC.addEventListener("change", function () {
+            if (inputIC.files && inputIC.files.length) {
+              selImpCruce.value = "";
+            }
+          });
+        }
 
         var selImp = document.getElementById("select-plantilla-imputacion");
         if (inputI && selImp && nombreI) {

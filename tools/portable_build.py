@@ -101,8 +101,7 @@ def _copiar_usuarios_portable() -> None:
             return
     print(
         "Aviso: no hay auth_users.enc ni auth_users.json en la raíz.\n"
-        "  • Neon/web: copiá auth_remote.example.txt → auth_remote.txt junto al .exe\n"
-        "    (URL https://analisisdelcontribuyente.onrender.com/api/auth-users + token).\n"
+        "  • Neon/web: python tools/setup_auth_portable.py --token … -> auth_remote.enc\n"
         "  • Local: python tools/encrypt_auth_users.py",
         flush=True,
     )
@@ -131,8 +130,8 @@ def main() -> int:
     print(
         f"\nListo: {DIST_DIR}\n"
         "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n"
-        "IMPORTANTE cupo: copiá auth_remote.example.txt → auth_remote.txt junto al .exe\n"
-        "  (URL Render + token = AUTH_USERS_REMOTE_TOKEN). Sin esto el cupo NO se descuenta en Neon.\n",
+        "IMPORTANTE cupo: generá auth_remote.enc con setup_auth_portable.py --token …\n"
+        "  (sync Neon). Sin esto el cupo NO se descuenta en el servidor.\n",
         flush=True,
     )
     return 0

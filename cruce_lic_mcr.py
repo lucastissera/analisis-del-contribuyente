@@ -14,13 +14,16 @@ from openpyxl.styles import Font
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from sumar_imp_total import (
+    _COLUMNA_COD_IMPUTACION_COMPROBANTES,
+    _COLUMNA_NOM_IMPUTACION_COMPROBANTES,
     _aplicar_hoja_comprobantes_excel,
     _normalizar_clave_cuit_doc,
+    agregar_columnas_imputacion_a_dataframe_comprobantes,
     parsear_numero_importe,
 )
 
 TOLERANCIA_TOTAL_CRUCE = 3.0
-_SHEET_CRUCE = "Cruce de comprobantes"
+_SHEET_CRUCE = "No tomados en IVA"
 _SHEET_LIC = "Libro IVA compras"
 _SHEET_MCR = "Mis Comprobantes Recibidos"
 
@@ -77,7 +80,11 @@ def _puntaje_columna(nombre: str, rol: str) -> float:
             return 7.0
         return -1.0
     if rol == "cuit":
-        if re.search(r"nro\.?\s*doc\.?\s*emisor|doc\.?\s*emisor|cuit.*emisor", h):
+        if re.search(r"tipo\s*doc|tipo\s*documento", h):
+            return -1.0
+        if re.search(r"nro\.?\s*doc\.?\s*emisor|numero\s*doc\.?\s*emisor", h):
+            return 12.0
+        if re.search(r"doc\.?\s*emisor|cuit.*emisor", h) and "receptor" not in h:
             return 10.0
         if h == "cuit" or h.startswith("cuit ") or h.endswith(" cuit"):
             return 9.0
@@ -205,13 +212,39 @@ def _leer_csv_para_cruce(entrada, *, ui_lang: str = "es") -> pd.DataFrame:
     raise ValueError(msg)
 
 
+def _normalizar_cuit_cruce(val: object) -> str:
+    """
+    CUIT/DNI del emisor en formato comparable: solo dígitos, sin - . ni espacios.
+    Acepta 11 dígitos corridos, 30-68898047-6, 30.68898047.6, etc.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return ""
+        if re.fullmatch(r"\d+\.0+", s):
+            try:
+                val = int(float(s))
+            except ValueError:
+                pass
+    digits = _normalizar_clave_cuit_doc(val)
+    if not digits:
+        return ""
+    if len(digits) > 11 and digits.startswith("0"):
+        recortado = digits.lstrip("0")
+        if len(recortado) == 11:
+            return recortado
+    return digits
+
+
 def _identidad_comprobante(
     fila: pd.Series, cols: dict[str, str]
 ) -> tuple[str, str, str, float] | None:
     """PV + número + CUIT + importe total (normalizados)."""
     pv = _norm_entero_comprobante(fila.get(cols["punto_venta"]))
     num = _norm_entero_comprobante(fila.get(cols["numero"]))
-    cuit = _normalizar_clave_cuit_doc(fila.get(cols["cuit"]))
+    cuit = _normalizar_cuit_cruce(fila.get(cols["cuit"]))
     total = float(parsear_numero_importe(fila.get(cols["total"])) or 0.0)
     if not pv or not num or not cuit:
         return None
@@ -263,6 +296,7 @@ def filtrar_mcr_sin_cruzar(
     for i, fila in df_mcr.iterrows():
         ident = _identidad_comprobante(fila, cols_mcr)
         if ident is None:
+            indices.append(int(i))
             continue
         if not _comprobante_coincide_en_lic(
             ident, comprobantes_lic, tolerancia=tolerancia
@@ -272,6 +306,53 @@ def filtrar_mcr_sin_cruzar(
     if not indices:
         return df_mcr.iloc[0:0].copy()
     return df_mcr.loc[indices].copy()
+
+
+def _mapa_imputacion_claves_normalizadas(
+    mapa: dict[str, tuple[str, str]],
+) -> dict[str, tuple[str, str]]:
+    """Unifica claves del mapa de imputación (CUIT con/sin guiones, ceros, etc.)."""
+    out: dict[str, tuple[str, str]] = {}
+    for clave, valor in mapa.items():
+        k = _normalizar_cuit_cruce(clave) or _normalizar_clave_cuit_doc(clave)
+        if k and k not in out:
+            out[k] = valor
+    return out
+
+
+def agregar_imputacion_a_dataframe_cruce(
+    df: pd.DataFrame,
+    mapa_imputaciones: dict[str, tuple[str, str]] | None,
+) -> pd.DataFrame:
+    """
+    Añade ``Cód. imputación`` e ``Imputación contable`` según el CUIT emisor de cada fila.
+    Si el archivo tiene columna ARCA ``Nro. Doc. Emisor``, reutiliza la lógica del procesador;
+    si no, usa la columna CUIT detectada para el cruce.
+    """
+    if not mapa_imputaciones:
+        return df
+    mapa = _mapa_imputacion_claves_normalizadas(mapa_imputaciones)
+    if "Nro. Doc. Emisor" in df.columns:
+        return agregar_columnas_imputacion_a_dataframe_comprobantes(
+            df, mapa, emitidos=False
+        )
+    cols = detectar_columnas_cruce(df)
+    col_cuit = cols["cuit"]
+    out = df.copy()
+    codigos: list[str] = []
+    nombres: list[str] = []
+    for val in out[col_cuit]:
+        k = _normalizar_cuit_cruce(val)
+        if not k or k not in mapa:
+            codigos.append("")
+            nombres.append("")
+        else:
+            c, n = mapa[k]
+            codigos.append(c)
+            nombres.append(n)
+    out[_COLUMNA_COD_IMPUTACION_COMPROBANTES] = codigos
+    out[_COLUMNA_NOM_IMPUTACION_COMPROBANTES] = nombres
+    return out
 
 
 def _escribir_hoja_datos(
@@ -347,6 +428,7 @@ def procesar_cruce_lic_mcr(
     lic_nombre: str,
     mcr_nombre: str,
     ui_lang: str = "es",
+    mapa_imputaciones: dict[str, tuple[str, str]] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     buf_lic = io.BytesIO(lic_bytes)
     buf_mcr = io.BytesIO(mcr_bytes)
@@ -355,6 +437,8 @@ def procesar_cruce_lic_mcr(
     df_mcr = leer_archivo_para_cruce(buf_mcr, nombre_archivo=mcr_nombre, ui_lang=ui_lang)
 
     df_cruce = filtrar_mcr_sin_cruzar(df_mcr, df_lic)
+    if mapa_imputaciones:
+        df_cruce = agregar_imputacion_a_dataframe_cruce(df_cruce, mapa_imputaciones)
     salida = io.BytesIO()
     escribir_excel_cruce_lic_mcr(
         salida,
@@ -366,5 +450,6 @@ def procesar_cruce_lic_mcr(
         "total_mcr": int(len(df_mcr)),
         "total_lic": int(len(df_lic)),
         "total_cruce": int(len(df_cruce)),
+        "con_imputacion": bool(mapa_imputaciones),
     }
     return salida.getvalue(), meta

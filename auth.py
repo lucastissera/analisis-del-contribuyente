@@ -4,7 +4,7 @@ Modos (por prioridad):
 
 1. **Render / servidor:** ``AUTH_USERS_JSON`` con el listado completo (fuera del repo).
 
-2. **Remoto (portables):** ``AUTH_USERS_URL`` o ``auth_remote.txt`` junto al .exe.
+2. **Remoto (portables):** ``AUTH_USERS_URL`` o ``auth_remote.enc`` / ``auth_remote.txt`` junto al .exe.
    Descarga el JSON por HTTPS, lo guarda en caché fuera de la carpeta del sistema.
 
 3. **Archivo local externo:** ``AUTH_USERS_PATH`` apunta a un JSON fuera del proyecto.
@@ -169,17 +169,31 @@ def _ruta_remota_desde_archivo_junto_exe() -> Path | None:
     return None
 
 
-def _auth_remote_txt() -> Path | None:
+def _dir_exe_portable() -> Path | None:
     if not getattr(sys, "frozen", False):
         return None
-    p = Path(sys.executable).resolve().parent / "auth_remote.txt"
+    return Path(sys.executable).resolve().parent
+
+
+def _auth_remote_txt() -> Path | None:
+    exe_dir = _dir_exe_portable()
+    if exe_dir is None:
+        return None
+    p = exe_dir / "auth_remote.txt"
     return p if p.is_file() else None
 
 
-def _leer_auth_remote_txt() -> tuple[str, str]:
+def _auth_remote_enc() -> Path | None:
+    exe_dir = _dir_exe_portable()
+    if exe_dir is None:
+        return None
+    p = exe_dir / "auth_remote.enc"
+    return p if p.is_file() else None
+
+
+def _leer_auth_remote_desde_txt(path: Path) -> tuple[str, str]:
     """Primera línea = URL; segunda línea opcional = token Bearer."""
-    path = _auth_remote_txt()
-    if path is None:
+    if not path.is_file():
         return "", ""
     try:
         lineas = [
@@ -192,6 +206,35 @@ def _leer_auth_remote_txt() -> tuple[str, str]:
     url = lineas[0] if lineas else ""
     token = lineas[1] if len(lineas) > 1 else ""
     return url, token
+
+
+def _leer_auth_remote_config() -> tuple[str, str]:
+    """URL + token: preferir ``auth_remote.enc``; respaldo ``auth_remote.txt``."""
+    enc_path = _auth_remote_enc()
+    if enc_path is not None:
+        from auth_crypto import AuthStoreCorruptError, descifrar_bytes
+
+        try:
+            blob = enc_path.read_bytes()
+        except OSError:
+            return "", ""
+        data = descifrar_bytes(blob)
+        if data is None:
+            raise AuthStoreCorruptError(
+                "No se pudo verificar auth_remote.enc (alterado o dañado)."
+            )
+        return (
+            str(data.get("url") or "").strip(),
+            str(data.get("token") or "").strip(),
+        )
+    txt_path = _auth_remote_txt()
+    if txt_path is not None:
+        return _leer_auth_remote_desde_txt(txt_path)
+    return "", ""
+
+
+def _leer_auth_remote_txt() -> tuple[str, str]:
+    return _leer_auth_remote_config()
 
 
 def _remote_url() -> str:

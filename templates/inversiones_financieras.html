@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ t('inv_page_title') }}</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='logo.png') }}"
+      id="favicon"
+      data-icon-claro="{{ url_for('static', filename='logo.png') }}"
+      data-icon-oscuro="{{ url_for('static', filename='logo-oscuro.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='inversiones_financieras/fci.css') }}" />
+    <script>
+      (function () {
+        try {
+          var oscuro = localStorage.getItem("tema") === "oscuro";
+          if (oscuro) document.documentElement.classList.add("modo-oscuro");
+          var fav = document.getElementById("favicon");
+          if (fav) {
+            fav.href = oscuro
+              ? fav.getAttribute("data-icon-oscuro") || fav.href
+              : fav.getAttribute("data-icon-claro") || fav.href;
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --bg-body: #ffffff;
+        --bg-panel: #fafafa;
+        --text-primary: #1a1a1a;
+        --text-muted: #444;
+        --border: #bbb;
+        --border-soft: #ccc;
+        --color-link: #1565c0;
+        --color-error: #b00020;
+        --color-success: #1b5e20;
+        --btn-bg: #111;
+        --btn-text: #fff;
+        --btn-border: #333;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014;
+        --bg-panel: #1a1c22;
+        --text-primary: #eceef3;
+        --text-muted: #aeb4c0;
+        --border: #3d424d;
+        --border-soft: #4a505c;
+        --color-link: #8ab4ff;
+        --color-error: #ff8a95;
+        --color-success: #81c995;
+        --btn-bg: #3d7dd9;
+        --btn-text: #0c1118;
+        --btn-border: #5b93e8;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        margin: clamp(0.75rem, 2vw, 1.5rem);
+        background: var(--bg-body);
+        color: var(--text-primary);
+      }
+      .pagina {
+        max-width: 920px;
+        margin: 0 auto;
+      }
+      .intro {
+        color: var(--text-muted);
+        margin: 0 0 1.4rem;
+        line-height: 1.5;
+      }
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.1rem 1.2rem;
+        background: var(--bg-panel);
+        margin-bottom: 1.2rem;
+      }
+      .panel h2 {
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin: 0 0 0.5rem;
+      }
+      .panel .help {
+        color: var(--text-muted);
+        font-size: 0.92rem;
+        margin: 0 0 0.9rem;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pagina pagina-fci">
+      {% include 'partials/barra_superior.html' %}
+
+      {% with titulo=t('inv_heading') %}
+      {% include 'partials/cabecera_isologo.html' %}
+      {% endwith %}
+
+      <p class="intro">{{ t('inv_intro')|safe }}</p>
+
+      <div class="fci-main">
+        <section class="panel">
+          <h2>{{ t('inv_lotes_titulo') }}</h2>
+          <p class="help">{{ t('inv_lotes_help')|safe }}</p>
+          <div id="lotesInicialesContainer" class="lotes-iniciales">
+            <div class="lote-inicial-row">
+              <div class="field">
+                <label>Fecha</label>
+                <input type="date" data-field="fecha" />
+              </div>
+              <div class="field">
+                <label>Cuotas parte</label>
+                <input
+                  type="number"
+                  data-field="cuotas"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  placeholder="0"
+                />
+              </div>
+              <div class="field">
+                <label>Valor unitario (moneda del selector «Archivo»)</label>
+                <input
+                  type="number"
+                  data-field="vu"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  placeholder="0"
+                />
+              </div>
+              <div class="lote-remove-wrap">
+                <button
+                  type="button"
+                  class="btn-remove-lote"
+                  title="Quitar lote"
+                  data-action="remove-lote"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="fci-actions-row">
+            <button type="button" class="btn-secondary" id="btnAgregarLoteInicial">
+              {{ t('inv_btn_agregar_lote') }}
+            </button>
+          </div>
+          <p class="help">{{ t('inv_excel_help')|safe }}</p>
+        </section>
+
+        <section class="panel" id="fciCardArchivo">
+          <h2>{{ t('inv_archivo_titulo') }}</h2>
+          <div class="fci-archivo-moneda">
+            <div class="field fci-moneda-field">
+              <label for="fciMonedaFondo">{{ t('inv_moneda_label') }}</label>
+              <select id="fciMonedaFondo">
+                <option value="ARS" selected>{{ t('inv_moneda_ars') }}</option>
+                <option value="USD">{{ t('inv_moneda_usd') }}</option>
+              </select>
+            </div>
+          </div>
+          <p class="help" id="fciMonedaHint" hidden>{{ t('inv_moneda_usd_hint')|safe }}</p>
+          <div class="fci-import-actions">
+            <button type="button" class="btn-primary" id="btnImportar">
+              {{ t('inv_btn_importar') }}
+            </button>
+            <button type="button" class="btn-secondary" id="btnExportar" disabled>
+              {{ t('inv_btn_exportar') }}
+            </button>
+          </div>
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden />
+          <div id="errMsg" hidden></div>
+        </section>
+
+        <section class="panel" id="panelResultados" hidden>
+          <h2>{{ t('inv_resultados_titulo') }}</h2>
+          <div class="results-grid">
+            <div class="result-item wide">
+              <div class="label">{{ t('inv_res_ejercicio') }}</div>
+              <div class="valor" id="resEjercicio">—</div>
+            </div>
+            <div class="result-item">
+              <div class="label">{{ t('inv_res_cuotas') }}</div>
+              <div class="valor" id="resCuotas">—</div>
+            </div>
+            <div class="result-item">
+              <div class="label">{{ t('inv_res_vu') }}</div>
+              <div class="valor" id="resVU">—</div>
+            </div>
+          </div>
+          <p class="help">{{ t('inv_resultados_help')|safe }}</p>
+        </section>
+
+        <section class="panel" id="panelRdoMensual" hidden>
+          <h2>{{ t('inv_rdo_mensual_titulo') }}</h2>
+          <p class="help">{{ t('inv_rdo_mensual_help')|safe }}</p>
+          <div class="fci-tabla-wrap">
+            <table class="fci-tabla">
+              <thead>
+                <tr>
+                  <th>Año</th>
+                  <th>Mes</th>
+                  <th>Resultado parcial (ARS)</th>
+                </tr>
+              </thead>
+              <tbody id="tablaRdoMensual"></tbody>
+            </table>
+            <p class="help fci-tabla-vacio" id="rdoMensualVacio" hidden>{{ t('inv_rdo_mensual_vacio') }}</p>
+          </div>
+        </section>
+
+        <section class="panel" id="panelLotesPendientes" hidden>
+          <h2>{{ t('inv_lotes_pendientes_titulo') }}</h2>
+          <p class="help">{{ t('inv_lotes_pendientes_help')|safe }}</p>
+          <div class="fci-tabla-wrap">
+            <table class="fci-tabla">
+              <thead>
+                <tr>
+                  <th>Fecha suscripción / lote</th>
+                  <th>Cuotas restantes</th>
+                  <th>Valor unitario (PEPS)</th>
+                  <th>Costo remanente</th>
+                  <th>Origen</th>
+                </tr>
+              </thead>
+              <tbody id="tablaLotesPendientes"></tbody>
+            </table>
+            <p class="help fci-tabla-vacio" id="lotesPendientesVacio" hidden>{{ t('inv_lotes_pendientes_vacio') }}</p>
+          </div>
+        </section>
+      </div>
+
+      {% include 'partials/pie_legal.html' %}
+    </div>
+
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script type="module" src="{{ url_for('static', filename='inversiones_financieras/app.js') }}"></script>
+    <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

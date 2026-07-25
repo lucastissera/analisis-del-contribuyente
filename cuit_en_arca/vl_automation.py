@@ -93,6 +93,25 @@ def _log(on_log: Callable[[str], None] | None, msg: str) -> None:
             pass
 
 
+def _actualizar_resumen_excel_vl(
+    carpeta_cuit: Path | None,
+    on_log: Callable[[str], None] | None = None,
+) -> None:
+    """Regenera ``Resumen liquidaciones.xlsx`` en la carpeta del contribuyente."""
+    if carpeta_cuit is None:
+        return
+    try:
+        from liquidaciones_pdf import (
+            NOMBRE_EXCEL_RESUMEN,
+            actualizar_excel_resumen_carpeta_cuit,
+        )
+
+        actualizar_excel_resumen_carpeta_cuit(carpeta_cuit)
+        _log(on_log, f"  • Excel actualizado: {NOMBRE_EXCEL_RESUMEN}")
+    except Exception as exc:
+        _log(on_log, f"  • Aviso: resumen Excel no actualizado ({exc})")
+
+
 def _nombre_seguro(nombre: str, *, fallback: str = "archivo") -> str:
     nombre = (nombre or "").strip()
     nombre = _INVALIDOS.sub("_", nombre)
@@ -938,6 +957,7 @@ def _descargar_pdfs_grilla(
     prefijo: str = "liq",
     on_log=None,
     offset: int = 0,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """Descarga todos los PDF visibles en table#tabla4 (columna Acción)."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -1019,6 +1039,7 @@ def _descargar_pdfs_grilla(
                     on_log,
                     f"  • PDF ({prefijo}) {descargados}/{total_objetivo}: {ruta.name}",
                 )
+                _actualizar_resumen_excel_vl(carpeta_resumen_excel, on_log)
                 _restaurar_vista_grilla(vl, url_grilla, on_log)
             else:
                 fallos_seguidos += 1
@@ -1161,6 +1182,7 @@ def _descargar_pdfs_grilla_paginado(
     *,
     prefijo: str,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """100 comprobantes por hoja y recorrido de todas las páginas (LSG emitidas, etc.)."""
     _establecer_registros_por_pagina_granos(vl, 100, on_log)
@@ -1175,7 +1197,12 @@ def _descargar_pdfs_grilla_paginado(
         if not pendientes:
             if not visitadas:
                 nuevos = _descargar_pdfs_grilla(
-                    vl, dest, prefijo=prefijo, on_log=on_log, offset=len(guardados)
+                    vl,
+                    dest,
+                    prefijo=prefijo,
+                    on_log=on_log,
+                    offset=len(guardados),
+                    carpeta_resumen_excel=carpeta_resumen_excel,
                 )
                 guardados.extend(nuevos)
             rondas_sin_nuevas += 1
@@ -1188,7 +1215,12 @@ def _descargar_pdfs_grilla_paginado(
                 if len(visitadas) == 0:
                     _log(on_log, f"  • Sin paginación ({prefijo}): {exc}")
                     nuevos = _descargar_pdfs_grilla(
-                        vl, dest, prefijo=prefijo, on_log=on_log, offset=len(guardados)
+                        vl,
+                        dest,
+                        prefijo=prefijo,
+                        on_log=on_log,
+                        offset=len(guardados),
+                        carpeta_resumen_excel=carpeta_resumen_excel,
                     )
                     return nuevos
                 _log(on_log, f"  • Fin de paginación ({prefijo}): {exc}")
@@ -1200,6 +1232,7 @@ def _descargar_pdfs_grilla_paginado(
                 prefijo=prefijo,
                 on_log=on_log,
                 offset=len(guardados),
+                carpeta_resumen_excel=carpeta_resumen_excel,
             )
             guardados.extend(nuevos)
         paginas_despues = _paginas_visibles_granos(vl)
@@ -1301,6 +1334,7 @@ def _descargar_pdfs_tabla_jig(
     prefijo: str = "CDG",
     on_log=None,
     offset: int = 0,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """Descarga PDF desde table.jig_table (certificados de depósito)."""
     dest.mkdir(parents=True, exist_ok=True)
@@ -1382,6 +1416,7 @@ def _descargar_pdfs_tabla_jig(
                     on_log,
                     f"  • PDF ({prefijo}) {descargados}/{total_objetivo}: {ruta.name}",
                 )
+                _actualizar_resumen_excel_vl(carpeta_resumen_excel, on_log)
                 _restaurar_vista_tabla_jig(vl, url_grilla, on_log)
             else:
                 fallos_seguidos += 1
@@ -1492,6 +1527,41 @@ def _consultar_certificados_deposito_depositante(
         except Exception:
             continue
     raise AutomatizacionArcaError("No se encontró el botón «Consultar».")
+
+
+def _exportar_pantalla_consulta_certificados(
+    vl,
+    dest: Path,
+    desde: date,
+    hasta: date,
+    on_log=None,
+) -> str | None:
+    """Captura en PDF la pantalla completa del listado tras filtrar certificados."""
+    from cuit_en_arca.dfe_automation import _png_a_pdf
+
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        try:
+            vl.wait_for_load_state("domcontentloaded", timeout=_VL_ESPERA_MS)
+        except Exception:
+            pass
+        try:
+            vl.locator("table.jig_table, form, body").first.wait_for(
+                state="visible",
+                timeout=min(_VL_ESPERA_MS, 15_000),
+            )
+        except Exception:
+            pass
+        pausa_humana(0.4, 0.8)
+        png = vl.screenshot(full_page=True)
+        nombre = f"CDG_listado_{desde:%Y%m%d}_{hasta:%Y%m%d}"
+        ruta = dest / (_nombre_seguro(nombre, fallback="CDG_listado")[:120] + ".pdf")
+        _png_a_pdf(png, ruta)
+        _log(on_log, f"  • Listado de certificados guardado en PDF: {ruta.name}")
+        return str(ruta)
+    except Exception as exc:
+        _log(on_log, f"  • No se pudo guardar captura del listado de certificados: {exc}")
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -2248,6 +2318,7 @@ def _descargar_pdfs_pagina_lsp(
     prefijo: str,
     offset: int,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     dest.mkdir(parents=True, exist_ok=True)
     guardados: list[str] = []
@@ -2297,6 +2368,7 @@ def _descargar_pdfs_pagina_lsp(
             guardados.append(str(ruta))
             fila += 1
             _log(on_log, f"  • PDF ({prefijo}) {numero_liq}: {ruta.name}")
+            _actualizar_resumen_excel_vl(carpeta_resumen_excel, on_log)
             _restaurar_vista_grilla_lsp(lsp, url_grilla, on_log)
         else:
             _log(
@@ -2340,6 +2412,7 @@ def _descargar_lsp_paginado(
     *,
     prefijo: str,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """Descarga todos los PDF visibles, recorriendo todas las hojas (100 por página)."""
     guardados: list[str] = []
@@ -2362,6 +2435,7 @@ def _descargar_lsp_paginado(
                 prefijo=prefijo,
                 offset=len(guardados),
                 on_log=on_log,
+                carpeta_resumen_excel=carpeta_resumen_excel,
             )
             guardados.extend(nuevos)
         # Tras completar las hojas conocidas, verificar si aparecieron más
@@ -2384,12 +2458,19 @@ def _procesar_liquidaciones_hacienda_emisor(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     _menu_lsp(lsp, r"consulta.*liquidaciones.*por\s+emisor", on_log)
     _buscar_liquidaciones_lsp(lsp, desde, hasta, on_log)
     _establecer_registros_por_pagina_lsp(lsp, 100, on_log)
     pausa_humana(0.5, 1.0)
-    return _descargar_lsp_paginado(lsp, dest, prefijo="LSH_E", on_log=on_log)
+    return _descargar_lsp_paginado(
+        lsp,
+        dest,
+        prefijo="LSH_E",
+        on_log=on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
+    )
 
 
 def _procesar_liquidaciones_hacienda_receptor(
@@ -2398,12 +2479,19 @@ def _procesar_liquidaciones_hacienda_receptor(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     _menu_lsp(lsp, r"consulta.*liquidaciones.*por\s+receptor", on_log)
     _buscar_liquidaciones_lsp(lsp, desde, hasta, on_log)
     _establecer_registros_por_pagina_lsp(lsp, 100, on_log)
     pausa_humana(0.5, 1.0)
-    return _descargar_lsp_paginado(lsp, dest, prefijo="LSH_R", on_log=on_log)
+    return _descargar_lsp_paginado(
+        lsp,
+        dest,
+        prefijo="LSH_R",
+        on_log=on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
+    )
 
 
 def _ejecutar_hacienda_vl(
@@ -2414,6 +2502,7 @@ def _ejecutar_hacienda_vl(
     fecha_hasta: date,
     *,
     cuit_login: str = "",
+    carpeta_resumen_excel: Path | None = None,
     on_log=None,
     on_paso=None,
 ) -> tuple[str | None, list[str], Path]:
@@ -2473,7 +2562,12 @@ def _ejecutar_hacienda_vl(
     paso("consulta_emisor", "en_curso")
     _log(on_log, "Liquidaciones de hacienda — por emisor…")
     archivos_emisor = _procesar_liquidaciones_hacienda_emisor(
-        lsp, dest_emisor, fecha_desde, fecha_hasta, on_log
+        lsp,
+        dest_emisor,
+        fecha_desde,
+        fecha_hasta,
+        on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
     )
     paso("consulta_emisor", "ok")
     paso("descargar_emisor", "ok")
@@ -2481,7 +2575,12 @@ def _ejecutar_hacienda_vl(
     paso("consulta_receptor", "en_curso")
     _log(on_log, "Liquidaciones de hacienda — por receptor…")
     archivos_receptor = _procesar_liquidaciones_hacienda_receptor(
-        lsp, dest_receptor, fecha_desde, fecha_hasta, on_log
+        lsp,
+        dest_receptor,
+        fecha_desde,
+        fecha_hasta,
+        on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
     )
     paso("consulta_receptor", "ok")
     paso("descargar_receptor", "ok")
@@ -2495,12 +2594,19 @@ def _procesar_liquidaciones_primarias(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     _click_input_menu(vl, r"liquidaci[oó]n\s+primaria\s+de\s+granos", on_log)
     _click_input_menu(vl, r"consulta\s+liquidaciones\s+recibidas(?!\s+de)", on_log)
     _consultar_por_criterio(vl, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_grilla(vl, dest, prefijo="LPG_R", on_log=on_log)
+    return _descargar_pdfs_grilla(
+        vl,
+        dest,
+        prefijo="LPG_R",
+        on_log=on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
+    )
 
 
 def _procesar_liquidaciones_secundarias(
@@ -2509,13 +2615,20 @@ def _procesar_liquidaciones_secundarias(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     _ir_menu_principal(vl, on_log)
     _click_input_menu(vl, r"liquidaci[oó]n\s+secundaria\s+de\s+granos", on_log)
     _click_input_menu(vl, r"consulta\s+de\s+liquidaciones\s+recibidas", on_log)
     _consultar_por_criterio(vl, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_grilla(vl, dest, prefijo="LSG_R", on_log=on_log)
+    return _descargar_pdfs_grilla(
+        vl,
+        dest,
+        prefijo="LSG_R",
+        on_log=on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
+    )
 
 
 def _procesar_liquidaciones_secundarias_emitidas(
@@ -2524,6 +2637,7 @@ def _procesar_liquidaciones_secundarias_emitidas(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """Grabación 20260706_170019: secundaria → Consulta de Liquidaciones Emitidas."""
     _ir_menu_principal(vl, on_log)
@@ -2531,7 +2645,13 @@ def _procesar_liquidaciones_secundarias_emitidas(
     _click_input_menu(vl, r"consulta\s+de\s+liquidaciones\s+emitidas", on_log)
     _consultar_por_criterio(vl, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_grilla_paginado(vl, dest, prefijo="LSG_E", on_log=on_log)
+    return _descargar_pdfs_grilla_paginado(
+        vl,
+        dest,
+        prefijo="LSG_E",
+        on_log=on_log,
+        carpeta_resumen_excel=carpeta_resumen_excel,
+    )
 
 
 def _procesar_certificados_deposito(
@@ -2540,6 +2660,7 @@ def _procesar_certificados_deposito(
     desde: date,
     hasta: date,
     on_log=None,
+    carpeta_resumen_excel: Path | None = None,
 ) -> list[str]:
     """Grabación 20260713_205858: certificación electrónica → certificados depositante."""
     _ir_menu_principal_opcional(vl, on_log)
@@ -2550,8 +2671,21 @@ def _procesar_certificados_deposito(
         on_log,
     )
     _consultar_certificados_deposito_depositante(vl, desde, hasta, on_log)
+    captura = _exportar_pantalla_consulta_certificados(vl, dest, desde, hasta, on_log)
     pausa_humana(0.8, 1.4)
-    return _descargar_pdfs_tabla_jig(vl, dest, prefijo="CDG", on_log=on_log)
+    guardados: list[str] = []
+    if captura:
+        guardados.append(captura)
+    guardados.extend(
+        _descargar_pdfs_tabla_jig(
+            vl,
+            dest,
+            prefijo="CDG",
+            on_log=on_log,
+            carpeta_resumen_excel=carpeta_resumen_excel,
+        )
+    )
+    return guardados
 
 
 def _fecha_de(texto: str) -> date | None:
@@ -2598,6 +2732,7 @@ def ejecutar_vl_cuit(
     nombre_representado: str,
     carpeta_destino: Path,
     sistemas: list[str] | None = None,
+    generar_resumen_excel: bool = False,
     headless: bool | None = None,
     on_log: Callable[[str], None] | None = None,
     on_paso: Callable[[str, str], None] | None = None,
@@ -2624,6 +2759,7 @@ def ejecutar_vl_cuit(
                 nombre_representado=nombre_representado,
                 carpeta_destino=carpeta_destino,
                 sistemas=sis,
+                generar_resumen_excel=generar_resumen_excel,
                 on_log=on_log,
                 on_paso=on_paso,
             )
@@ -2637,6 +2773,7 @@ def ejecutar_vl_cuit(
                 nombre_representado=nombre_representado,
                 carpeta_destino=carpeta_destino,
                 sistemas=sis,
+                generar_resumen_excel=generar_resumen_excel,
                 on_log=on_log,
                 on_paso=on_paso,
             )
@@ -2675,6 +2812,7 @@ def _ejecutar_vl_impl(
     nombre_representado: str,
     carpeta_destino: Path,
     sistemas: list[str] | None = None,
+    generar_resumen_excel: bool = False,
     on_log=None,
     on_paso=None,
 ) -> ResultadoVlCuit:
@@ -2701,6 +2839,11 @@ def _ejecutar_vl_impl(
 
     archivos: list[str] = []
     razon: str | None = None
+
+    def _carpeta_resumen_excel() -> Path | None:
+        if not generar_resumen_excel or "certificados" not in sistemas_ord:
+            return None
+        return carpeta_destino
 
     try:
         for sistema in sistemas_ord:
@@ -2741,7 +2884,12 @@ def _ejecutar_vl_impl(
                     paso("consulta_prim", "en_curso")
                     _log(on_log, "Liquidaciones primarias recibidas…")
                     archivos_prim = _procesar_liquidaciones_primarias(
-                        vl, dest_prim, fecha_desde, fecha_hasta, on_log
+                        vl,
+                        dest_prim,
+                        fecha_desde,
+                        fecha_hasta,
+                        on_log,
+                        carpeta_resumen_excel=_carpeta_resumen_excel(),
                     )
                     paso("consulta_prim", "ok")
                     paso("descargar_prim", "ok")
@@ -2749,7 +2897,12 @@ def _ejecutar_vl_impl(
                     paso("consulta_sec", "en_curso")
                     _log(on_log, "Liquidaciones secundarias recibidas…")
                     archivos_sec = _procesar_liquidaciones_secundarias(
-                        vl, dest_sec_rec, fecha_desde, fecha_hasta, on_log
+                        vl,
+                        dest_sec_rec,
+                        fecha_desde,
+                        fecha_hasta,
+                        on_log,
+                        carpeta_resumen_excel=_carpeta_resumen_excel(),
                     )
                     paso("consulta_sec", "ok")
                     paso("descargar_sec", "ok")
@@ -2757,7 +2910,12 @@ def _ejecutar_vl_impl(
                     paso("consulta_sec_emit", "en_curso")
                     _log(on_log, "Liquidaciones secundarias emitidas…")
                     archivos_sec_emit = _procesar_liquidaciones_secundarias_emitidas(
-                        vl, dest_sec_emit, fecha_desde, fecha_hasta, on_log
+                        vl,
+                        dest_sec_emit,
+                        fecha_desde,
+                        fecha_hasta,
+                        on_log,
+                        carpeta_resumen_excel=_carpeta_resumen_excel(),
                     )
                     paso("consulta_sec_emit", "ok")
                     paso("descargar_sec_emit", "ok")
@@ -2787,7 +2945,12 @@ def _ejecutar_vl_impl(
                     paso("consulta_cert_dep", "en_curso")
                     _log(on_log, "Certificados de depósito (como depositante)…")
                     archivos_cert = _procesar_certificados_deposito(
-                        vl, dest_cert_dep, fecha_desde, fecha_hasta, on_log
+                        vl,
+                        dest_cert_dep,
+                        fecha_desde,
+                        fecha_hasta,
+                        on_log,
+                        carpeta_resumen_excel=_carpeta_resumen_excel(),
                     )
                     paso("consulta_cert_dep", "ok")
                     paso("descargar_cert_dep", "ok")
@@ -2801,6 +2964,7 @@ def _ejecutar_vl_impl(
                         fecha_desde,
                         fecha_hasta,
                         cuit_login=cred.cuit_login,
+                        carpeta_resumen_excel=_carpeta_resumen_excel(),
                         on_log=on_log,
                         on_paso=on_paso,
                     )
@@ -2817,6 +2981,7 @@ def _ejecutar_vl_impl(
 
         resultado.razon_social = razon
         resultado.archivos = archivos
+        _actualizar_resumen_excel_vl(_carpeta_resumen_excel(), on_log)
         _log(
             on_log,
             f"Listo. {len(archivos)} PDF en {carpeta_destino}.",
@@ -2841,6 +3006,7 @@ def ejecutar_vl_lote(
     filas,
     *,
     sistemas: list[str] | None = None,
+    generar_resumen_excel: bool = False,
     headless: bool | None = None,
     on_log=None,
     on_paso=None,
@@ -2912,6 +3078,7 @@ def ejecutar_vl_lote(
                     nombre_representado=nombre_repr,
                     carpeta_destino=dest,
                     sistemas=sistemas,
+                    generar_resumen_excel=generar_resumen_excel,
                     headless=headless,
                     on_log=on_log,
                     on_paso=on_paso,

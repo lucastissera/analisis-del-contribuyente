@@ -25,6 +25,7 @@ _PROHIBIDOS = frozenset(
         "auth_users.json",
         "auth_users.enc",
         "auth_remote.txt",
+        "auth_remote.enc",
         "auth_data_dir.txt",
     }
 )
