@@ -359,6 +359,9 @@ def _consumir_cuit_overlay_local(username: str, cantidad: int = 1) -> bool:
             return False
         meta["cuit_usados"] = usados + cantidad
         meta["cuit_limite"] = limite
+        from auth_uso_valor import registrar_uso_cuit_mes_en_meta
+
+        registrar_uso_cuit_mes_en_meta(meta, cantidad)
         _guardar_overlay_completo(overlay)
     _LOG.info(
         "Cupo CUIT actualizado: %s → %d/%d usados.",

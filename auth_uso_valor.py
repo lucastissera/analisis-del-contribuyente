@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+from datetime import date
 from typing import Any, Callable
 
 _LOG = logging.getLogger(__name__)
@@ -15,10 +16,112 @@ _USO_KEYS = (
     "uso_np_cuits",
 )
 
+_USO_KEY_A_MES = {
+    "uso_mce_comprobantes": "mce",
+    "uso_mcr_comprobantes": "mcr",
+    "uso_dfe_notificaciones": "dfe",
+    "uso_np_cuits": "np",
+}
+
+_USO_MES_CAMPOS = ("cuit", "mce", "mcr", "dfe", "np")
+
+_MESES_HISTORIAL_USO = 3
+
+
+def _meses_vigentes_uso(hoy: date | None = None) -> set[str]:
+    """Últimos N meses calendario (incluye el mes en curso)."""
+    ref = hoy or date.today()
+    y, m = ref.year, ref.month
+    out: set[str] = set()
+    for _ in range(_MESES_HISTORIAL_USO):
+        out.add(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m <= 0:
+            m = 12
+            y -= 1
+    return out
+
+
+def _podar_uso_por_mes_meta(meta: dict[str, Any], hoy: date | None = None) -> None:
+    por_mes = meta.get("uso_por_mes")
+    if not isinstance(por_mes, dict) or not por_mes:
+        return
+    vigentes = _meses_vigentes_uso(hoy)
+    meta["uso_por_mes"] = {
+        mes: bucket
+        for mes, bucket in por_mes.items()
+        if mes in vigentes and isinstance(bucket, dict)
+    }
+
 
 def reset_uso_periodo_meta(meta: dict[str, Any]) -> None:
+    """Reinicia contadores del período de suscripción; conserva uso mensual (3 meses)."""
     for key in _USO_KEYS:
         meta[key] = 0
+    _podar_uso_por_mes_meta(meta)
+
+
+def _incrementar_uso_por_mes_meta(meta: dict[str, Any], mes: str, **campos: int) -> None:
+    por_mes = meta.get("uso_por_mes")
+    if not isinstance(por_mes, dict):
+        por_mes = {}
+    bucket = por_mes.get(mes)
+    if not isinstance(bucket, dict):
+        bucket = {}
+    for campo, val in campos.items():
+        if val <= 0 or campo not in _USO_MES_CAMPOS:
+            continue
+        try:
+            actual = int(bucket.get(campo) or 0)
+        except (TypeError, ValueError):
+            actual = 0
+        bucket[campo] = min(actual + int(val), 1_000_000_000)
+    por_mes[mes] = bucket
+    meta["uso_por_mes"] = por_mes
+    _podar_uso_por_mes_meta(meta)
+
+
+def registrar_uso_cuit_mes_en_meta(meta: dict[str, Any], cantidad: int = 1) -> None:
+    if cantidad <= 0:
+        return
+    mes = date.today().strftime("%Y-%m")
+    _incrementar_uso_por_mes_meta(meta, mes, cuit=cantidad)
+
+
+def _leer_uso_por_mes(meta: dict[str, Any]) -> list[dict[str, Any]]:
+    por_mes = meta.get("uso_por_mes")
+    if not isinstance(por_mes, dict):
+        return []
+    vigentes = _meses_vigentes_uso()
+    filas: list[dict[str, Any]] = []
+    for mes in sorted(vigentes):
+        bucket = por_mes.get(mes)
+        if not isinstance(bucket, dict):
+            continue
+        try:
+            filas.append(
+                {
+                    "mes": mes,
+                    "mes_fmt": _formatear_mes_ym(mes),
+                    "cuit": max(0, int(bucket.get("cuit") or 0)),
+                    "mce": max(0, int(bucket.get("mce") or 0)),
+                    "mcr": max(0, int(bucket.get("mcr") or 0)),
+                    "dfe": max(0, int(bucket.get("dfe") or 0)),
+                    "np": max(0, int(bucket.get("np") or 0)),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return filas
+
+
+def _formatear_mes_ym(mes: str) -> str:
+    """YYYY-MM → MM/YYYY para mostrar."""
+    try:
+        y, m = mes.split("-", 1)
+        return f"{int(m):02d}/{y}"
+    except (TypeError, ValueError, IndexError):
+        return mes
 
 
 def _leer_uso_meta(meta: dict[str, Any]) -> dict[str, int]:
@@ -65,6 +168,12 @@ def _incrementar_uso(username: str, **campos: int) -> None:
             uso[key] = min(uso[key] + val, 1_000_000_000)
         for key in _USO_KEYS:
             meta[key] = uso[key]
+        mes = date.today().strftime("%Y-%m")
+        mes_campos = {
+            _USO_KEY_A_MES[k]: v for k, v in incrementos.items() if k in _USO_KEY_A_MES
+        }
+        if mes_campos:
+            _incrementar_uso_por_mes_meta(meta, mes, **mes_campos)
         _guardar_overlay_completo(overlay)
 
 
@@ -146,6 +255,7 @@ def dashboard_valor_usuario(cuit: str) -> dict[str, Any] | None:
         "mcr_comprobantes": uso["uso_mcr_comprobantes"],
         "dfe_notificaciones": uso["uso_dfe_notificaciones"],
         "np_cuits": uso["uso_np_cuits"],
+        "uso_por_mes": _leer_uso_por_mes(meta),
     }
 
 
@@ -333,8 +443,45 @@ def generar_excel_dashboard_valor() -> bytes:
             det.cell(row=r, column=1, value=etiqueta)
             det.cell(row=r, column=2, value=fn(d))
             r += 1
+
+        r += 2
+        titulo_mes = r
+        det.cell(row=titulo_mes, column=1, value="Uso por mes")
+        det.cell(row=titulo_mes, column=1).font = Font(bold=True, size=12)
+        r = titulo_mes + 1
+        enc_mes = [
+            "Mes",
+            "CUIT procesados",
+            "Comprob. emitidos (MCE)",
+            "Comprob. recibidos (MCR)",
+            "Notificaciones DFE",
+            "CUIT Nuestra Parte",
+        ]
+        for col, tit in enumerate(enc_mes, start=1):
+            c = det.cell(row=r, column=col, value=tit)
+            c.font = lbl_font
+            c.fill = titulo_fill
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        r += 1
+        uso_mes = d.get("uso_por_mes") or []
+        if uso_mes:
+            for fila_mes in uso_mes:
+                det.cell(row=r, column=1, value=fila_mes.get("mes_fmt") or fila_mes.get("mes"))
+                det.cell(row=r, column=2, value=fila_mes.get("cuit", 0))
+                det.cell(row=r, column=3, value=fila_mes.get("mce", 0))
+                det.cell(row=r, column=4, value=fila_mes.get("mcr", 0))
+                det.cell(row=r, column=5, value=fila_mes.get("dfe", 0))
+                det.cell(row=r, column=6, value=fila_mes.get("np", 0))
+                r += 1
+        else:
+            det.cell(row=r, column=1, value="Sin datos mensuales en los últimos 3 meses.")
+            det.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+            r += 1
+
         det.column_dimensions["A"].width = 32
         det.column_dimensions["B"].width = 22
+        for col in range(3, 7):
+            det.column_dimensions[get_column_letter(col)].width = 18
         det["D4"] = f"Exportado: {date.today().strftime('%d/%m/%Y')}"
 
     buf = io.BytesIO()

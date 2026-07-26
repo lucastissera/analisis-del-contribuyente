@@ -38,6 +38,10 @@
       .btn-dashboard:hover { opacity: 0.92; }
       h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
       .subtitulo { color: var(--text-muted); font-size: 0.92rem; margin: 0; }
+      table.tabla-uso-mes { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
+      table.tabla-uso-mes th, table.tabla-uso-mes td { border: 1px solid var(--border); padding: 0.4rem 0.55rem; text-align: right; }
+      table.tabla-uso-mes th:first-child, table.tabla-uso-mes td:first-child { text-align: left; }
+      table.tabla-uso-mes th { background: var(--bg-body); font-weight: 600; }
       @media (max-width: 520px) { .metricas { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -80,6 +84,39 @@
             <div class="metrica-etq">{{ t('admin_dashboard_valor_np') }}</div>
           </div>
         </div>
+      </div>
+
+      <div class="panel">
+        <h2 style="font-size: 1rem; margin: 0 0 0.25rem;">{{ t('admin_dashboard_valor_uso_mes_titulo') }}</h2>
+        <p class="help">{{ t('admin_dashboard_valor_uso_mes_help') }}</p>
+        {% if dashboard.uso_por_mes %}
+        <table class="tabla-uso-mes">
+          <thead>
+            <tr>
+              <th>{{ t('admin_dashboard_valor_uso_mes_col_mes') }}</th>
+              <th>{{ t('admin_dashboard_valor_uso_mes_col_cuit') }}</th>
+              <th>{{ t('admin_dashboard_valor_mce') }}</th>
+              <th>{{ t('admin_dashboard_valor_mcr') }}</th>
+              <th>{{ t('admin_dashboard_valor_dfe') }}</th>
+              <th>{{ t('admin_dashboard_valor_np') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for fila in dashboard.uso_por_mes %}
+            <tr>
+              <td>{{ fila.mes_fmt or fila.mes }}</td>
+              <td>{{ fila.cuit }}</td>
+              <td>{{ fila.mce }}</td>
+              <td>{{ fila.mcr }}</td>
+              <td>{{ fila.dfe }}</td>
+              <td>{{ fila.np }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="help">{{ t('admin_dashboard_valor_uso_mes_vacio') }}</p>
+        {% endif %}
       </div>
     </div>
   </body>
