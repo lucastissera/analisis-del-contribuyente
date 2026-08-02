@@ -29,7 +29,12 @@
       }
       body { font-family: Arial, sans-serif; margin: 1rem; background: var(--bg-body); color: var(--text-primary); }
       a { color: var(--color-link); }
-      .pagina { max-width: 820px; margin: 0 auto; }
+      .pagina { max-width: 1100px; margin: 0 auto; }
+      .tabla-scroll { overflow-x: auto; margin-bottom: 1.5rem; }
+      .form-servicios { display: flex; flex-direction: column; gap: 0.35rem; min-width: 9rem; }
+      .servicios-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 0.15rem 0.5rem; font-size: 0.8rem; }
+      .servicios-checks label { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; cursor: pointer; }
+      .servicios-checks input { margin: 0; }
       table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin-bottom: 1.5rem; }
       th, td { text-align: left; padding: 0.45rem; border-bottom: 1px solid var(--border); }
       .panel { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1.2rem; background: var(--bg-panel); }
@@ -303,17 +308,25 @@
         <a class="btn-dashboard" href="{{ url_for('admin_dashboard_valor_exportar') }}">{{ t('admin_dashboard_export_btn') }}</a>
         <span class="help">{{ t('admin_dashboard_export_help') }}</span>
       </p>
+      <p>
+        <a class="btn-dashboard" href="{{ url_for('admin_legal_exportar_aceptaciones', formato='csv') }}">{{ t('admin_legal_export_csv') }}</a>
+        <a class="btn-dashboard" href="{{ url_for('admin_legal_exportar_aceptaciones', formato='json') }}">{{ t('admin_legal_export_json') }}</a>
+        <span class="help">{{ t('admin_legal_export_help') }}</span>
+      </p>
       {% endif %}
       {% if not suscriptores %}
       <p>{{ t('admin_gestion_suscripciones_vacio') }}</p>
       {% else %}
+      <div class="tabla-scroll">
       <table>
         <thead>
           <tr>
             <th>{{ t('alta_cuit_label') }}</th>
             <th>{{ t('alta_email_label') }}</th>
+            <th>{{ t('admin_gestion_col_servicios') }}</th>
             <th>{{ t('admin_gestion_col_vencimiento') }}</th>
             <th>{{ t('admin_gestion_col_cupo') }}</th>
+            <th>{{ t('admin_legal_col_aceptacion') }}</th>
             <th>{{ t('admin_gestion_col_dias') }}</th>
             <th>{{ t('admin_gestion_col_clave') }}</th>
             <th>{{ t('admin_gestion_col_acciones') }}</th>
@@ -324,6 +337,21 @@
           <tr class="{{ 'fila-suspendida' if s.suspendida else '' }}">
             <td>{{ s.cuit_fmt or s.cuit }}</td>
             <td>{{ s.email or '—' }}</td>
+            <td>
+              <form method="post" class="form-servicios">
+                <input type="hidden" name="accion" value="actualizar_servicios" />
+                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                <div class="servicios-checks">
+                  {% for sid in servicios_ids %}
+                  <label title="{{ t('admin_svc_' ~ sid) }}">
+                    <input type="checkbox" name="svc_{{ sid }}" value="1" {% if s.servicios.get(sid) %}checked{% endif %} />
+                    {{ t('admin_svc_corto_' ~ sid) }}
+                  </label>
+                  {% endfor %}
+                </div>
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_servicios') }}</button>
+              </form>
+            </td>
             <td>
               <form method="post" class="form-venc">
                 <input type="hidden" name="accion" value="actualizar_vencimiento" />
@@ -340,6 +368,18 @@
                 <p class="help">{{ t('admin_gestion_cupo_resumen', usados=s.cuit_usados, disponibles=s.cuit_disponibles) }}</p>
                 <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_cupo') }}</button>
               </form>
+            </td>
+            <td class="legal-col">
+              {% if s.legal_aceptada_en %}
+                {% if s.legal_version == legal_version_actual %}
+                <span class="ok" title="{{ s.legal_aceptada_en }}">{{ t('admin_legal_estado_ok', version=s.legal_version) }}</span>
+                {% else %}
+                <span class="warn" title="{{ s.legal_aceptada_en }}">{{ t('admin_legal_estado_desactualizada', version=s.legal_version, actual=legal_version_actual) }}</span>
+                {% endif %}
+                <br /><span class="help">{{ s.legal_metodo or '—' }}</span>
+              {% else %}
+                <span class="vencida">{{ t('admin_legal_estado_pendiente') }}</span>
+              {% endif %}
             </td>
             <td class="{{ 'vencida' if s.vencida else ('suspendida' if s.suspendida else '') }}">
               {% if s.suspendida %}{{ t('admin_gestion_estado_suspendida') }}
@@ -411,6 +451,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% endif %}
 
       <h2>{{ t('admin_altas_historial_titulo') }}</h2>

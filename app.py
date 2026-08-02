@@ -358,6 +358,42 @@ def _requiere_admin():
         abort(403)
 
 
+_RUTAS_POR_SERVICIO: tuple[tuple[str, str], ...] = (
+    ("/procesador", "procesador"),
+    ("/arca-descarga-lote", "procesador"),
+    ("/domicilio-fiscal", "dfe"),
+    ("/dfe-descargar", "dfe"),
+    ("/dfe-estado", "dfe"),
+    ("/ventas-liquidaciones", "vl"),
+    ("/vl-descargar", "vl"),
+    ("/vl-estado", "vl"),
+    ("/nuestra-parte", "np"),
+    ("/np-descargar", "np"),
+    ("/np-estado", "np"),
+    ("/facturador", "facturador"),
+    ("/inversiones-financieras", "inv"),
+    ("/analisis-programado", "ap"),
+)
+
+
+def _servicio_requerido_por_ruta(path: str) -> str | None:
+    p = (path or "").split("?", 1)[0]
+    for prefijo, clave in _RUTAS_POR_SERVICIO:
+        if p == prefijo or p.startswith(prefijo + "/"):
+            return clave
+    return None
+
+
+def _requiere_servicio(clave: str) -> None:
+    if session.get("es_admin"):
+        return
+    from auth_registro import usuario_tiene_servicio
+
+    user = (session.get("user") or "").strip()
+    if not user or not usuario_tiene_servicio(user, clave):
+        abort(403)
+
+
 def _headless_desde_peticion() -> bool:
     """Navegador visible solo para administrador (portable); resto siempre headless."""
     from cuit_en_arca.service import headless_desde_form
@@ -427,6 +463,9 @@ def _session_idle_and_login():
         "api_estado_altas",
         "solicitar_acceso",
         "activar_cuenta",
+        "legal_terminos",
+        "legal_privacidad",
+        "legal_aceptar",
         "olvide_contrasena",
         "guia_usuario",
         None,
@@ -435,6 +474,68 @@ def _session_idle_and_login():
     if session.get("user"):
         return None
     return redirect(url_for("login", next=request.path))
+
+
+@app.before_request
+def _verificar_servicio_habilitado():
+    if request.endpoint == "static" or (
+        request.path and request.path.startswith("/static")
+    ):
+        return None
+    user = session.get("user")
+    if not user or session.get("es_admin"):
+        return None
+    clave = _servicio_requerido_por_ruta(request.path)
+    if not clave:
+        return None
+    from auth_registro import usuario_tiene_servicio
+
+    if usuario_tiene_servicio(user, clave):
+        return None
+    lg = normalize_lang(session.get("lang"))
+    msg = tr(lg, "err_servicio_no_habilitado")
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"error": msg}), 403
+    flash(msg, "warning")
+    return redirect(url_for("index"))
+
+
+@app.before_request
+def _verificar_aceptacion_legal_pendiente():
+    if request.endpoint == "static" or (
+        request.path and request.path.startswith("/static")
+    ):
+        return None
+    user = session.get("user")
+    if not user or session.get("es_admin"):
+        return None
+    if request.endpoint in (
+        "login",
+        "logout",
+        "set_lang",
+        "desktop_alive",
+        "desktop_quit",
+        "legal_terminos",
+        "legal_privacidad",
+        "legal_aceptar",
+        "api_auth_users",
+        "api_cupo_info",
+        "api_cupo_consumir",
+        "api_estado_altas",
+        None,
+    ):
+        return None
+    try:
+        from legal_aceptacion import usuario_requiere_aceptacion_legal
+
+        if not usuario_requiere_aceptacion_legal(user):
+            return None
+    except Exception:
+        return None
+    if request.headers.get("X-Requested-With") == "fetch":
+        lg = normalize_lang(session.get("lang"))
+        return jsonify({"error": tr(lg, "legal_err_aceptacion_pendiente")}), 403
+    return redirect(url_for("legal_aceptar"))
 
 
 def _entero_miles_punto(n: int) -> str:
@@ -496,6 +597,26 @@ def _inject_i18n():
         "lang_labels": LANG_LABELS,
         "i18n_js": tr_js_bundle(lg),
     }
+
+
+@app.context_processor
+def _inject_servicios():
+    user = session.get("user")
+    if not user:
+        return {"servicios_habilitados": {}}
+    try:
+        from auth_registro import servicios_usuario
+
+        return {"servicios_habilitados": servicios_usuario(user)}
+    except Exception:
+        return {"servicios_habilitados": {}}
+
+
+@app.context_processor
+def _inject_legal_links():
+    from legal_config import LEGAL_VERSION
+
+    return {"legal_version_actual": LEGAL_VERSION}
 
 
 @app.context_processor
@@ -732,6 +853,75 @@ def guia_usuario():
     )
 
 
+def _contexto_legal_template() -> dict:
+    from legal_config import (
+        LEGAL_VERSION,
+        PROVEEDORES_TRANSFERENCIA_INTERNACIONAL,
+        jurisdiccion,
+        titular_cuit,
+        titular_domicilio,
+        titular_email,
+        titular_razon_social,
+    )
+
+    return {
+        "legal_version": LEGAL_VERSION,
+        "app_name": APP_NAME,
+        "titular_nombre": titular_razon_social(),
+        "titular_cuit": titular_cuit(),
+        "titular_domicilio": titular_domicilio(),
+        "titular_email": titular_email(),
+        "jurisdiccion": jurisdiccion(),
+        "proveedores_transferencia": PROVEEDORES_TRANSFERENCIA_INTERNACIONAL,
+    }
+
+
+@app.get("/legal/terminos")
+def legal_terminos():
+    return render_template("legal/terminos.html", **_contexto_legal_template())
+
+
+@app.get("/legal/privacidad")
+def legal_privacidad():
+    return render_template("legal/privacidad.html", **_contexto_legal_template())
+
+
+@app.route("/legal/aceptar", methods=["GET", "POST"])
+def legal_aceptar():
+    from auth_registro import registrar_aceptacion_legal_usuario, resolver_clave_usuario_overlay
+    from legal_aceptacion import datos_peticion_aceptacion, usuario_requiere_aceptacion_legal
+    from legal_config import LEGAL_VERSION
+
+    lg = normalize_lang(session.get("lang"))
+    user = (session.get("user") or "").strip()
+    if not user:
+        return redirect(url_for("login", next=url_for("legal_aceptar")))
+    if not usuario_requiere_aceptacion_legal(user):
+        return redirect(url_for("index"))
+
+    error_msg = None
+    if request.method == "POST":
+        if request.form.get("acepto_legal") != "1":
+            error_msg = tr(lg, "legal_err_aceptacion_requerida")
+        else:
+            pet = datos_peticion_aceptacion()
+            clave = resolver_clave_usuario_overlay(user) or user
+            if registrar_aceptacion_legal_usuario(
+                clave,
+                version=LEGAL_VERSION,
+                metodo="digital_clickwrap",
+                ip=pet["ip"],
+                user_agent=pet["user_agent"],
+            ):
+                flash(tr(lg, "legal_ok_aceptacion"), "success")
+                return redirect(url_for("index"))
+            error_msg = tr(lg, "legal_err_aceptacion_guardado")
+
+    ctx = _contexto_legal_template()
+    ctx["error_msg"] = error_msg
+    return render_template("legal/aceptar.html", **ctx)
+
+
 @app.route("/solicitar-acceso", methods=["GET", "POST"])
 def solicitar_acceso():
     from auth_registro import _token_horas, alta_publica_habilitada
@@ -888,9 +1078,24 @@ def activar_cuenta(token: str):
             pwd2 = request.form.get("password2") or ""
             if pwd != pwd2:
                 error_msg = tr(lg, "alta_err_password_no_coincide")
+            elif request.form.get("acepto_legal") != "1":
+                error_msg = tr(lg, "legal_err_aceptacion_requerida")
             else:
                 try:
-                    reg = registro_activar(token, pwd)
+                    from legal_aceptacion import datos_peticion_aceptacion
+                    from legal_config import LEGAL_VERSION
+
+                    pet = datos_peticion_aceptacion()
+                    reg = registro_activar(
+                        token,
+                        pwd,
+                        aceptacion_legal={
+                            "version": LEGAL_VERSION,
+                            "metodo": "digital_clickwrap_alta",
+                            "ip": pet["ip"],
+                            "user_agent": pet["user_agent"],
+                        },
+                    )
                     notificar_admin_alta_async(
                         str(reg["cuit"]),
                         str(reg.get("email") or ""),
@@ -970,6 +1175,8 @@ def admin_altas_usuarios():
         reactivar_cuenta,
         actualizar_vencimiento,
         actualizar_cuit_limite,
+        actualizar_servicios_usuario,
+        SERVICIOS_IDS,
         estado_smtp,
         _dias_suscripcion,
     )
@@ -1078,6 +1285,21 @@ def admin_altas_usuarios():
                     )
                 else:
                     flash(tr(lg, "admin_gestion_err_cuit_limite"), "warning")
+        elif accion == "actualizar_servicios":
+            servicios = {
+                sid: request.form.get(f"svc_{sid}") == "1" for sid in SERVICIOS_IDS
+            }
+            if actualizar_servicios_usuario(cuit, servicios):
+                flash(
+                    tr(
+                        lg,
+                        "admin_gestion_ok_servicios",
+                        cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                    ),
+                    "success",
+                )
+            else:
+                flash(tr(lg, "admin_gestion_err_servicios"), "warning")
         elif accion == "generar_enlace":
             email = (request.form.get("email") or "").strip()
             nombre = (request.form.get("nombre") or "").strip()
@@ -1189,6 +1411,7 @@ def admin_altas_usuarios():
         fecha_default_alta=fecha_default_alta,
         min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
         smtp_estado=estado_smtp(),
+        servicios_ids=SERVICIOS_IDS,
     )
 
 
@@ -1230,6 +1453,34 @@ def admin_dashboard_valor_exportar():
         as_attachment=True,
         download_name=nombre,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/admin/legal/exportar-aceptaciones")
+def admin_legal_exportar_aceptaciones():
+    _requiere_admin()
+    from datetime import date
+
+    from auth_registro import listar_usuarios_suscripcion
+    from legal_aceptacion import exportar_aceptaciones_csv, exportar_aceptaciones_json
+
+    formato = (request.args.get("formato") or "csv").strip().lower()
+    filas = listar_usuarios_suscripcion()
+    hoy = date.today().isoformat()
+    if formato == "json":
+        contenido = exportar_aceptaciones_json(filas)
+        nombre = f"Aceptaciones_Legales_{hoy}.json"
+        mimetype = "application/json; charset=utf-8"
+    else:
+        contenido = exportar_aceptaciones_csv(filas)
+        nombre = f"Aceptaciones_Legales_{hoy}.csv"
+        mimetype = "text/csv; charset=utf-8"
+
+    return send_file(
+        io.BytesIO(contenido),
+        as_attachment=True,
+        download_name=nombre,
+        mimetype=mimetype,
     )
 
 
@@ -2506,7 +2757,6 @@ def vl_estado(job_id: str):
 # --------------------------------------------------------------------------- #
 @app.get("/inversiones-financieras")
 def inversiones_financieras():
-    _requiere_admin()
     return render_template("inversiones_financieras.html")
 
 
@@ -2575,13 +2825,11 @@ def _filas_facturador_desde_peticion(lg: str):
 
 @app.get("/facturador")
 def facturador():
-    _requiere_admin()
     return render_template("facturador.html", **_facturador_contexto_plantilla())
 
 
 @app.get("/facturador/plantilla")
 def facturador_plantilla():
-    _requiere_admin()
     from cuit_en_arca.facturador_automation import ruta_plantilla_facturador_excel
 
     ruta = ruta_plantilla_facturador_excel()
@@ -2597,7 +2845,6 @@ def facturador_plantilla():
 
 @app.post("/facturador/emitir")
 def facturador_emitir():
-    _requiere_admin()
     lg = normalize_lang(session.get("lang"))
     es_fetch = request.headers.get("X-Requested-With") == "fetch"
     ctx = _facturador_contexto_plantilla()
@@ -2679,7 +2926,6 @@ def facturador_emitir():
 
 @app.get("/facturador/estado/<job_id>")
 def facturador_estado(job_id: str):
-    _requiere_admin()
     from cuit_en_arca.progreso_facturador import obtener_estado_facturador
 
     estado = obtener_estado_facturador(job_id)
@@ -3009,7 +3255,6 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
 
 @app.get("/analisis-programado")
 def analisis_programado():
-    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config
 
     cfg = cargar_config()
@@ -3021,7 +3266,6 @@ def analisis_programado():
 
 @app.get("/analisis-programado/plantilla")
 def analisis_programado_plantilla():
-    _requiere_admin()
     from cuit_en_arca.analisis_programado import ruta_plantilla_excel
 
     ruta = ruta_plantilla_excel()
@@ -3037,7 +3281,6 @@ def analisis_programado_plantilla():
 
 @app.get("/analisis-programado/estado")
 def analisis_programado_estado():
-    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config, scheduler_estado
 
     cfg = cargar_config()
@@ -3048,7 +3291,6 @@ def analisis_programado_estado():
 
 @app.get("/analisis-programado/ejecucion")
 def analisis_programado_ejecucion():
-    _requiere_admin()
     from cuit_en_arca.progreso_analisis_programado import obtener_ejecucion_ap
 
     return jsonify(obtener_ejecucion_ap())
@@ -3056,7 +3298,6 @@ def analisis_programado_ejecucion():
 
 @app.post("/analisis-programado/guardar")
 def analisis_programado_guardar():
-    _requiere_admin()
     from cuit_en_arca.analisis_programado import cargar_config, guardar_config
 
     lg = normalize_lang(session.get("lang"))
@@ -3097,7 +3338,6 @@ def analisis_programado_guardar():
 def analisis_programado_ejecutar_ahora():
     from cuit_en_arca.analisis_programado import cargar_config, lanzar_ejecucion_ap
 
-    _requiere_admin()
     lg = normalize_lang(session.get("lang"))
     es_fetch = request.headers.get("X-Requested-With") == "fetch"
 
@@ -3159,7 +3399,7 @@ def cancelar_descarga():
     msg = tr(lg, "msg_descarga_cancelada")
 
     if tipo == "ap":
-        _requiere_admin()
+        _requiere_servicio("ap")
         solicitar_cancelacion_ap()
         marcar_cancelado_ap(msg)
     elif job_id:
@@ -3244,7 +3484,6 @@ def api_cupo_consumir():
 
 @app.post("/analisis-programado/limpiar")
 def analisis_programado_limpiar():
-    _requiere_admin()
     from cuit_en_arca.analisis_programado import limpiar_configuracion_completa
     from cuit_en_arca.progreso_analisis_programado import resetear_ejecucion_ap
 

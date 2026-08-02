@@ -431,6 +431,8 @@ _OVERLAY_SYNC_KEYS = (
     "uso_dfe_notificaciones",
     "uso_np_cuits",
     "uso_por_mes",
+    "servicios",
+    "legal_aceptacion",
 )
 
 

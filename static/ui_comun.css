@@ -119,6 +119,17 @@ html.modo-oscuro .btn-tema .icono-sol {
   font-weight: 600;
   color: var(--color-link);
 }
+.pie-legal-links {
+  text-align: right;
+  margin-left: auto;
+  max-width: 38rem;
+}
+.pie-legal-links a {
+  font-weight: 600;
+}
+.pie-legal-ver {
+  font-size: 0.78rem;
+}
 .pie-guia-enlace {
   margin-top: 3rem;
   text-align: right;

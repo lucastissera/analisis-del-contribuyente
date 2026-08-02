@@ -162,6 +162,10 @@
         background: #152318;
         border-color: #4caf50;
       }
+      .flash-msgs { list-style: none; padding: 0; margin: 0 0 1rem; }
+      .flash { padding: 0.55rem 0.75rem; border-radius: 6px; margin-bottom: 0.35rem; font-size: 0.92rem; }
+      .flash-warning { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+      html.modo-oscuro .flash-warning { background: #3d2a14; color: #ffb74d; border-color: #6d4c1a; }
     </style>
   </head>
   <body>
@@ -172,43 +176,67 @@
       {% include 'partials/cabecera_isologo.html' %}
       {% endwith %}
 
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+      <ul class="flash-msgs">
+        {% for cat, msg in messages %}
+        <li class="flash flash-{{ cat }}">{{ msg }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% endwith %}
+
       <div class="botones">
+        {% if es_administrador or servicios_habilitados.get('procesador') %}
         <a class="boton-grande boton-procesador" href="{{ url_for('procesador') }}">
           <span class="icono" aria-hidden="true">&#128202;</span>
           <span class="titulo">{{ t('inicio_btn_procesador') }}</span>
           <span class="desc">{{ t('inicio_btn_procesador_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('dfe') %}
         <a class="boton-grande boton-dfe" href="{{ url_for('domicilio_fiscal') }}">
           <span class="icono" aria-hidden="true">&#9993;</span>
           <span class="titulo">{{ t('inicio_btn_dfe') }}</span>
           <span class="desc">{{ t('inicio_btn_dfe_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('vl') %}
         <a class="boton-grande boton-vl" href="{{ url_for('ventas_liquidaciones') }}">
           <span class="icono vl-iconos" aria-hidden="true"><span>&#127806;</span><span>&#128004;</span></span>
           <span class="titulo">{{ t('inicio_btn_vl') }}</span>
           <span class="desc">{{ t('inicio_btn_vl_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('np') %}
         <a class="boton-grande boton-np" href="{{ url_for('nuestra_parte') }}">
           <span class="icono" aria-hidden="true">&#128196;</span>
           <span class="titulo">{{ t('inicio_btn_np') }}</span>
           <span class="desc">{{ t('inicio_btn_np_desc') }}</span>
         </a>
-        {% if es_administrador %}
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('facturador') %}
         <a class="boton-grande boton-admin" href="{{ url_for('facturador') }}">
           <span class="icono" aria-hidden="true">&#128179;</span>
           <span class="titulo">{{ t('inicio_btn_fact') }}</span>
           <span class="desc">{{ t('inicio_btn_fact_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('ap') %}
         <a class="boton-grande boton-ap" href="{{ url_for('analisis_programado') }}">
           <span class="icono" aria-hidden="true">&#128197;</span>
           <span class="titulo">{{ t('inicio_btn_ap') }}</span>
           <span class="desc">{{ t('inicio_btn_ap_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador or servicios_habilitados.get('inv') %}
         <a class="boton-grande boton-inv" href="{{ url_for('inversiones_financieras') }}">
           <span class="icono" aria-hidden="true">&#128200;</span>
           <span class="titulo">{{ t('inicio_btn_inv') }}</span>
           <span class="desc">{{ t('inicio_btn_inv_desc') }}</span>
         </a>
+        {% endif %}
+        {% if es_administrador %}
         <a class="boton-grande boton-admin" href="{{ url_for('admin_altas_usuarios') }}">
           <span class="icono" aria-hidden="true">&#128100;</span>
           <span class="titulo">{{ t('inicio_btn_admin_altas') }}</span>

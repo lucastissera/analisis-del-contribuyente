@@ -1,0 +1,60 @@
+{% extends 'legal/layout.html' %}
+{% block legal_title %}{{ t('legal_terminos_title') }}{% endblock %}
+{% block legal_body %}
+<h1>{{ t('legal_terminos_h1') }}</h1>
+<p class="legal-meta">{{ t('legal_version_label', version=legal_version) }} · {{ t('legal_titular_label', nombre=titular_nombre) }}</p>
+<p class="legal-aviso">{{ t('legal_borrador_aviso') }}</p>
+
+<h2>1. Objeto</h2>
+<p>El presente documento regula el acceso y uso de <strong>{{ app_name }}</strong> (en adelante, el «Servicio»), prestado por {{ titular_nombre }}{% if titular_cuit %} (CUIT {{ titular_cuit }}){% endif %}, con domicilio en {{ titular_domicilio }}{% if titular_email %}, contacto: {{ titular_email }}{% endif %}.</p>
+<p>El Servicio automatiza tareas de consulta, descarga y procesamiento de información fiscal/contable vinculada a sistemas de ARCA (ex AFIP), según los módulos contratados (Mis Comprobantes, DFE, Ventas y Liquidaciones, Nuestra Parte, Facturador, Análisis programado, Inversiones financieras, etc.).</p>
+
+<h2>2. Naturaleza del Servicio — no es asesoramiento</h2>
+<p>El Servicio es una <strong>herramienta informática de apoyo</strong>. No constituye asesoramiento contable, impositivo, legal ni financiero. No reemplaza la consulta con un contador público matriculado u otro profesional habilitado. Usted es responsable de validar resultados antes de utilizarlos en declaraciones juradas, presentaciones ante ARCA o decisiones de negocio.</p>
+<p>El Servicio <strong>no está afiliado, patrocinado ni autorizado</strong> por ARCA, AFIP ni ningún organismo gubernamental.</p>
+
+<h2>3. Credenciales fiscales — qué almacena y qué no</h2>
+<p><strong>3.1 Datos de su cuenta de usuario del Servicio:</strong> para operar el Servicio registramos y almacenamos los datos de su suscripción (CUIT de usuario, email, nombre, teléfono, contraseña de acceso al Servicio cifrada, vigencia, módulos habilitados, métricas de uso y registro de aceptación de estos términos).</p>
+<p><strong>3.2 CUIT y claves fiscales de terceros (clientes que usted procesa):</strong> el Servicio <strong>no administra ni almacena de forma persistente</strong> las claves fiscales ni los CUIT de los contribuyentes que usted consulta en nombre de terceros. Esas credenciales se utilizan únicamente en el momento de la operación automatizada para completar la tarea solicitada y <strong>no quedan guardadas</strong> en bases de datos del Servicio una vez finalizado el proceso.</p>
+<p><strong>3.3 Recomendación de seguridad:</strong> cuando ARCA lo permita, utilice delegación formal de servicios en el Administrador de Relaciones en lugar de compartir claves fiscales. La clave fiscal es personal e intransferible; usted es responsable de su uso conforme a la normativa de ARCA.</p>
+<p><strong>3.4 Responsabilidad fiscal:</strong> conforme a la normativa de ARCA, el contribuyente titular de la información sigue siendo responsable por la veracidad de los datos y las consecuencias de las operaciones realizadas, aunque utilice software de terceros.</p>
+
+<h2>4. Licencia de uso</h2>
+<p>Se le otorga una licencia de uso <strong>no exclusiva, intransferible, revocable y limitada</strong> al Servicio, según la membresía contratada. No se transfiere propiedad del software ni del código. Queda prohibida la ingeniería inversa, la sublicencia, la reventa del acceso o el uso con fines ilícitos.</p>
+<p>Los archivos generados a partir de sus propios datos (Excel, PDF descargados, etc.) son de su titularidad; el software y la plataforma siguen siendo propiedad del titular del Servicio.</p>
+
+<h2>5. Membresía, módulos y cupo</h2>
+<p>El administrador puede habilitar módulos específicos por usuario. El cupo de CUIT procesados y la vigencia de la suscripción se informan en el panel del Servicio. El acceso a módulos no contratados está restringido.</p>
+
+<h2>6. Precio, facturación y renovación</h2>
+<p>Las condiciones comerciales (precio, periodicidad, medio de pago) se acuerdan con el titular del Servicio fuera de esta plataforma o por comunicación expresa. Salvo pacto en contrario, las suscripciones pueden renovarse por períodos sucesivos mientras se mantenga el pago y la cuenta activa.</p>
+
+<h2>7. Baja de la membresía</h2>
+<p><strong>7.1 Solicitud de baja:</strong> puede solicitar la baja contactando al titular del Servicio{% if titular_email %} ({{ titular_email }}){% endif %}. La baja surte efecto desde la confirmación del administrador o desde el vencimiento del período ya abonado, según lo acordado.</p>
+<p><strong>7.2 Efectos de la baja:</strong> se deshabilitará el acceso al Servicio. Los pagos ya realizados por períodos en curso no son reembolsables salvo acuerdo expreso o disposición legal imperativa aplicable.</p>
+<p><strong>7.3 Conservación de prueba:</strong> el titular del Servicio conservará registros de suscripción, pagos recibidos (comprobantes de transferencia/facturación) y el registro de aceptación de estos términos (fecha, versión, IP y método de aceptación digital) como resguardo ante reclamos.</p>
+<p><strong>7.4 Datos tras la baja:</strong> los datos de cuenta se conservarán el tiempo necesario para obligaciones legales, contables y defensa de reclamos, y luego serán suprimidos o anonimizados conforme a la Política de Privacidad.</p>
+
+<h2>8. Nivel de servicio</h2>
+<p>El Servicio se presta en modalidad de <strong>mejor esfuerzo</strong>. No se garantiza disponibilidad ininterrumpida. Interrupciones de ARCA, fallas de internet, mantenimiento programado o causas de fuerza mayor no son responsabilidad del titular del Servicio.</p>
+
+<h2>9. Limitación de responsabilidad</h2>
+<p>En la máxima medida permitida por la ley aplicable:</p>
+<ul>
+  <li>El titular del Servicio <strong>no responde</strong> por daños indirectos, lucro cesante, pérdida de datos, multas o sanciones de ARCA derivadas de información incorrecta ingresada por el usuario, decisiones impositivas sin validación profesional, o indisponibilidad de sistemas de terceros.</li>
+  <li>La responsabilidad total acumulada del titular del Servicio por cualquier concepto relacionado con el Servicio se limita al <strong>monto efectivamente abonado por el usuario en los doce (12) meses calendario anteriores</strong> al hecho que originó el reclamo. Si no hubo pagos en ese período, el tope será cero salvo dolo o culpa grave.</li>
+</ul>
+<p><em>Ejemplo del tope:</em> si abonó $120.000 en total en los últimos 12 meses, la responsabilidad máxima del proveedor por daños directos relacionados con el Servicio no excederá ese monto, salvo normas imperativas en contrario.</p>
+
+<h2>10. Aceptación digital y equivalencia</h2>
+<p>Al marcar la casilla de aceptación en el alta de cuenta (o al confirmar en la pantalla de aceptación legal), usted declara haber leído y aceptado estos Términos y la Política de Privacidad. El sistema registra versión, fecha y hora (UTC), dirección IP y agente de navegador como prueba de consentimiento informado, en los términos de la Ley 25.326.</p>
+<p>Una firma manuscrita en copia física de este contrato, conservada por el titular del Servicio, produce efectos equivalentes si así se acuerda expresamente.</p>
+
+<h2>11. Modificaciones</h2>
+<p>El titular del Servicio puede actualizar estos Términos. Se incrementará la versión legal publicada. El uso continuado tras la notificación o, en su caso, la nueva aceptación expresa, implica conformidad con la versión vigente.</p>
+
+<h2>12. Ley aplicable y jurisdicción</h2>
+<p>Estos Términos se rigen por las leyes de la República Argentina. Toda controversia será sometida a los {{ jurisdiccion }}, salvo norma imperativa en contrario.</p>
+
+<p class="legal-meta">{{ t('legal_ver_tambien') }} <a href="{{ url_for('legal_privacidad') }}">{{ t('legal_link_privacidad') }}</a>.</p>
+{% endblock %}

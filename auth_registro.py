@@ -214,7 +214,80 @@ def _reset_cupo_meta(meta: dict[str, Any]) -> None:
     reset_uso_periodo_meta(meta)
 
 
-def info_cupo_cuit(username: str) -> dict[str, Any] | None:
+SERVICIOS_IDS: tuple[str, ...] = (
+    "procesador",
+    "dfe",
+    "vl",
+    "np",
+    "facturador",
+    "ap",
+    "inv",
+)
+
+_SERVICIOS_DEFAULT: dict[str, bool] = {
+    "procesador": True,
+    "dfe": True,
+    "vl": True,
+    "np": True,
+    "facturador": False,
+    "ap": False,
+    "inv": False,
+}
+
+
+def servicios_default() -> dict[str, bool]:
+    return dict(_SERVICIOS_DEFAULT)
+
+
+def _normalizar_servicios_meta(raw: Any) -> dict[str, bool]:
+    out = servicios_default()
+    if isinstance(raw, dict):
+        for clave in SERVICIOS_IDS:
+            if clave in raw:
+                out[clave] = bool(raw[clave])
+    return out
+
+
+def _inicializar_servicios_meta(meta: dict[str, Any]) -> None:
+    meta["servicios"] = _normalizar_servicios_meta(meta.get("servicios"))
+
+
+def servicios_usuario(username: str) -> dict[str, bool]:
+    from auth import es_administrador
+
+    if es_administrador(username):
+        return {k: True for k in SERVICIOS_IDS}
+    u = resolver_clave_usuario_overlay(username) or normalizar_cuit(username)
+    if not u:
+        return servicios_default()
+    meta = cargar_usuarios_overlay().get(u)
+    if not isinstance(meta, dict) or meta_es_admin(meta):
+        return {k: True for k in SERVICIOS_IDS}
+    return _normalizar_servicios_meta(meta.get("servicios"))
+
+
+def usuario_tiene_servicio(username: str, clave: str) -> bool:
+    if clave not in SERVICIOS_IDS:
+        return False
+    return bool(servicios_usuario(username).get(clave))
+
+
+def actualizar_servicios_usuario(cuit: str, servicios: dict[str, bool]) -> bool:
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        return False
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if meta.get("pendiente_aprobacion"):
+            return False
+        meta["servicios"] = _normalizar_servicios_meta(servicios)
+        _guardar_overlay_completo(overlay)
+    return True
+
     """Cupo compartido entre servicios. Admin / sin overlay = ilimitado (None)."""
     from auth import es_administrador
 
@@ -1071,7 +1144,12 @@ def obtener_solicitud(token: str) -> dict[str, Any] | None:
     return sol
 
 
-def activar_cuenta(token: str, password: str) -> dict[str, Any]:
+def activar_cuenta(
+    token: str,
+    password: str,
+    *,
+    aceptacion_legal: dict[str, str] | None = None,
+) -> dict[str, Any]:
     tok = (token or "").strip()
     pwd = password or ""
     if len(pwd) < _min_password_len():
@@ -1101,7 +1179,25 @@ def activar_cuenta(token: str, password: str) -> dict[str, Any]:
             "pendiente_aprobacion": True,
             "password_definida": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
+        if aceptacion_legal:
+            from legal_aceptacion import aplicar_aceptacion_a_meta
+
+            aplicar_aceptacion_a_meta(
+                users[cuit],
+                version=aceptacion_legal.get("version"),
+                metodo=aceptacion_legal.get("metodo") or "digital_clickwrap",
+                ip=aceptacion_legal.get("ip") or "",
+                user_agent=aceptacion_legal.get("user_agent") or "",
+            )
         _guardar_overlay_completo(overlay)
+        datos_legal = (
+            _datos_notificacion_aceptacion_legal(cuit, users[cuit])
+            if aceptacion_legal
+            else None
+        )
+
+    if datos_legal:
+        notificar_aceptacion_legal_async(**datos_legal)
 
         data = _cargar_solicitudes()
         if tok in data.get("solicitudes", {}):
@@ -1188,6 +1284,7 @@ def crear_usuario_admin(
             "aprobado_en": ahora,
             "cuit_limite": _cuit_limite_default(),
             "cuit_usados": 0,
+            "servicios": servicios_default(),
         }
         _guardar_overlay_completo(overlay)
 
@@ -1239,6 +1336,7 @@ def aprobar_cuenta(cuit: str) -> bool:
         users[u]["valido_desde"] = hoy.isoformat()
         users[u]["valido_hasta"] = valido_hasta.isoformat()
         users[u]["aprobado_en"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _inicializar_servicios_meta(users[u])
         _reset_cupo_meta(users[u])
         _guardar_overlay_completo(overlay)
     return True
@@ -1258,6 +1356,13 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
         vh = _parse_fecha_local(meta.get("valido_hasta"))
         dias = (vh - hoy).days if vh else None
         limite, usados = _leer_cupo_meta(meta)
+        legal = {}
+        try:
+            from legal_aceptacion import resumen_aceptacion
+
+            legal = resumen_aceptacion(meta)
+        except Exception:
+            pass
         out.append(
             {
                 "cuit": cuit,
@@ -1273,6 +1378,14 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
                 "cuit_limite": limite,
                 "cuit_usados": usados,
                 "cuit_disponibles": max(0, limite - usados),
+                "servicios": _normalizar_servicios_meta(meta.get("servicios")),
+                "legal_version": legal.get("version") or "",
+                "legal_aceptada_en": legal.get("aceptada_en") or "",
+                "legal_metodo": legal.get("metodo") or "",
+                "legal_ip": legal.get("ip") or "",
+                "legal_user_agent": meta.get("legal_aceptacion", {}).get("user_agent", "")
+                if isinstance(meta.get("legal_aceptacion"), dict)
+                else "",
                 **_telefono_desde_meta(meta),
             }
         )
@@ -1464,6 +1577,37 @@ def actualizar_cuit_limite(cuit: str, limite: int) -> bool:
         meta["cuit_limite"] = nuevo_limite
         _inicializar_cupo_meta(meta)
         _guardar_overlay_completo(overlay)
+    return True
+
+
+def registrar_aceptacion_legal_usuario(
+    cuit: str,
+    *,
+    version: str = "",
+    metodo: str = "digital_clickwrap",
+    ip: str = "",
+    user_agent: str = "",
+) -> bool:
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        return False
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        from legal_aceptacion import aplicar_aceptacion_a_meta
+
+        aplicar_aceptacion_a_meta(
+            users[u],
+            version=version,
+            metodo=metodo,
+            ip=ip,
+            user_agent=user_agent,
+        )
+        _guardar_overlay_completo(overlay)
+        datos_legal = _datos_notificacion_aceptacion_legal(u, users[u])
+    notificar_aceptacion_legal_async(**datos_legal)
     return True
 
 
@@ -1856,6 +2000,22 @@ def _email_admin_configurado() -> str:
     return (os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL") or "").strip()
 
 
+def _datos_notificacion_aceptacion_legal(cuit: str, meta: dict[str, Any]) -> dict[str, str]:
+    reg = meta.get("legal_aceptacion")
+    if not isinstance(reg, dict):
+        reg = {}
+    return {
+        "cuit": cuit,
+        "email": str(meta.get("email") or ""),
+        "nombre": str(meta.get("nombre") or ""),
+        "version": str(reg.get("version") or ""),
+        "metodo": str(reg.get("metodo") or ""),
+        "ip": str(reg.get("ip") or ""),
+        "aceptada_en": str(reg.get("aceptada_en") or ""),
+        "user_agent": str(reg.get("user_agent") or ""),
+    }
+
+
 def _avisar_admin_por_email(
     asunto: str,
     cuerpo: str,
@@ -2083,3 +2243,70 @@ def notificar_admin_alta(cuit: str, email: str, nombre: str = "") -> dict[str, A
 
 def notificar_admin_alta_async(cuit: str, email: str, nombre: str = "") -> None:
     _notificar_en_segundo_plano(notificar_admin_alta, cuit, email, nombre)
+
+
+def notificar_aceptacion_legal(
+    cuit: str,
+    *,
+    email: str = "",
+    nombre: str = "",
+    version: str = "",
+    metodo: str = "",
+    ip: str = "",
+    aceptada_en: str = "",
+    user_agent: str = "",
+) -> dict[str, Any]:
+    cuit_fmt = formatear_cuit(cuit)
+    nom_line = f"Nombre: {nombre}\n" if nombre else ""
+    ua_line = f"Navegador: {user_agent[:200]}\n" if user_agent else ""
+    cuerpo_admin = (
+        f"Aceptación legal registrada en {APP_NAME}.\n\n"
+        f"CUIT (usuario): {cuit_fmt}\n"
+        f"{nom_line}"
+        f"Email de contacto: {email or '—'}\n"
+        f"Versión legal: {version or '—'}\n"
+        f"Fecha/hora (UTC): {aceptada_en or '—'}\n"
+        f"Método: {metodo or '—'}\n"
+        f"IP: {ip or '—'}\n"
+        f"{ua_line}\n"
+        f"Documentos: Términos y condiciones + Política de privacidad.\n"
+    )
+    admin_ok = _avisar_admin_por_email(
+        f"[{APP_NAME}] Aceptación legal {cuit_fmt} (v{version})",
+        cuerpo_admin,
+        contexto=f"aceptación legal {cuit_fmt}",
+        timeout=_smtp_timeout_background(),
+    )
+    user_ok = False
+    destino = (email or "").strip()
+    if destino and "@" in destino:
+        saludo = f"Hola {nombre},\n\n" if nombre else "Hola,\n\n"
+        cuerpo_user = (
+            f"{saludo}"
+            f"Registramos tu aceptación de los Términos y condiciones y la Política de "
+            f"privacidad de {APP_NAME}.\n\n"
+            f"Versión: {version or '—'}\n"
+            f"Fecha/hora (UTC): {aceptada_en or '—'}\n\n"
+            f"Conservá este correo como comprobante de tu consentimiento.\n"
+        )
+        user_ok, err = _enviar_email(
+            destino,
+            f"[{APP_NAME}] Confirmación de aceptación legal",
+            cuerpo_user,
+            timeout=_smtp_timeout_background(),
+        )
+        if not user_ok:
+            _LOG.error(
+                "Falló el email de confirmación legal al usuario %s (%s): %s",
+                cuit_fmt,
+                destino,
+                err or "error desconocido",
+            )
+    return {
+        "email_enviado": admin_ok,
+        "email_usuario_enviado": user_ok,
+    }
+
+
+def notificar_aceptacion_legal_async(**kwargs) -> None:
+    _notificar_en_segundo_plano(notificar_aceptacion_legal, **kwargs)

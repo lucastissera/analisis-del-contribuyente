@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="{{ current_lang }}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block legal_title %}{{ t('legal_doc_title') }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_comun.css') }}" />
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}" />
+    <script>
+      try { if (localStorage.getItem("tema") === "oscuro") document.documentElement.classList.add("modo-oscuro"); } catch (e) {}
+    </script>
+    <style>
+      :root {
+        --bg-body: #fff; --bg-panel: #fafafa; --text-primary: #1a1a1a;
+        --text-muted: #444; --border: #bbb; --color-link: #1565c0;
+      }
+      html.modo-oscuro {
+        color-scheme: dark;
+        --bg-body: #0f1014; --bg-panel: #1a1c22; --text-primary: #eceef3;
+        --text-muted: #aeb4c0; --border: #3d424d; --color-link: #8ab4ff;
+      }
+      body { font-family: Arial, sans-serif; margin: 1rem; background: var(--bg-body); color: var(--text-primary); line-height: 1.55; }
+      .pagina { max-width: 820px; margin: 0 auto; }
+      .legal-doc { border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem 1.4rem; background: var(--bg-panel); }
+      .legal-doc h1 { font-size: 1.35rem; margin: 0 0 0.35rem; }
+      .legal-meta { font-size: 0.88rem; color: var(--text-muted); margin-bottom: 1.25rem; }
+      .legal-doc h2 { font-size: 1.05rem; margin: 1.35rem 0 0.45rem; }
+      .legal-doc p, .legal-doc li { font-size: 0.94rem; }
+      .legal-doc ul { padding-left: 1.25rem; }
+      .legal-nav { margin: 1rem 0; font-size: 0.92rem; }
+      .legal-nav a { margin-right: 1rem; }
+      .legal-aviso { font-size: 0.85rem; color: var(--color-warn, #e65100); border: 1px solid #ffcc80; background: #fff8e1; padding: 0.65rem 0.85rem; border-radius: 6px; margin-bottom: 1rem; }
+      html.modo-oscuro .legal-aviso { background: #3d2a14; border-color: #6d4c1a; color: #ffb74d; }
+      table.legal-tabla { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.75rem 0; }
+      table.legal-tabla th, table.legal-tabla td { border: 1px solid var(--border); padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
+    </style>
+  </head>
+  <body>
+    <div class="pagina">
+      {% with mostrar_volver=true %}{% include 'partials/barra_superior.html' %}{% endwith %}
+      <div class="legal-nav">
+        <a href="{{ url_for('legal_terminos') }}">{{ t('legal_link_terminos') }}</a>
+        <a href="{{ url_for('legal_privacidad') }}">{{ t('legal_link_privacidad') }}</a>
+        <a href="{{ url_for('index') }}">{{ t('volver_inicio') }}</a>
+      </div>
+      <article class="legal-doc">
+        {% block legal_body %}{% endblock %}
+      </article>
+      {% include 'partials/pie_legal.html' %}
+    </div>
+    <script src="{{ url_for('static', filename='tema.js') }}"></script>
+  </body>
+</html>

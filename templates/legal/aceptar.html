@@ -1,0 +1,23 @@
+{% extends 'legal/layout.html' %}
+{% block legal_title %}{{ t('legal_aceptar_title') }}{% endblock %}
+{% block legal_body %}
+<h1>{{ t('legal_aceptar_h1') }}</h1>
+<p class="legal-meta">{{ t('legal_aceptar_intro', version=legal_version) }}</p>
+{% if error_msg %}
+<p class="error" style="color: var(--color-error, #c62828);">{{ error_msg }}</p>
+{% endif %}
+<form method="post">
+  <p class="help">{{ t('legal_aceptar_leer') }}</p>
+  <ul>
+    <li><a href="{{ url_for('legal_terminos') }}" target="_blank" rel="noopener">{{ t('legal_link_terminos') }}</a></li>
+    <li><a href="{{ url_for('legal_privacidad') }}" target="_blank" rel="noopener">{{ t('legal_link_privacidad') }}</a></li>
+  </ul>
+  <p style="margin: 1rem 0;">
+    <label>
+      <input type="checkbox" name="acepto_legal" value="1" required />
+      {{ t('legal_aceptar_checkbox') }}
+    </label>
+  </p>
+  <button type="submit">{{ t('legal_aceptar_btn') }}</button>
+</form>
+{% endblock %}

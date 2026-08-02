@@ -108,6 +108,14 @@
               </button>
             </div>
           </div>
+          <p class="field" style="margin: 1rem 0 0.5rem;">
+            <label class="legal-check">
+              <input type="checkbox" name="acepto_legal" value="1" required />
+              {{ t('legal_aceptar_checkbox') }}
+              (<a href="{{ url_for('legal_terminos') }}" target="_blank" rel="noopener">{{ t('legal_link_terminos') }}</a>,
+              <a href="{{ url_for('legal_privacidad') }}" target="_blank" rel="noopener">{{ t('legal_link_privacidad') }}</a>)
+            </label>
+          </p>
           <button type="submit" id="btn-activar">{{ t('alta_btn_activar') }}</button>
           <p id="procesando-msg" class="procesando" role="status" aria-live="polite">{{ t('alta_procesando') }}</p>
         </form>
