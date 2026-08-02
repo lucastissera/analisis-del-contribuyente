@@ -2,19 +2,18 @@
 {% block legal_title %}{{ t('legal_privacidad_title') }}{% endblock %}
 {% block legal_body %}
 <h1>{{ t('legal_privacidad_h1') }}</h1>
-<p class="legal-meta">{{ t('legal_version_label', version=legal_version) }} · {{ t('legal_responsable_label', nombre=titular_nombre) }}</p>
+<p class="legal-meta">{{ t('legal_version_label', version=legal_version) }}</p>
 <p class="legal-aviso">{{ t('legal_borrador_aviso') }}</p>
 
 <h2>1. Responsable del tratamiento</h2>
-<p>{{ titular_nombre }}{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, domicilio {{ titular_domicilio }}{% if titular_email %}, contacto: {{ titular_email }}{% endif %}, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
-<p><strong>Obligación del titular del negocio:</strong> inscribir las bases de datos en el Registro Nacional de Bases de Datos (RNBD) vía TAD/AAIP y mantenerlas actualizadas, según [Estudio Nunes & Asociados — Protección de datos sensibles](https://estudionunes.com.ar/proteccion-de-datos-sensibles-lo-que-las-empresas-deben-saber/).</p>
+<p>{{ titular_nombre }}{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, con domicilio en {{ titular_domicilio }}{% if titular_email %}, contacto: {{ titular_email }}{% endif %}, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
 
 <h2>2. Datos que tratamos</h2>
 <ul>
   <li><strong>Cuenta de usuario:</strong> CUIT, nombre, email, teléfono, contraseña (hash), vigencia de suscripción, módulos habilitados, cupo de uso.</li>
-  <li><strong>Registro legal:</strong> versión de TyC/privacidad aceptada, fecha/hora, IP, navegador, método de aceptación.</li>
+  <li><strong>Registro legal:</strong> versión de TyC y privacidad aceptada, fecha/hora, IP, navegador, método de aceptación.</li>
   <li><strong>Métricas de uso:</strong> contadores agregados de operaciones (CUIT procesados, comprobantes, etc.).</li>
-  <li><strong>Datos fiscales de terceros:</strong> el Servicio <strong>no almacena de forma persistente</strong> claves fiscales ni CUIT de clientes que usted procesa; solo se usan transitoriamente para ejecutar la automatización solicitada.</li>
+  <li><strong>Datos fiscales de terceros:</strong> el Servicio <strong>no almacena de forma persistente</strong> claves fiscales ni CUIT de clientes que usted procesa; solo se usan transitoriamente para ejecutar la automatización solicitada ante ARCA y/o demás entes gubernamentales.</li>
 </ul>
 <p>El Servicio <strong>no está diseñado</strong> para tratar datos sensibles en el sentido del art. 7 de la Ley 25.326 (salud, opiniones políticas, etc.). No solicite ni cargue ese tipo de información.</p>
 
@@ -22,10 +21,10 @@
 <p>Tratamos datos para: crear y administrar su cuenta; prestar el Servicio; facturación y soporte; seguridad; cumplimiento legal; y métricas de uso. La base legal es la ejecución del contrato, el consentimiento informado (alta y casillas de aceptación) y el interés legítimo del responsable en la seguridad del sistema.</p>
 
 <h2>4. Principios (Ley 25.326)</h2>
-<p>Calidad del dato, finalidad determinada, confidencialidad, seguridad, y conservación limitada al tiempo necesario. Personal autorizado bajo deber de confidencialidad.</p>
+<p>Aplicamos los principios de calidad del dato, finalidad determinada, confidencialidad, seguridad y conservación limitada al tiempo necesario. El personal autorizado actúa bajo deber de confidencialidad.</p>
 
 <h2>5. Transferencia internacional de datos</h2>
-<p>Para operar el Servicio utilizamos proveedores cloud fuera de Argentina. Adoptamos cláusulas contractuales y medidas técnicas acordes a la normativa argentina (Ley 25.326, Disposiciones y Resoluciones AAIP sobre transferencia internacional):</p>
+<p>Para operar el Servicio utilizamos proveedores cloud fuera de Argentina. Adoptamos cláusulas contractuales y medidas técnicas acordes a la normativa argentina (Ley 25.326, disposiciones y resoluciones AAIP sobre transferencia internacional):</p>
 <table class="legal-tabla">
   <thead>
     <tr><th>Proveedor</th><th>Servicio</th><th>Ubicación</th><th>Finalidad</th></tr>
@@ -45,22 +44,23 @@
 
 <h2>6. Plazo de conservación</h2>
 <ul>
-  <li>Datos de cuenta: mientras la suscripción esté activa y el plazo posterior necesario para obligaciones legales/contables y defensa de reclamos.</li>
-  <li>Registro de aceptación legal: conservado como prueba contractual (recomendado al menos 10 años o plazo que indique su asesor).</li>
-  <li>Tras la baja: supresión o anonimización cuando no exista obligación de conservación.</li>
+  <li><strong>Datos de cuenta:</strong> mientras la suscripción esté activa y el plazo posterior necesario para obligaciones legales, contables y defensa de reclamos.</li>
+  <li><strong>Registro de aceptación legal:</strong> conservado como prueba contractual durante el plazo necesario para acreditar el consentimiento otorgado.</li>
+  <li><strong>Tras la baja:</strong> supresión o anonimización cuando no exista obligación de conservación.</li>
 </ul>
 
 <h2>7. Derechos del titular (ARCO + hábeas data)</h2>
-<p>Puede solicitar acceso, rectificación, actualización o supresión de sus datos personales escribiendo a{% if titular_email %} {{ titular_email }}{% else %} el contacto del responsable{% endif %}. Responderemos en los plazos de la Ley 25.326. También puede reclamar ante la AAIP.</p>
+<p>Puede solicitar acceso, rectificación, actualización o supresión de sus datos personales escribiendo a{% if titular_email %} {{ titular_email }}{% else %} el contacto indicado en el Servicio{% endif %}. Responderemos en los plazos de la Ley 25.326. También puede reclamar ante la AAIP.</p>
 
 <h2>8. Seguridad</h2>
-<p>Contraseñas con hash, comunicaciones cifradas (HTTPS), acceso restringido, archivos sensibles cifrados cuando corresponda (p. ej. tokens de sync). Ningún sistema es 100 % seguro; notificaremos incidentes relevantes conforme a buenas prácticas y normativa aplicable.</p>
+<p>Utilizamos contraseñas con hash, comunicaciones cifradas (HTTPS), acceso restringido y archivos sensibles cifrados cuando corresponda (por ejemplo, tokens de sincronización). Ningún sistema es completamente seguro; notificaremos incidentes relevantes conforme a buenas prácticas y normativa aplicable.</p>
+<p>Usted es responsable de proteger sus credenciales de acceso y de notificar cualquier uso no autorizado de su cuenta.</p>
 
 <h2>9. Encargados de tratamiento</h2>
-<p>Los proveedores cloud actúan como encargados del tratamiento según instrucciones del responsable y no pueden usar los datos para fines propios.</p>
+<p>Los proveedores cloud actúan como encargados del tratamiento según instrucciones del responsable y no pueden usar los datos para fines propios distintos de la prestación del Servicio.</p>
 
 <h2>10. Cambios</h2>
-<p>Publicaremos la versión actualizada con nueva fecha de versión. Cambios sustanciales pueden requerir nueva aceptación en el login.</p>
+<p>Publicaremos la versión actualizada con nueva fecha de versión. Los cambios sustanciales pueden requerir nueva aceptación al iniciar sesión.</p>
 
 <p class="legal-meta">{{ t('legal_ver_tambien') }} <a href="{{ url_for('legal_terminos') }}">{{ t('legal_link_terminos') }}</a>.</p>
 {% endblock %}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 # Incrementar al publicar cambios sustanciales en TyC o privacidad.
-LEGAL_VERSION = "2026-08-02"
+LEGAL_VERSION = "2026-08-02-v2"
 
 LEGAL_DOCUMENTOS = ("terminos", "privacidad")
 
@@ -31,7 +31,10 @@ def titular_domicilio() -> str:
 
 
 def jurisdiccion() -> str:
-    return (os.environ.get("LEGAL_JURISDICCION") or "Tribunales Ordinarios de la Ciudad Autónoma de Buenos Aires").strip()
+    return (
+        os.environ.get("LEGAL_JURISDICCION")
+        or "Tribunales Ordinarios de la Ciudad de Córdoba, Provincia de Córdoba"
+    ).strip()
 
 
 PROVEEDORES_TRANSFERENCIA_INTERNACIONAL: tuple[dict[str, str], ...] = (

@@ -120,7 +120,7 @@ LEGAL_TITULAR_RAZON_SOCIAL=Lucas Tissera Laplagne
 LEGAL_TITULAR_CUIT=
 LEGAL_TITULAR_EMAIL=
 LEGAL_TITULAR_DOMICILIO=República Argentina
-LEGAL_JURISDICCION=Tribunales Ordinarios de la Ciudad Autónoma de Buenos Aires
+LEGAL_JURISDICCION=Tribunales Ordinarios de la Ciudad de Córdoba, Provincia de Córdoba
 ```
 
 ---
