@@ -10,7 +10,7 @@ Referencia de datos personales: [Estudio Nunes — Protección de datos sensible
 
 | Ítem | Estado | Detalle |
 |------|--------|---------|
-| TyC publicados | ✅ | `/legal/terminos` |
+| TyC publicados | ✅ | `/legal/terminos` (base LevelUp + cláusulas tipo Axoft adaptadas; §4 PI y §7 Garantía-Plazo en rojo para revisión) |
 | Política de privacidad | ✅ | `/legal/privacidad` |
 | Aceptación digital en alta | ✅ | Checkbox obligatorio en activación de cuenta |
 | Re-aceptación al cambiar versión | ✅ | `LEGAL_VERSION` en `legal_config.py`; pantalla `/legal/aceptar` |
@@ -29,6 +29,17 @@ Referencia de datos personales: [Estudio Nunes — Protección de datos sensible
 - **Campos:** `version`, `aceptada_en` (UTC), `documentos`, `metodo`, `ip`, `user_agent`.
 - **Resguardo recomendado:** exportar CSV/JSON desde el panel admin **mensualmente** y archivar en servidor/backups externos (no depende solo de Neon).
 
+### ⚠️ Revisar TyC si se almacena data del licenciatario
+
+Hoy los TyC (§4.4 y §20) afirman que el Servicio **no almacena de forma persistente** datos operativos del licenciatario y que los **backups diarios / resguardo ante fallos de hardware** recaen **penal y administrativamente** sobre el licenciatario.
+
+**Si a futuro se implementa** almacenamiento de archivos, resultados, historiales de contribuyentes, backups en la nube, bases de datos de trabajo del usuario, etc.:
+
+1. Revisar y actualizar TyC §4.4 y §20 (y privacidad).
+2. Definir quién responde por backups y pérdida de datos.
+3. Evaluar impacto RNBD / AAIP y transferencia internacional.
+4. **Pendiente — período de gracia para exportar:** agregar en TyC un plazo claro (p. ej. 30 o 60 días) tras baja o falta de pago para que el usuario descargue/migre sus bases **antes** de eliminar definitivamente su información de los servidores. Hoy no aplica porque no se almacenan datos operativos del licenciatario.
+
 ---
 
 ## 2. Antes de lanzar al mercado (pendiente / externo al código)
@@ -38,7 +49,7 @@ Referencia de datos personales: [Estudio Nunes — Protección de datos sensible
 - [ ] Inscribir bases de datos en **RNBD** (TAD / AAIP).
 - [ ] Designar responsable interno de datos personales.
 - [ ] Revisar TyC y privacidad con abogado (textos actuales son **borrador**).
-- [ ] Completar variables de entorno: `LEGAL_TITULAR_RAZON_SOCIAL`, `LEGAL_TITULAR_CUIT`, `LEGAL_TITULAR_EMAIL`, `LEGAL_TITULAR_DOMICILIO`, `LEGAL_JURISDICCION`.
+- [ ] Completar variables de entorno: `LEGAL_TITULAR_RAZON_SOCIAL`, `LEGAL_TITULAR_CUIT`, `LEGAL_TITULAR_EMAIL`, `LEGAL_TITULAR_DOMICILIO`, `LEGAL_JURISDICCION`, `LEGAL_RNBD_NUMERO` (oculta aviso rojo en privacidad).
 - [ ] Definir plazo de conservación post-baja (privacidad sugiere mínimo legal + defensa de reclamos).
 - [ ] Procedimiento de respuesta a derechos ARCO (acceso, rectificación, supresión) vía email del titular.
 - [ ] Evaluar si requiere **DPD** (delegado de protección de datos) según volumen/riesgo.

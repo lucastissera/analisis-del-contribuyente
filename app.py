@@ -858,6 +858,8 @@ def _contexto_legal_template() -> dict:
         LEGAL_VERSION,
         PROVEEDORES_TRANSFERENCIA_INTERNACIONAL,
         jurisdiccion,
+        rnbd_inscripto,
+        rnbd_numero,
         titular_cuit,
         titular_domicilio,
         titular_email,
@@ -873,6 +875,8 @@ def _contexto_legal_template() -> dict:
         "titular_email": titular_email(),
         "jurisdiccion": jurisdiccion(),
         "proveedores_transferencia": PROVEEDORES_TRANSFERENCIA_INTERNACIONAL,
+        "rnbd_numero": rnbd_numero(),
+        "rnbd_inscripto": rnbd_inscripto(),
     }
 
 

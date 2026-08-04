@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 # Incrementar al publicar cambios sustanciales en TyC o privacidad.
-LEGAL_VERSION = "2026-08-02-v2"
+LEGAL_VERSION = "2026-08-03-v7"
 
 LEGAL_DOCUMENTOS = ("terminos", "privacidad")
 
@@ -22,8 +22,17 @@ def titular_email() -> str:
     return (
         os.environ.get("LEGAL_TITULAR_EMAIL")
         or os.environ.get("AUTH_ADMIN_NOTIFY_EMAIL")
-        or ""
+        or "levelup.aplicaciones@gmail.com"
     ).strip()
+
+
+def rnbd_numero() -> str:
+    """N° de inscripción RNBD (AAIP/DNPDP). Vacío hasta completar la inscripción."""
+    return (os.environ.get("LEGAL_RNBD_NUMERO") or "").strip()
+
+
+def rnbd_inscripto() -> bool:
+    return bool(rnbd_numero())
 
 
 def titular_domicilio() -> str:

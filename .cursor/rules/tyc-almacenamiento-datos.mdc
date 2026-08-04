@@ -1,0 +1,27 @@
+---
+description: Recordatorio legal — TyC sobre no almacenamiento y backups del licenciatario
+globs:
+  - "**/auth*.py"
+  - "**/app.py"
+  - "**/templates/legal/**"
+  - "**/*storage*"
+  - "**/*backup*"
+  - "**/neon*"
+alwaysApply: false
+---
+
+# TyC: almacenamiento de datos del licenciatario
+
+Los Términos (§4.4 y §20) establecen que el Servicio **no almacena de forma persistente** los datos operativos aportados/generados por el licenciatario, y que la obligación de **backups diarios** y resguardo ante fallos de hardware recae **penal y administrativamente** sobre el licenciatario.
+
+## Cuándo alertar al usuario
+
+Si implementás o proponés una función que **guarde de forma persistente** datos del licenciatario (archivos subidos, resultados de procesamiento, historial de CUIT/clientes, backups en nube, bases de trabajo, etc.), **avisá expresamente** que hay que revisar:
+
+1. `templates/legal/terminos.html` — cláusulas §4.4 y §20
+2. `templates/legal/privacidad.html`
+3. `docs/CHECKLIST_LEGAL_COMPLIANCE.md` — sección «Revisar TyC si se almacena data»
+4. Incrementar `LEGAL_VERSION` en `legal_config.py`
+5. **Agregar período de gracia para exportar** (p. ej. 30–60 días tras baja/falta de pago) antes de borrar datos del usuario en servidores — hoy está pendiente a propósito porque no se almacenan datos operativos
+
+No asumas que la cláusula actual sigue siendo válida si el producto empieza a custodiar datos del usuario.

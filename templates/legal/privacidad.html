@@ -5,8 +5,19 @@
 <p class="legal-meta">{{ t('legal_version_label', version=legal_version) }}</p>
 <p class="legal-aviso">{{ t('legal_borrador_aviso') }}</p>
 
+{% if not rnbd_inscripto %}
+<p class="legal-aviso-rnbd" role="alert">
+  FALTA EL NÚMERO DE REGISTRO ANTE LA DNPDP/AAIP (RNBD)
+</p>
+{% endif %}
+
 <h2>1. Responsable del tratamiento</h2>
-<p>{{ titular_nombre }}{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, con domicilio en {{ titular_domicilio }}{% if titular_email %}, contacto: {{ titular_email }}{% endif %}, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
+<p>{{ titular_nombre }}{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, con domicilio en {{ titular_domicilio }}, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
+{% if rnbd_inscripto %}
+<p>La base de datos del Servicio se encuentra inscripta en el Registro Nacional de Bases de Datos de la AAIP bajo el N° {{ rnbd_numero }}. En caso de consultas o reclamos relacionados con el tratamiento de datos personales, el titular puede ser contactado a través del medio indicado en la Sección 7.</p>
+{% else %}
+<p>La inscripción de la base de datos en el Registro Nacional de Bases de Datos (RNBD) de la AAIP se encuentra <strong>pendiente de completar</strong>. En caso de consultas o reclamos relacionados con el tratamiento de datos personales, el titular puede ser contactado a través del medio indicado en la Sección 7.</p>
+{% endif %}
 
 <h2>2. Datos que tratamos</h2>
 <ul>
@@ -50,17 +61,18 @@
 </ul>
 
 <h2>7. Derechos del titular (ARCO + hábeas data)</h2>
-<p>Puede solicitar acceso, rectificación, actualización o supresión de sus datos personales escribiendo a{% if titular_email %} {{ titular_email }}{% else %} el contacto indicado en el Servicio{% endif %}. Responderemos en los plazos de la Ley 25.326. También puede reclamar ante la AAIP.</p>
+<p>En ejercicio de los derechos reconocidos por los arts. 14 a 16 de la Ley N° 25.326, el titular de los datos puede solicitar el acceso, rectificación, actualización, supresión o confidencialidad de sus datos personales escribiendo a <a href="mailto:{{ titular_email }}?subject={{ 'Derechos ARCO — Datos Personales' | urlencode }}">{{ titular_email }}</a>, con asunto «Derechos ARCO — Datos Personales», indicando nombre completo, CUIT y descripción de la solicitud.</p>
+<p>Responderemos dentro del plazo establecido por la Ley 25.326. En caso de respuesta insatisfactoria o ausencia de respuesta, el titular tiene derecho a interponer acción de hábeas data ante la justicia y/o reclamar ante la AAIP (<a href="https://www.argentina.gob.ar/aaip" target="_blank" rel="noopener">www.argentina.gob.ar/aaip</a>).</p>
 
-<h2>8. Seguridad</h2>
-<p>Utilizamos contraseñas con hash, comunicaciones cifradas (HTTPS), acceso restringido y archivos sensibles cifrados cuando corresponda (por ejemplo, tokens de sincronización). Ningún sistema es completamente seguro; notificaremos incidentes relevantes conforme a buenas prácticas y normativa aplicable.</p>
-<p>Usted es responsable de proteger sus credenciales de acceso y de notificar cualquier uso no autorizado de su cuenta.</p>
+<h2>8. Seguridad y notificación de incidentes</h2>
+<p>Utilizamos contraseñas con hash, comunicaciones cifradas (HTTPS), acceso restringido y archivos sensibles cifrados cuando corresponda (por ejemplo, tokens de sincronización). Ningún sistema es completamente seguro; usted es responsable de proteger sus credenciales de acceso y de notificar cualquier uso no autorizado de su cuenta.</p>
+<p>En caso de detectarse una brecha de seguridad que afecte datos personales de usuarios y que pueda generar un riesgo para los derechos y libertades de las personas, el titular del Servicio notificará el incidente a la AAIP dentro de las setenta y dos (72) horas de haberlo conocido, conforme a las directrices de buenas prácticas y la normativa aplicable. Se informará a los usuarios afectados cuando el riesgo para sus derechos sea significativo, en el menor plazo posible y con descripción de la naturaleza del incidente, los datos comprometidos y las medidas adoptadas.</p>
 
 <h2>9. Encargados de tratamiento</h2>
 <p>Los proveedores cloud actúan como encargados del tratamiento según instrucciones del responsable y no pueden usar los datos para fines propios distintos de la prestación del Servicio.</p>
 
 <h2>10. Cambios</h2>
-<p>Publicaremos la versión actualizada con nueva fecha de versión. Los cambios sustanciales pueden requerir nueva aceptación al iniciar sesión.</p>
+<p>Publicaremos la versión actualizada con nueva fecha de versión dentro de este documento. Los cambios sustanciales pueden requerir nueva aceptación al iniciar sesión.</p>
 
 <p class="legal-meta">{{ t('legal_ver_tambien') }} <a href="{{ url_for('legal_terminos') }}">{{ t('legal_link_terminos') }}</a>.</p>
 {% endblock %}

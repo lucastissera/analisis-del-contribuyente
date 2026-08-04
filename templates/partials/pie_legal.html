@@ -8,9 +8,6 @@
     <a href="{{ url_for('legal_terminos') }}">{{ t('legal_link_terminos') }}</a>
     ·
     <a href="{{ url_for('legal_privacidad') }}">{{ t('legal_link_privacidad') }}</a>
-    {% if legal_version_actual %}
-    · <span class="pie-legal-ver">{{ t('legal_version_corta', version=legal_version_actual) }}</span>
-    {% endif %}
   </p>
   <p>{{ t('footer_disclaimer') }}</p>
   <p>{{ t('footer_copyright') }}</p>
