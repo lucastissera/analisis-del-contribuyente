@@ -46,10 +46,10 @@ Hoy los TyC (§4.4 y §20) afirman que el Servicio **no almacena de forma persis
 
 ### 2.1 Protección de datos personales (Ley 25.326 / AAIP)
 
-- [ ] Inscribir bases de datos en **RNBD** (TAD / AAIP).
+- [x] Inscribir bases de datos en **RNBD** (TAD / AAIP) — `RL-2026-74241156-APN-DNPDP#AAIP` (cargar también en Render: `LEGAL_RNBD_NUMERO`).
 - [ ] Designar responsable interno de datos personales.
 - [ ] Revisar TyC y privacidad con abogado (textos actuales son **borrador**).
-- [ ] Completar variables de entorno: `LEGAL_TITULAR_RAZON_SOCIAL`, `LEGAL_TITULAR_CUIT`, `LEGAL_TITULAR_EMAIL`, `LEGAL_TITULAR_DOMICILIO`, `LEGAL_JURISDICCION`, `LEGAL_RNBD_NUMERO` (oculta aviso rojo en privacidad).
+- [ ] Completar variables de entorno: `LEGAL_TITULAR_RAZON_SOCIAL` (identidad legal), `LEGAL_NOMBRE_COMERCIAL` (marca, ej. Level Up), `LEGAL_TITULAR_CUIT`, `LEGAL_TITULAR_EMAIL`, `LEGAL_TITULAR_DOMICILIO`, `LEGAL_JURISDICCION`, `LEGAL_RNBD_NUMERO` (oculta aviso rojo en privacidad).
 - [ ] Definir plazo de conservación post-baja (privacidad sugiere mínimo legal + defensa de reclamos).
 - [ ] Procedimiento de respuesta a derechos ARCO (acceso, rectificación, supresión) vía email del titular.
 - [ ] Evaluar si requiere **DPD** (delegado de protección de datos) según volumen/riesgo.
@@ -128,6 +128,7 @@ Al publicar nueva versión legal:
 
 ```env
 LEGAL_TITULAR_RAZON_SOCIAL=Lucas Tissera Laplagne
+LEGAL_NOMBRE_COMERCIAL=Level Up
 LEGAL_TITULAR_CUIT=
 LEGAL_TITULAR_EMAIL=
 LEGAL_TITULAR_DOMICILIO=República Argentina

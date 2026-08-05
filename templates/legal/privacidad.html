@@ -12,7 +12,8 @@
 {% endif %}
 
 <h2>1. Responsable del tratamiento</h2>
-<p>{{ titular_nombre }}{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, con domicilio en {{ titular_domicilio }}, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
+<p><strong>{{ titular_razon_social }}</strong>{% if titular_cuit %} — CUIT {{ titular_cuit }}{% endif %}, con domicilio en {{ titular_domicilio }}{% if titular_email %}, contacto: {{ titular_email }}{% endif %}, quien opera bajo el nombre comercial <strong>{{ nombre_comercial }}</strong>, es responsable del tratamiento de los datos personales de los usuarios del Servicio {{ app_name }}, conforme a la Ley N° 25.326 de Protección de los Datos Personales y normativa de la Agencia de Acceso a la Información Pública (AAIP).</p>
+<p>El responsable del tratamiento es <strong>{{ titular_razon_social }}</strong>. «{{ nombre_comercial }}» es únicamente el nombre comercial / marca bajo el cual se presta el Servicio.</p>
 {% if rnbd_inscripto %}
 <p>La base de datos del Servicio se encuentra inscripta en el Registro Nacional de Bases de Datos de la AAIP bajo el N° {{ rnbd_numero }}. En caso de consultas o reclamos relacionados con el tratamiento de datos personales, el titular puede ser contactado a través del medio indicado en la Sección 7.</p>
 {% else %}

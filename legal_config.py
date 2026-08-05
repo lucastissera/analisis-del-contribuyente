@@ -5,13 +5,19 @@ from __future__ import annotations
 import os
 
 # Incrementar al publicar cambios sustanciales en TyC o privacidad.
-LEGAL_VERSION = "2026-08-03-v7"
+LEGAL_VERSION = "2026-08-04-v9"
 
 LEGAL_DOCUMENTOS = ("terminos", "privacidad")
 
 
 def titular_razon_social() -> str:
+    """Identidad legal (persona física o jurídica) que presta el Servicio."""
     return (os.environ.get("LEGAL_TITULAR_RAZON_SOCIAL") or "Lucas Tissera Laplagne").strip()
+
+
+def titular_nombre_comercial() -> str:
+    """Marca / nombre de fantasía. No reemplaza a la razón social en obligaciones legales."""
+    return (os.environ.get("LEGAL_NOMBRE_COMERCIAL") or "Level Up").strip()
 
 
 def titular_cuit() -> str:

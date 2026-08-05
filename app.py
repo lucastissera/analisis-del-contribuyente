@@ -863,13 +863,18 @@ def _contexto_legal_template() -> dict:
         titular_cuit,
         titular_domicilio,
         titular_email,
+        titular_nombre_comercial,
         titular_razon_social,
     )
 
+    razon = titular_razon_social()
+    comercial = titular_nombre_comercial()
     return {
         "legal_version": LEGAL_VERSION,
         "app_name": APP_NAME,
-        "titular_nombre": titular_razon_social(),
+        "titular_nombre": razon,
+        "titular_razon_social": razon,
+        "nombre_comercial": comercial,
         "titular_cuit": titular_cuit(),
         "titular_domicilio": titular_domicilio(),
         "titular_email": titular_email(),
