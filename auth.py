@@ -826,24 +826,28 @@ def verificar_acceso(username: str, password: str) -> str | None:
     """Devuelve None si válido; si no: invalid, expired, not_yet, pending_approval."""
     from auth_registro import verificar_acceso_overlay, verificar_password, verificar_suspendido
 
-    u = _resolver_clave_usuario(username)
-    pwd = (password or "").strip()
-    if not u:
+    try:
+        u = _resolver_clave_usuario(username)
+        pwd = (password or "").strip()
+        if not u:
+            return "invalid"
+        pendiente = verificar_acceso_overlay(u, pwd)
+        if pendiente == "pending_approval":
+            return "pending_approval"
+        if pendiente == "invalid":
+            return "invalid"
+        suspendido = verificar_suspendido(u, pwd)
+        if suspendido == "suspended":
+            return "suspended"
+        if suspendido == "invalid":
+            return "invalid"
+        cuenta = _load_cuentas().get(u)
+        if cuenta is None or not verificar_password(cuenta.password, pwd):
+            return "invalid"
+        return _motivo_vigencia(cuenta)
+    except Exception:
+        _LOG.exception("verificar_acceso falló para usuario %r", (username or "")[:64])
         return "invalid"
-    pendiente = verificar_acceso_overlay(u, pwd)
-    if pendiente == "pending_approval":
-        return "pending_approval"
-    if pendiente == "invalid":
-        return "invalid"
-    suspendido = verificar_suspendido(u, pwd)
-    if suspendido == "suspended":
-        return "suspended"
-    if suspendido == "invalid":
-        return "invalid"
-    cuenta = _load_cuentas().get(u)
-    if cuenta is None or not verificar_password(cuenta.password, pwd):
-        return "invalid"
-    return _motivo_vigencia(cuenta)
 
 
 def verify_credentials(username: str, password: str) -> bool:
