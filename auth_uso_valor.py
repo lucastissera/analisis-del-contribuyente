@@ -360,16 +360,21 @@ def _valor_celda_excel(val: Any) -> Any:
     return re.sub(r"[\000-\010\013\014\016-\037]", "", val)
 
 
+def _hipervinculo_hoja(hoja: str) -> str:
+    """Referencia interna Excel; escapa comillas simples del nombre de hoja."""
+    safe = (hoja or "Usuario").replace("'", "''")
+    return f"#'{safe}'!A1"
+
+
 def generar_excel_dashboard_valor(
     dashboards: list[dict[str, Any]] | None = None,
 ) -> bytes:
-    """Excel: hoja Resumen (tabla + enlaces), Uso por mes y una hoja de detalle por usuario."""
+    """Excel: hoja Resumen (filtros + enlaces), Uso por mes y una hoja de detalle por usuario."""
     from datetime import date
 
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.table import Table, TableStyleInfo
 
     if dashboards is None:
         dashboards = listar_dashboards_valor()
@@ -381,11 +386,11 @@ def generar_excel_dashboard_valor(
         "CUIT / Usuario",
         "Nombre",
         "Email",
-        "Teléfono",
-        "Válido desde",
-        "Válido hasta",
+        "Telefono",
+        "Valido desde",
+        "Valido hasta",
         "CUIT procesados",
-        "Cupo límite",
+        "Cupo limite",
         "CUIT disponibles",
     ] + [m.excel_label for m in METRICAS_USO]
     ws.append(encabezados)
@@ -409,31 +414,23 @@ def generar_excel_dashboard_valor(
             _valor_celda_excel(d.get("telefono") or ""),
             _valor_celda_excel(d.get("valido_desde_fmt") or ""),
             _valor_celda_excel(d.get("valido_hasta_fmt") or ""),
-            d.get("cuit_usados", 0),
-            d.get("cuit_limite", 0),
-            d.get("cuit_disponibles", 0),
-        ] + [d.get(m.dash_key, 0) for m in METRICAS_USO]
+            int(d.get("cuit_usados", 0) or 0),
+            int(d.get("cuit_limite", 0) or 0),
+            int(d.get("cuit_disponibles", 0) or 0),
+        ] + [int(d.get(m.dash_key, 0) or 0) for m in METRICAS_USO]
         ws.append(fila_datos)
         celda = ws.cell(row=fila, column=1)
-        celda.hyperlink = f"#'{hoja}'!A1"
-        celda.font = Font(color="0563C1", underline="single")
+        try:
+            celda.hyperlink = _hipervinculo_hoja(hoja)
+            celda.font = Font(color="0563C1", underline="single")
+        except Exception:
+            pass
         fila += 1
 
     ultima_fila = max(1, len(dashboards) + 1)
     ultima_col = get_column_letter(len(encabezados))
     if dashboards:
-        tabla = Table(
-            displayName="TablaValorGenerado",
-            ref=f"A1:{ultima_col}{ultima_fila}",
-        )
-        tabla.tableStyleInfo = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        ws.add_table(tabla)
+        ws.auto_filter.ref = f"A1:{ultima_col}{ultima_fila}"
 
     ws.freeze_panes = "A2"
     for col in range(1, len(encabezados) + 1):
@@ -443,14 +440,15 @@ def generar_excel_dashboard_valor(
     ws.column_dimensions["C"].width = 26
     ws.column_dimensions["D"].width = 16
 
-    ws["O1"] = "Instrucciones"
-    ws["O2"] = (
-        "Hacé clic en el CUIT de la tabla para abrir el detalle del usuario en otra hoja. "
-        "La hoja «Uso por mes» concentra el desglose mensual por sistema. "
-        "Podés filtrar y ordenar con los controles de la tabla."
+    col_ayuda = get_column_letter(len(encabezados) + 2)
+    ws[f"{col_ayuda}1"] = "Instrucciones"
+    ws[f"{col_ayuda}2"] = (
+        "Hace clic en el CUIT de la tabla para abrir el detalle del usuario en otra hoja. "
+        "La hoja Uso por mes concentra el desglose mensual por sistema. "
+        "Podes filtrar y ordenar con los controles de la tabla."
     )
-    ws["O2"].alignment = Alignment(wrap_text=True)
-    ws.column_dimensions["O"].width = 36
+    ws[f"{col_ayuda}2"].alignment = Alignment(wrap_text=True)
+    ws.column_dimensions[col_ayuda].width = 36
 
     titulo_fill = PatternFill("solid", fgColor="E8F0FE")
     lbl_font = Font(bold=True)
@@ -468,50 +466,43 @@ def generar_excel_dashboard_valor(
     n_cols_mes = len(enc_mes_resumen)
     for _hoja, d in hojas_usuario:
         uso_mes = d.get("uso_por_mes") or []
+        if not isinstance(uso_mes, list):
+            continue
         for fila_mes in uso_mes:
+            if not isinstance(fila_mes, dict):
+                continue
             ws_mes.append(
                 [
                     _valor_celda_excel(d.get("cuit_fmt") or d.get("cuit")),
                     _valor_celda_excel(d.get("nombre") or ""),
                     _valor_celda_excel(fila_mes.get("mes_fmt") or fila_mes.get("mes")),
-                    fila_mes.get("cuit", 0),
+                    int(fila_mes.get("cuit", 0) or 0),
                 ]
-                + [fila_mes.get(m.mes_key, 0) for m in METRICAS_USO]
+                + [int(fila_mes.get(m.mes_key, 0) or 0) for m in METRICAS_USO]
             )
             fila_mes_global += 1
     if fila_mes_global == 2:
         ws_mes.append(
-            ["—", "—", "Sin datos mensuales en los últimos 3 meses."]
+            ["-", "-", "Sin datos mensuales en los ultimos 3 meses."]
             + [""] * (n_cols_mes - 3)
         )
     ultima_fila_mes = max(1, ws_mes.max_row)
     ultima_col_mes = get_column_letter(n_cols_mes)
     if fila_mes_global > 2:
-        tabla_mes = Table(
-            displayName="TablaUsoPorMes",
-            ref=f"A1:{ultima_col_mes}{ultima_fila_mes}",
-        )
-        tabla_mes.tableStyleInfo = TableStyleInfo(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        ws_mes.add_table(tabla_mes)
+        ws_mes.auto_filter.ref = f"A1:{ultima_col_mes}{ultima_fila_mes}"
     ws_mes.freeze_panes = "A2"
     for col in range(1, n_cols_mes + 1):
         ws_mes.column_dimensions[get_column_letter(col)].width = 18 if col > 2 else 20
 
     filas_detalle = [
         ("CUIT / Usuario", lambda d: d.get("cuit_fmt") or d.get("cuit")),
-        ("Nombre", lambda d: d.get("nombre") or "—"),
-        ("Email", lambda d: d.get("email") or "—"),
-        ("Teléfono", lambda d: d.get("telefono") or "—"),
-        ("Período desde", lambda d: d.get("valido_desde_fmt") or "—"),
-        ("Período hasta", lambda d: d.get("valido_hasta_fmt") or "—"),
+        ("Nombre", lambda d: d.get("nombre") or "-"),
+        ("Email", lambda d: d.get("email") or "-"),
+        ("Telefono", lambda d: d.get("telefono") or "-"),
+        ("Periodo desde", lambda d: d.get("valido_desde_fmt") or "-"),
+        ("Periodo hasta", lambda d: d.get("valido_hasta_fmt") or "-"),
         ("CUIT procesados (cupo)", lambda d: d.get("cuit_usados", 0)),
-        ("Cupo límite", lambda d: d.get("cuit_limite", 0)),
+        ("Cupo limite", lambda d: d.get("cuit_limite", 0)),
         ("CUIT disponibles", lambda d: d.get("cuit_disponibles", 0)),
     ] + [
         (m.excel_label, lambda d, _m=m: d.get(_m.dash_key, 0))
@@ -529,52 +520,75 @@ def generar_excel_dashboard_valor(
         n_cols = len(enc_mes)
         if uso_mes:
             for fila_mes in uso_mes:
+                if not isinstance(fila_mes, dict):
+                    continue
                 hoja_ws.cell(
                     row=r,
                     column=1,
                     value=_valor_celda_excel(fila_mes.get("mes_fmt") or fila_mes.get("mes")),
                 )
-                hoja_ws.cell(row=r, column=2, value=fila_mes.get("cuit", 0))
+                hoja_ws.cell(row=r, column=2, value=int(fila_mes.get("cuit", 0) or 0))
                 for idx, m in enumerate(METRICAS_USO, start=3):
-                    hoja_ws.cell(row=r, column=idx, value=fila_mes.get(m.mes_key, 0))
+                    hoja_ws.cell(row=r, column=idx, value=int(fila_mes.get(m.mes_key, 0) or 0))
                 r += 1
         else:
-            hoja_ws.cell(row=r, column=1, value="Sin datos mensuales en los últimos 3 meses.")
+            hoja_ws.cell(
+                row=r,
+                column=1,
+                value="Sin datos mensuales en los ultimos 3 meses.",
+            )
             hoja_ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=n_cols)
             r += 1
         return r
 
     for hoja, d in hojas_usuario:
-        det = wb.create_sheet(title=hoja)
-        titulo = f"Dashboard de valor — {_valor_celda_excel(d.get('cuit_fmt') or d.get('cuit'))}"
-        det["A1"] = titulo
-        det["A1"].font = Font(bold=True, size=14)
-        det["A2"] = "← Volver al resumen"
-        det["A2"].hyperlink = "#Resumen!A1"
-        det["A2"].font = Font(color="0563C1", underline="single")
-        det["A4"] = "Métrica"
-        det["B4"] = "Valor"
-        det["A4"].font = lbl_font
-        det["B4"].font = lbl_font
-        det["A4"].fill = titulo_fill
-        det["B4"].fill = titulo_fill
-        r = 5
-        for etiqueta, fn in filas_detalle:
-            det.cell(row=r, column=1, value=_valor_celda_excel(etiqueta))
-            det.cell(row=r, column=2, value=_valor_celda_excel(fn(d)))
-            r += 1
+        try:
+            det = wb.create_sheet(title=hoja)
+            titulo = (
+                "Dashboard de valor - "
+                + str(_valor_celda_excel(d.get("cuit_fmt") or d.get("cuit") or ""))
+            )
+            det["A1"] = titulo
+            det["A1"].font = Font(bold=True, size=14)
+            det["A2"] = "Volver al resumen"
+            try:
+                det["A2"].hyperlink = "#Resumen!A1"
+                det["A2"].font = Font(color="0563C1", underline="single")
+            except Exception:
+                pass
+            det["A4"] = "Metrica"
+            det["B4"] = "Valor"
+            det["A4"].font = lbl_font
+            det["B4"].font = lbl_font
+            det["A4"].fill = titulo_fill
+            det["B4"].fill = titulo_fill
+            r = 5
+            for etiqueta, fn in filas_detalle:
+                try:
+                    valor = fn(d)
+                except Exception:
+                    valor = ""
+                det.cell(row=r, column=1, value=_valor_celda_excel(etiqueta))
+                det.cell(row=r, column=2, value=_valor_celda_excel(valor))
+                r += 1
 
-        r += 2
-        titulo_mes = r
-        det.cell(row=titulo_mes, column=1, value="Uso por mes")
-        det.cell(row=titulo_mes, column=1).font = Font(bold=True, size=12)
-        r = _escribir_tabla_uso_mes(det, titulo_mes + 1, d.get("uso_por_mes") or [])
+            r += 2
+            titulo_mes = r
+            det.cell(row=titulo_mes, column=1, value="Uso por mes")
+            det.cell(row=titulo_mes, column=1).font = Font(bold=True, size=12)
+            uso_mes = d.get("uso_por_mes") or []
+            if not isinstance(uso_mes, list):
+                uso_mes = []
+            r = _escribir_tabla_uso_mes(det, titulo_mes + 1, uso_mes)
 
-        det.column_dimensions["A"].width = 32
-        det.column_dimensions["B"].width = 22
-        for col in range(3, len(enc_mes) + 1):
-            det.column_dimensions[get_column_letter(col)].width = 18
-        det["D4"] = f"Exportado: {date.today().strftime('%d/%m/%Y')}"
+            det.column_dimensions["A"].width = 32
+            det.column_dimensions["B"].width = 22
+            for col in range(3, len(enc_mes) + 1):
+                det.column_dimensions[get_column_letter(col)].width = 18
+            det["D4"] = f"Exportado: {date.today().strftime('%d/%m/%Y')}"
+        except Exception:
+            _LOG.exception("No se pudo armar hoja Excel para %r", hoja)
+            continue
 
     buf = io.BytesIO()
     wb.save(buf)

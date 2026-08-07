@@ -1500,20 +1500,25 @@ def admin_dashboard_valor_exportar():
 
         contenido = generar_excel_dashboard_valor(dashboards)
         if not contenido:
-            raise ValueError("Excel vacío")
+            raise ValueError("Excel vacio")
 
         nombre = f"Dashboard_Valor_Generado_{date.today().isoformat()}.xlsx"
-        buf = io.BytesIO(contenido)
-        buf.seek(0)
-        return send_file(
-            buf,
-            as_attachment=True,
-            download_name=nombre,
+        # Response con bytes evita fallos de send_file(BytesIO) bajo gunicorn/Render.
+        return Response(
+            contenido,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{nombre}"',
+                "Content-Length": str(len(contenido)),
+                "Cache-Control": "no-store",
+            },
         )
-    except Exception:
+    except Exception as exc:
         logging.getLogger(__name__).exception("Error al exportar dashboard de valor")
-        flash(tr(lg, "admin_dashboard_export_error"), "danger")
+        flash(
+            f"{tr(lg, 'admin_dashboard_export_error')} ({type(exc).__name__}: {exc})",
+            "danger",
+        )
         return redirect(url_for("admin_altas_usuarios"))
 
 
