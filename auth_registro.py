@@ -619,6 +619,57 @@ def _consumir_cuit_remoto(username: str, cantidad: int = 1) -> bool:
         return False
 
 
+def _url_api_uso_remota() -> str:
+    base = _base_api_remota()
+    return f"{base}/api/uso/registrar" if base else ""
+
+
+def registrar_uso_remoto(username: str, incrementos: dict[str, int]) -> bool:
+    """Portable: envía métricas de uso al servidor para el dashboard admin."""
+    import ssl
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    if not incrementos:
+        return True
+    try:
+        from auth import _remote_token
+    except Exception:
+        return False
+
+    url = _url_api_uso_remota()
+    token = (_remote_token() or "").strip()
+    u_raw = (username or "").strip()
+    if not url or not token or not u_raw:
+        return False
+
+    payload: dict[str, object] = {"usuario": u_raw}
+    for key, val in incrementos.items():
+        if val > 0:
+            payload[key] = int(val)
+    if len(payload) <= 1:
+        return True
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    ctx = ssl.create_default_context()
+    try:
+        with urlopen(req, timeout=20, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return bool(data.get("ok"))
+    except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        _LOG.debug("Uso remoto no registrado para %s: %s", u_raw, exc)
+        return False
+
+
 def control_cupo_cuit(username: str | None):
     """Devuelve (hay_cupo, on_exitoso) o (None, None) si no aplica cupo.
 
@@ -1476,6 +1527,46 @@ def eliminar_cuenta(cuit: str) -> bool:
         }
     )
     return True
+
+
+def actualizar_email_usuario(cuit: str, email: str) -> None:
+    """Actualiza el email de registro (solo admin). Afecta recuperación de contraseña."""
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        raise ValueError("no_encontrada")
+    em = (email or "").strip().lower()
+    if em and not _EMAIL_RE.match(em):
+        raise ValueError("email_invalido")
+    with _lock:
+        path = _path_usuarios_overlay()
+        overlay = _read_store("usuarios_registrados", {"version": 1, "users": {}}, path)
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            raise ValueError("no_encontrada")
+        meta = users[u]
+        if not isinstance(meta, dict):
+            raise ValueError("no_encontrada")
+        if meta_es_admin(meta):
+            raise ValueError("no_encontrada")
+        anterior = str(meta.get("email") or "").strip().lower()
+        if anterior == em:
+            return
+        meta["email"] = em
+        meta["email_cambiado_admin"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        historial = meta.get("email_historial")
+        if not isinstance(historial, list):
+            historial = []
+        historial.insert(
+            0,
+            {
+                "anterior": anterior,
+                "nuevo": em,
+                "en": meta["email_cambiado_admin"],
+            },
+        )
+        meta["email_historial"] = historial[:20]
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay, path)
 
 
 def actualizar_vencimiento(cuit: str, valido_hasta: str) -> bool:

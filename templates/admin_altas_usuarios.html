@@ -53,6 +53,8 @@
       .btn-dashboard:hover { opacity: 0.92; }
       .form-venc { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
       .form-venc input[type="date"] { font-size: 0.85rem; }
+      .form-email { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; min-width: 12rem; }
+      .form-email input[type="email"] { font-size: 0.85rem; min-width: 10rem; flex: 1 1 10rem; }
       .acciones-suscripcion { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
       .suspendida { color: var(--color-warn); font-weight: bold; }
       .enlace-box { word-break: break-all; background: var(--enlace-bg); padding: 0.6rem; border-radius: 6px; border: 1px dashed var(--border); }
@@ -161,6 +163,26 @@
           </form>
         </div>
       </details>
+
+      {% if db_estado and db_estado.activo %}
+      <details class="admin-acordeon">
+        <summary class="admin-acordeon-cabecera">{{ t('admin_db_titulo') }}</summary>
+        <div class="admin-acordeon-cuerpo">
+          <p class="help">{{ t('admin_db_help') }}</p>
+          {% if db_estado.tamano_mb is not none %}
+          <p class="help">{{ t('admin_db_tamano', mb=db_estado.tamano_mb) }}</p>
+          {% if db_estado.alerta_tamano %}
+          <p class="warn">{{ t('admin_db_alerta_tamano', mb=db_estado.tamano_mb, umbral=db_estado.umbral_alerta_mb) }}</p>
+          {% else %}
+          <p class="ok">{{ t('admin_db_tamano_ok', umbral=db_estado.umbral_alerta_mb) }}</p>
+          {% endif %}
+          {% elif db_estado.tamano_error %}
+          <p class="warn">{{ t('admin_db_tamano_err', detalle=db_estado.tamano_error) }}</p>
+          {% endif %}
+          <p class="help">{{ t('admin_db_neon_aviso') }}</p>
+        </div>
+      </details>
+      {% endif %}
 
       {% if enlace_generado %}
       <div class="panel">
@@ -274,7 +296,14 @@
           {% for p in pendientes %}
           <tr>
             <td>{{ p.cuit_fmt or p.cuit }}</td>
-            <td>{{ p.email or '—' }}</td>
+            <td>
+              <form method="post" class="form-email">
+                <input type="hidden" name="accion" value="actualizar_email" />
+                <input type="hidden" name="cuit" value="{{ p.cuit }}" />
+                <input name="email" type="email" value="{{ p.email or '' }}" autocomplete="email" />
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_email') }}</button>
+              </form>
+            </td>
             <td>
               {% if p.url %}
               <a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.fmt or '—' }}</a>
@@ -336,7 +365,14 @@
           {% for s in suscriptores %}
           <tr class="{{ 'fila-suspendida' if s.suspendida else '' }}">
             <td>{{ s.cuit_fmt or s.cuit }}</td>
-            <td>{{ s.email or '—' }}</td>
+            <td>
+              <form method="post" class="form-email">
+                <input type="hidden" name="accion" value="actualizar_email" />
+                <input type="hidden" name="cuit" value="{{ s.cuit }}" />
+                <input name="email" type="email" value="{{ s.email or '' }}" autocomplete="email" />
+                <button type="submit" class="btn-guardar">{{ t('admin_gestion_btn_guardar_email') }}</button>
+              </form>
+            </td>
             <td>
               <form method="post" class="form-servicios">
                 <input type="hidden" name="accion" value="actualizar_servicios" />

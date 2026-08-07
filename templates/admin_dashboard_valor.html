@@ -52,6 +52,9 @@
       <h1>{{ t('admin_dashboard_valor_h1', cuit=dashboard.cuit_fmt) }}</h1>
       <p class="subtitulo">
         {% if dashboard.nombre %}{{ dashboard.nombre }} · {% endif %}{{ dashboard.email or '—' }}
+        {% if dashboard.telefono %}
+        · {% if dashboard.telefono_url %}<a href="{{ dashboard.telefono_url }}" target="_blank" rel="noopener">{{ dashboard.telefono }}</a>{% else %}{{ dashboard.telefono }}{% endif %}
+        {% endif %}
       </p>
       <p class="help">
         {{ t('admin_dashboard_valor_periodo', desde=dashboard.valido_desde_fmt, hasta=dashboard.valido_hasta_fmt) }}
@@ -67,22 +70,12 @@
             <div class="metrica-valor">{{ dashboard.cuit_usados }} / {{ dashboard.cuit_limite }}</div>
             <div class="metrica-etq">{{ t('admin_dashboard_valor_cuit_procesados') }}</div>
           </div>
+          {% for m in dashboard.metricas_uso %}
           <div class="metrica">
-            <div class="metrica-valor">{{ dashboard.mce_comprobantes }}</div>
-            <div class="metrica-etq">{{ t('admin_dashboard_valor_mce') }}</div>
+            <div class="metrica-valor">{{ dashboard[m.dash_key] }}</div>
+            <div class="metrica-etq">{{ t(m.i18n_label) }}</div>
           </div>
-          <div class="metrica">
-            <div class="metrica-valor">{{ dashboard.mcr_comprobantes }}</div>
-            <div class="metrica-etq">{{ t('admin_dashboard_valor_mcr') }}</div>
-          </div>
-          <div class="metrica">
-            <div class="metrica-valor">{{ dashboard.dfe_notificaciones }}</div>
-            <div class="metrica-etq">{{ t('admin_dashboard_valor_dfe') }}</div>
-          </div>
-          <div class="metrica">
-            <div class="metrica-valor">{{ dashboard.np_cuits }}</div>
-            <div class="metrica-etq">{{ t('admin_dashboard_valor_np') }}</div>
-          </div>
+          {% endfor %}
         </div>
       </div>
 
@@ -95,10 +88,9 @@
             <tr>
               <th>{{ t('admin_dashboard_valor_uso_mes_col_mes') }}</th>
               <th>{{ t('admin_dashboard_valor_uso_mes_col_cuit') }}</th>
-              <th>{{ t('admin_dashboard_valor_mce') }}</th>
-              <th>{{ t('admin_dashboard_valor_mcr') }}</th>
-              <th>{{ t('admin_dashboard_valor_dfe') }}</th>
-              <th>{{ t('admin_dashboard_valor_np') }}</th>
+              {% for m in dashboard.metricas_uso %}
+              <th>{{ t(m.i18n_label) }}</th>
+              {% endfor %}
             </tr>
           </thead>
           <tbody>
@@ -106,10 +98,9 @@
             <tr>
               <td>{{ fila.mes_fmt or fila.mes }}</td>
               <td>{{ fila.cuit }}</td>
-              <td>{{ fila.mce }}</td>
-              <td>{{ fila.mcr }}</td>
-              <td>{{ fila.dfe }}</td>
-              <td>{{ fila.np }}</td>
+              {% for m in dashboard.metricas_uso %}
+              <td>{{ fila[m.mes_key] }}</td>
+              {% endfor %}
             </tr>
             {% endfor %}
           </tbody>

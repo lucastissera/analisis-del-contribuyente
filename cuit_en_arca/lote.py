@@ -116,12 +116,12 @@ def _mensaje_sin_descargas(
 
 
 def _cuit_mc_procesado_exitoso(resultado) -> bool:
-    """Éxito completo: emitidos y recibidos, sin aviso de descarga parcial."""
-    return bool(
-        resultado.emitidos
-        and resultado.recibidos
-        and not resultado.aviso_parcial
-    )
+    """Hay al menos un comprobante descargado (emitidos y/o recibidos).
+
+    Antes exigía ambos lados; eso dejaba sin contar cupo ni métricas cuando ARCA
+    devolvía solo emitidos o solo recibidos.
+    """
+    return bool(getattr(resultado, "emitidos", None) or getattr(resultado, "recibidos", None))
 
 
 _MENSAJE_CUPO_AGOTADO = "Cupo de CUIT agotado"

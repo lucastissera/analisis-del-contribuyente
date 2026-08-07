@@ -3019,6 +3019,7 @@ def ejecutar_vl_lote(
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
     usuario_cupo: str | None = None,
+    registrar_valor_vl: Callable[[], None] | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
 ) -> Path:
     headless = _headless_desde_env() if headless is None else headless
@@ -3092,6 +3093,8 @@ def ejecutar_vl_lote(
                 )
                 if on_cuit_fin:
                     on_cuit_fin(nombre_repr or cuit_log, res.razon_social, res.total_archivos, None)
+                if registrar_valor_vl:
+                    registrar_valor_vl()
             except CancelacionUsuarioError:
                 raise
             except Exception as exc:

@@ -136,6 +136,21 @@ def estado_db() -> dict[str, Any]:
             )
             for name, updated_at in cur.fetchall():
                 out["blobs"][name] = updated_at.isoformat() if updated_at else None
+            try:
+                cur.execute("SELECT pg_database_size(current_database())")
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    size_bytes = int(row[0])
+                    out["tamano_bytes"] = size_bytes
+                    out["tamano_mb"] = round(size_bytes / (1024 * 1024), 2)
+                    try:
+                        warn_mb = int((os.environ.get("NEON_STORAGE_WARN_MB") or "400").strip())
+                    except ValueError:
+                        warn_mb = 400
+                    out["alerta_tamano"] = size_bytes >= warn_mb * 1024 * 1024
+                    out["umbral_alerta_mb"] = warn_mb
+            except Exception as exc:
+                out["tamano_error"] = str(exc)
     except Exception as exc:
         out["error"] = str(exc)
     finally:

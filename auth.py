@@ -429,6 +429,7 @@ _OVERLAY_SYNC_KEYS = (
     "uso_mce_comprobantes",
     "uso_mcr_comprobantes",
     "uso_dfe_notificaciones",
+    "uso_vl_cuits",
     "uso_np_cuits",
     "uso_por_mes",
     "servicios",

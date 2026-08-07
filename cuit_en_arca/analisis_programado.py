@@ -346,9 +346,7 @@ def ejecutar_analisis_programado(
         usuario_cupo = (cfg.usuario_cupo or "").strip()
         hay_cupo = None
         on_cuit_exitoso = None
-        registrar_valor_mc = None
-        registrar_valor_dfe = None
-        registrar_valor_np = None
+        reg_valor = None
         if usuario_cupo:
             from auth_registro import control_cupo_cuit, cupo_cuit_disponible
             from auth_uso_valor import fabricar_registro_valor
@@ -356,9 +354,7 @@ def ejecutar_analisis_programado(
             if cupo_cuit_disponible(usuario_cupo) <= 0:
                 raise ValueError("Cupo de CUIT agotado.")
             hay_cupo, on_cuit_exitoso = control_cupo_cuit(usuario_cupo)
-            registrar_valor_mc, registrar_valor_dfe, registrar_valor_np = fabricar_registro_valor(
-                usuario_cupo
-            )
+            reg_valor = fabricar_registro_valor(usuario_cupo)
 
         marcar_paso_ap("preparacion", "en_curso")
         filas_ap = _filas_desde_config(cfg)
@@ -412,7 +408,7 @@ def ejecutar_analisis_programado(
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
                             usuario_cupo=usuario_cupo or None,
-                            registrar_valor_mc=registrar_valor_mc,
+                            registrar_valor_mc=reg_valor.mc if reg_valor else None,
                         )
                         resultado["sistemas"]["mis_comprobantes"]["descargas_ok"] = res.descargas_ok
                         resultado["sistemas"]["mis_comprobantes"]["fallos"] = list(res.ingresos_fallidos)
@@ -459,7 +455,7 @@ def ejecutar_analisis_programado(
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
                             usuario_cupo=usuario_cupo or None,
-                            registrar_valor_dfe=registrar_valor_dfe,
+                            registrar_valor_dfe=reg_valor.dfe if reg_valor else None,
                         )
                         resultado["sistemas"]["dfe"]["carpeta"] = str(carpeta_dfe)
                         marcar_paso_ap("dfe", "ok")
@@ -502,7 +498,7 @@ def ejecutar_analisis_programado(
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
                             usuario_cupo=usuario_cupo or None,
-                            registrar_valor_np=registrar_valor_np,
+                            registrar_valor_np=reg_valor.np if reg_valor else None,
                         )
                         resultado["sistemas"]["nuestra_parte"]["carpeta"] = str(carpeta_np)
                         marcar_paso_ap("nuestra_parte", "ok")
@@ -549,6 +545,7 @@ def ejecutar_analisis_programado(
                             hay_cupo=hay_cupo,
                             on_cuit_exitoso=on_cuit_exitoso,
                             usuario_cupo=usuario_cupo or None,
+                            registrar_valor_vl=reg_valor.vl if reg_valor else None,
                         )
                         resultado["sistemas"]["liquidaciones"]["carpeta"] = str(carpeta_vl)
                         marcar_paso_ap("liquidaciones", "ok")

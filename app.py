@@ -460,6 +460,7 @@ def _session_idle_and_login():
         "api_auth_users",
         "api_cupo_info",
         "api_cupo_consumir",
+        "api_uso_registrar",
         "api_estado_altas",
         "solicitar_acceso",
         "activar_cuenta",
@@ -521,6 +522,7 @@ def _verificar_aceptacion_legal_pendiente():
         "api_auth_users",
         "api_cupo_info",
         "api_cupo_consumir",
+        "api_uso_registrar",
         "api_estado_altas",
         None,
     ):
@@ -1168,6 +1170,7 @@ def admin_altas_usuarios():
     _requiere_admin()
     from auth_registro import (
         aprobar_cuenta,
+        actualizar_email_usuario,
         cambiar_contrasena_usuario,
         crear_solicitud,
         crear_usuario_admin,
@@ -1387,6 +1390,28 @@ def admin_altas_usuarios():
                     flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
                 except RuntimeError:
                     flash(tr(lg, "alta_err_guardado"), "warning")
+        elif accion == "actualizar_email":
+            email = (request.form.get("email") or "").strip()
+            try:
+                actualizar_email_usuario(cuit, email)
+                flash(
+                    tr(
+                        lg,
+                        "admin_gestion_ok_email",
+                        cuit=formatear_cuit(normalizar_cuit(cuit) or cuit),
+                        email=email or "—",
+                    ),
+                    "success",
+                )
+            except ValueError as exc:
+                key = (
+                    f"alta_err_{exc}"
+                    if str(exc).startswith("email_")
+                    else "admin_altas_err_no_encontrada"
+                )
+                flash(tr(lg, key) if tr(lg, key) != key else str(exc), "warning")
+            except RuntimeError:
+                flash(tr(lg, "alta_err_guardado"), "warning")
         elif accion == "probar_email":
             resultado = probar_email_admin()
             if resultado.get("ok"):
@@ -1410,6 +1435,14 @@ def admin_altas_usuarios():
     from datetime import date as _date_cls, timedelta as _td_cls
 
     fecha_default_alta = (_date_cls.today() + _td_cls(days=_dias_suscripcion())).isoformat()
+    db_estado = None
+    try:
+        from auth_registro_db import enabled, estado_db
+
+        if enabled():
+            db_estado = estado_db()
+    except Exception:
+        db_estado = None
     return render_template(
         "admin_altas_usuarios.html",
         pendientes=pendientes,
@@ -1421,6 +1454,7 @@ def admin_altas_usuarios():
         min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
         smtp_estado=estado_smtp(),
         servicios_ids=SERVICIOS_IDS,
+        db_estado=db_estado,
     )
 
 
@@ -1451,14 +1485,23 @@ def admin_dashboard_valor_exportar():
     from auth_uso_valor import generar_excel_dashboard_valor, listar_dashboards_valor
 
     lg = normalize_lang(session.get("lang"))
-    if not listar_dashboards_valor():
+    dashboards = listar_dashboards_valor()
+    if not dashboards:
         flash(tr(lg, "admin_dashboard_export_vacio"), "warning")
         return redirect(url_for("admin_altas_usuarios"))
 
-    contenido = generar_excel_dashboard_valor()
+    try:
+        contenido = generar_excel_dashboard_valor(dashboards)
+    except Exception:
+        logging.getLogger(__name__).exception("Error al generar Excel del dashboard de valor")
+        flash(tr(lg, "admin_dashboard_export_error"), "danger")
+        return redirect(url_for("admin_altas_usuarios"))
+
     nombre = f"Dashboard_Valor_Generado_{date.today().isoformat()}.xlsx"
+    buf = io.BytesIO(contenido)
+    buf.seek(0)
     return send_file(
-        io.BytesIO(contenido),
+        buf,
         as_attachment=True,
         download_name=nombre,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2296,7 +2339,7 @@ def arca_descarga_lote():
     on_log = envolver_log_con_entrega(callback_log_lote(job_id), entrega)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     usuario_cupo_job = _usuario_cupo_web()
-    registrar_valor_mc, _reg_dfe, _reg_np = _registro_valor_sesion()
+    reg_valor = _registro_valor_sesion()
 
     headless = _headless_desde_peticion()
 
@@ -2320,7 +2363,7 @@ def arca_descarga_lote():
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
                 usuario_cupo=usuario_cupo_job,
-                registrar_valor_mc=registrar_valor_mc,
+                registrar_valor_mc=reg_valor.mc if reg_valor else None,
                 headless=headless,
             )
             if entrega:
@@ -2502,7 +2545,7 @@ def dfe_descargar():
     on_paso = callback_paso_dfe(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     usuario_cupo_job = _usuario_cupo_web()
-    _reg_mc, registrar_valor_dfe, _reg_np = _registro_valor_sesion()
+    reg_valor = _registro_valor_sesion()
 
     def _reinit() -> None:
         reiniciar_pasos_dfe(job_id)
@@ -2538,7 +2581,7 @@ def dfe_descargar():
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
                 usuario_cupo=usuario_cupo_job,
-                registrar_valor_dfe=registrar_valor_dfe,
+                registrar_valor_dfe=reg_valor.dfe if reg_valor else None,
             )
             if entrega:
                 entrega.escanear()
@@ -2698,6 +2741,7 @@ def vl_descargar():
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     usuario_cupo_job = _usuario_cupo_web()
     generar_resumen_excel_vl = "certificados" in sistemas
+    reg_valor = _registro_valor_sesion()
 
     def _reinit() -> None:
         reiniciar_pasos_vl(job_id)
@@ -2735,6 +2779,7 @@ def vl_descargar():
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
                 usuario_cupo=usuario_cupo_job,
+                registrar_valor_vl=reg_valor.vl if reg_valor else None,
             )
             if entrega:
                 entrega.escanear()
@@ -3055,7 +3100,7 @@ def np_descargar():
     on_paso = callback_paso_np(job_id)
     hay_cupo, on_cuit_exitoso = _control_cupo_sesion()
     usuario_cupo_job = _usuario_cupo_web()
-    _reg_mc, _reg_dfe, registrar_valor_np = _registro_valor_sesion()
+    reg_valor = _registro_valor_sesion()
 
     def _reinit() -> None:
         reiniciar_pasos_np(job_id)
@@ -3091,7 +3136,7 @@ def np_descargar():
                 hay_cupo=hay_cupo,
                 on_cuit_exitoso=on_cuit_exitoso,
                 usuario_cupo=usuario_cupo_job,
-                registrar_valor_np=registrar_valor_np,
+                registrar_valor_np=reg_valor.np if reg_valor else None,
             )
             if entrega:
                 entrega.escanear()
@@ -3489,6 +3534,37 @@ def api_cupo_consumir():
             "cuit_disponibles": info.get("cuit_disponibles"),
         }
     )
+
+
+@app.post("/api/uso/registrar")
+def api_uso_registrar():
+    """Registra métricas de uso desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
+    if not verificar_token_remoto(request.headers.get("Authorization")):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    usuario = (data.get("usuario") or "").strip()
+    if not usuario:
+        return jsonify({"error": "usuario_requerido"}), 400
+    from auth_registro import resolver_clave_usuario_overlay
+    from auth_uso_valor import _incrementar_uso
+    from uso_metricas import meta_keys_uso
+
+    clave = resolver_clave_usuario_overlay(usuario) or usuario
+    campos: dict[str, int] = {}
+    for key in meta_keys_uso():
+        try:
+            val = int(data.get(key) or 0)
+        except (TypeError, ValueError):
+            val = 0
+        if val > 0:
+            campos[key] = val
+    if not campos:
+        return jsonify({"error": "sin_incrementos"}), 400
+    try:
+        _incrementar_uso(clave, **campos)
+    except Exception as exc:
+        return jsonify({"error": "registro_fallido", "detalle": str(exc)}), 500
+    return jsonify({"ok": True, "usuario": clave})
 
 
 @app.post("/analisis-programado/limpiar")

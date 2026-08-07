@@ -1,0 +1,39 @@
+---
+description: Al agregar una solapa/servicio nuevo, registrar métricas en el dashboard de uso
+globs: app.py,auth_uso_valor.py,uso_metricas.py,cuit_en_arca/**/*.py,templates/admin_dashboard_valor.html,i18n.py,auth.py
+alwaysApply: false
+---
+
+# Dashboard de uso — nueva solapa o servicio
+
+Cuando agregues una **solapa** con procesamiento que deba reflejarse en el dashboard admin de valor generado:
+
+## 1. Catálogo central (`uso_metricas.py`)
+
+Añadir fila en ``METRICAS_USO``:
+
+- ``servicio_id``: misma clave que en ``auth_registro.SERVICIOS_IDS`` (ej. ``vl``, ``facturador``).
+- ``meta_key``: campo en el JSON del usuario (ej. ``uso_vl_cuits``).
+- ``mes_key``: clave corta en ``uso_por_mes`` (ej. ``vl``).
+- ``dash_key`` / ``i18n_label`` / ``excel_label``: etiquetas para pantalla y Excel.
+
+Con eso se actualizan solos: dashboard web, export Excel, uso mensual y reset al renovar.
+
+## 2. Registro al procesar
+
+- Añadir método en ``RegistroValorUso`` (`auth_uso_valor.py`) si hace falta.
+- Pasar callback a la automatización (patrón ``registrar_valor_*``).
+- En la ruta Flask: ``reg_valor = _registro_valor_sesion()`` y pasar ``reg_valor.xxx if reg_valor else None``.
+- Incluir en **análisis programado** si el sistema corre en AP.
+
+## 3. Sync portable
+
+Añadir ``meta_key`` en ``auth._OVERLAY_SYNC_KEYS``.
+
+## 4. i18n
+
+Clave ``admin_dashboard_valor_<dash_key>`` en ``i18n.py`` (es).
+
+## Servicios sin métrica hoy
+
+``facturador``, ``inv``, procesador manual ``/procesar``, cruce LIC/MCR — no están en ``METRICAS_USO`` hasta instrumentarlos.

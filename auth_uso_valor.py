@@ -4,26 +4,25 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
 
-_LOG = logging.getLogger(__name__)
-
-_USO_KEYS = (
-    "uso_mce_comprobantes",
-    "uso_mcr_comprobantes",
-    "uso_dfe_notificaciones",
-    "uso_np_cuits",
+from uso_metricas import (
+    METRICAS_USO,
+    fila_uso_mes_desde_bucket,
+    fila_uso_mes_vacia,
+    mes_keys_uso,
+    meta_key_a_mes_key,
+    meta_keys_uso,
+    metricas_dashboard_desde_uso,
 )
 
-_USO_KEY_A_MES = {
-    "uso_mce_comprobantes": "mce",
-    "uso_mcr_comprobantes": "mcr",
-    "uso_dfe_notificaciones": "dfe",
-    "uso_np_cuits": "np",
-}
+_LOG = logging.getLogger(__name__)
 
-_USO_MES_CAMPOS = ("cuit", "mce", "mcr", "dfe", "np")
+_USO_KEYS = meta_keys_uso()
+_USO_KEY_A_MES = meta_key_a_mes_key()
+_USO_MES_CAMPOS = mes_keys_uso()
 
 _MESES_HISTORIAL_USO = 3
 
@@ -91,27 +90,18 @@ def registrar_uso_cuit_mes_en_meta(meta: dict[str, Any], cantidad: int = 1) -> N
 def _leer_uso_por_mes(meta: dict[str, Any]) -> list[dict[str, Any]]:
     por_mes = meta.get("uso_por_mes")
     if not isinstance(por_mes, dict):
-        return []
-    vigentes = _meses_vigentes_uso()
+        por_mes = {}
     filas: list[dict[str, Any]] = []
-    for mes in sorted(vigentes):
+    for mes in sorted(_meses_vigentes_uso()):
         bucket = por_mes.get(mes)
         if not isinstance(bucket, dict):
-            continue
+            bucket = {}
         try:
             filas.append(
-                {
-                    "mes": mes,
-                    "mes_fmt": _formatear_mes_ym(mes),
-                    "cuit": max(0, int(bucket.get("cuit") or 0)),
-                    "mce": max(0, int(bucket.get("mce") or 0)),
-                    "mcr": max(0, int(bucket.get("mcr") or 0)),
-                    "dfe": max(0, int(bucket.get("dfe") or 0)),
-                    "np": max(0, int(bucket.get("np") or 0)),
-                }
+                fila_uso_mes_desde_bucket(mes, _formatear_mes_ym(mes), bucket)
             )
         except (TypeError, ValueError):
-            continue
+            filas.append(fila_uso_mes_vacia(mes, _formatear_mes_ym(mes)))
     return filas
 
 
@@ -149,6 +139,10 @@ def _incrementar_uso(username: str, **campos: int) -> None:
         return
     u = resolver_clave_usuario_overlay(u_raw)
     if not u:
+        _LOG.warning(
+            "Uso no registrado: usuario %r no está en usuarios_registrados.",
+            u_raw,
+        )
         return
     incrementos = {k: max(0, int(v)) for k, v in campos.items() if int(v) > 0}
     if not incrementos:
@@ -157,6 +151,11 @@ def _incrementar_uso(username: str, **campos: int) -> None:
         overlay = _cargar_overlay_completo()
         users = overlay.get("users")
         if not isinstance(users, dict) or u not in users:
+            _LOG.warning(
+                "Uso no registrado: clave overlay %r (desde %r) ausente en el store.",
+                u,
+                u_raw,
+            )
             return
         meta = users[u]
         if not isinstance(meta, dict) or meta_es_admin(meta):
@@ -175,6 +174,27 @@ def _incrementar_uso(username: str, **campos: int) -> None:
         if mes_campos:
             _incrementar_uso_por_mes_meta(meta, mes, **mes_campos)
         _guardar_overlay_completo(overlay)
+    _sync_uso_remoto_si_corresponde(u, incrementos)
+
+
+def _sync_uso_remoto_si_corresponde(username: str, incrementos: dict[str, int]) -> None:
+    """Portable: replica métricas de uso en el servidor (Neon) para el dashboard admin."""
+    if not incrementos:
+        return
+    try:
+        from auth_registro_db import enabled
+
+        if enabled():
+            return
+        from auth import _modo_remoto_activo
+
+        if not _modo_remoto_activo():
+            return
+        from auth_registro import registrar_uso_remoto
+
+        registrar_uso_remoto(username, incrementos)
+    except Exception:
+        _LOG.debug("Sync remoto de uso omitido", exc_info=True)
 
 
 def contar_comprobantes_en_archivo(datos: bytes, nombre: str) -> int:
@@ -214,8 +234,42 @@ def registrar_uso_dfe(username: str, notificaciones: int) -> None:
     _incrementar_uso(username, uso_dfe_notificaciones=max(0, int(notificaciones)))
 
 
+def registrar_uso_vl(username: str, cuits: int = 1) -> None:
+    _incrementar_uso(username, uso_vl_cuits=max(0, int(cuits)))
+
+
 def registrar_uso_np(username: str) -> None:
     _incrementar_uso(username, uso_np_cuits=1)
+
+
+@dataclass
+class RegistroValorUso:
+    """Callbacks de registro de uso por servicio (extensible vía ``uso_metricas.METRICAS_USO``)."""
+
+    usuario: str
+
+    def mc(self, mce: int = 0, mcr: int = 0) -> None:
+        registrar_uso_mc(self.usuario, mce=mce, mcr=mcr)
+
+    def dfe(self, notificaciones: int = 0) -> None:
+        registrar_uso_dfe(self.usuario, notificaciones)
+
+    def vl(self, cuits: int = 1) -> None:
+        registrar_uso_vl(self.usuario, cuits=cuits)
+
+    def np(self) -> None:
+        registrar_uso_np(self.usuario)
+
+
+def fabricar_registro_valor(username: str | None) -> RegistroValorUso | None:
+    u = (username or "").strip()
+    if not u:
+        return None
+    from auth import es_administrador
+
+    if es_administrador(u):
+        return None
+    return RegistroValorUso(u)
 
 
 def dashboard_valor_usuario(cuit: str) -> dict[str, Any] | None:
@@ -237,53 +291,30 @@ def dashboard_valor_usuario(cuit: str) -> dict[str, Any] | None:
         return None
     if meta.get("pendiente_aprobacion"):
         return None
+    from auth_registro import _telefono_desde_meta
+
     limite, usados = _leer_cupo_meta(meta)
     uso = _leer_uso_meta(meta)
     vd = _parse_fecha_local(meta.get("valido_desde"))
     vh = _parse_fecha_local(meta.get("valido_hasta"))
-    return {
+    tel = _telefono_desde_meta(meta)
+    out: dict[str, Any] = {
         "cuit": u,
         "cuit_fmt": formatear_cuit(u),
         "nombre": meta.get("nombre") or "",
         "email": meta.get("email") or "",
+        "telefono": tel.get("fmt") or "",
+        "telefono_url": tel.get("url") or "",
         "valido_desde_fmt": vd.strftime("%d/%m/%Y") if vd else "—",
         "valido_hasta_fmt": vh.strftime("%d/%m/%Y") if vh else "—",
         "cuit_usados": usados,
         "cuit_limite": limite,
         "cuit_disponibles": max(0, limite - usados),
-        "mce_comprobantes": uso["uso_mce_comprobantes"],
-        "mcr_comprobantes": uso["uso_mcr_comprobantes"],
-        "dfe_notificaciones": uso["uso_dfe_notificaciones"],
-        "np_cuits": uso["uso_np_cuits"],
         "uso_por_mes": _leer_uso_por_mes(meta),
+        "metricas_uso": METRICAS_USO,
     }
-
-
-def fabricar_registro_valor(
-    username: str | None,
-) -> tuple[
-    Callable[[int, int], None] | None,
-    Callable[[int], None] | None,
-    Callable[[], None] | None,
-]:
-    u = (username or "").strip()
-    if not u:
-        return None, None, None
-    from auth import es_administrador
-
-    if es_administrador(u):
-        return None, None, None
-
-    def mc(mce: int, mcr: int) -> None:
-        registrar_uso_mc(u, mce=mce, mcr=mcr)
-
-    def dfe(notificaciones: int) -> None:
-        registrar_uso_dfe(u, notificaciones)
-
-    def np() -> None:
-        registrar_uso_np(u)
-
-    return mc, dfe, np
+    out.update(metricas_dashboard_desde_uso(uso))
+    return out
 
 
 def listar_dashboards_valor() -> list[dict[str, Any]]:
@@ -313,8 +344,10 @@ def _nombre_hoja_excel(d: dict[str, Any], usados: set[str]) -> str:
     return nombre
 
 
-def generar_excel_dashboard_valor() -> bytes:
-    """Excel: hoja Resumen (tabla + enlaces) y una hoja de detalle por usuario."""
+def generar_excel_dashboard_valor(
+    dashboards: list[dict[str, Any]] | None = None,
+) -> bytes:
+    """Excel: hoja Resumen (tabla + enlaces), Uso por mes y una hoja de detalle por usuario."""
     from datetime import date
 
     from openpyxl import Workbook
@@ -322,7 +355,8 @@ def generar_excel_dashboard_valor() -> bytes:
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.table import Table, TableStyleInfo
 
-    dashboards = listar_dashboards_valor()
+    if dashboards is None:
+        dashboards = listar_dashboards_valor()
     wb = Workbook()
     ws = wb.active
     ws.title = "Resumen"
@@ -331,16 +365,13 @@ def generar_excel_dashboard_valor() -> bytes:
         "CUIT / Usuario",
         "Nombre",
         "Email",
+        "Teléfono",
         "Válido desde",
         "Válido hasta",
         "CUIT procesados",
         "Cupo límite",
         "CUIT disponibles",
-        "Comprob. emitidos (MCE)",
-        "Comprob. recibidos (MCR)",
-        "Notificaciones DFE",
-        "CUIT Nuestra Parte",
-    ]
+    ] + [m.excel_label for m in METRICAS_USO]
     ws.append(encabezados)
     for col in range(1, len(encabezados) + 1):
         c = ws.cell(row=1, column=col)
@@ -349,28 +380,24 @@ def generar_excel_dashboard_valor() -> bytes:
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     hojas_usuario: list[tuple[str, dict[str, Any]]] = []
-    usados: set[str] = {"Resumen"}
+    usados: set[str] = {"Resumen", "Uso por mes"}
     for d in dashboards:
         hojas_usuario.append((_nombre_hoja_excel(d, usados), d))
 
     fila = 2
     for hoja, d in hojas_usuario:
-        ws.append(
-            [
-                d.get("cuit_fmt") or d.get("cuit"),
-                d.get("nombre") or "",
-                d.get("email") or "",
-                d.get("valido_desde_fmt") or "",
-                d.get("valido_hasta_fmt") or "",
-                d.get("cuit_usados", 0),
-                d.get("cuit_limite", 0),
-                d.get("cuit_disponibles", 0),
-                d.get("mce_comprobantes", 0),
-                d.get("mcr_comprobantes", 0),
-                d.get("dfe_notificaciones", 0),
-                d.get("np_cuits", 0),
-            ]
-        )
+        fila_datos = [
+            d.get("cuit_fmt") or d.get("cuit"),
+            d.get("nombre") or "",
+            d.get("email") or "",
+            d.get("telefono") or "",
+            d.get("valido_desde_fmt") or "",
+            d.get("valido_hasta_fmt") or "",
+            d.get("cuit_usados", 0),
+            d.get("cuit_limite", 0),
+            d.get("cuit_disponibles", 0),
+        ] + [d.get(m.dash_key, 0) for m in METRICAS_USO]
+        ws.append(fila_datos)
         celda = ws.cell(row=fila, column=1)
         celda.hyperlink = f"#'{hoja}'!A1"
         celda.font = Font(color="0563C1", underline="single")
@@ -398,32 +425,104 @@ def generar_excel_dashboard_valor() -> bytes:
     ws.column_dimensions["A"].width = 18
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 26
+    ws.column_dimensions["D"].width = 16
 
-    ws["N1"] = "Instrucciones"
-    ws["N2"] = (
+    ws["O1"] = "Instrucciones"
+    ws["O2"] = (
         "Hacé clic en el CUIT de la tabla para abrir el detalle del usuario en otra hoja. "
+        "La hoja «Uso por mes» concentra el desglose mensual por sistema. "
         "Podés filtrar y ordenar con los controles de la tabla."
     )
-    ws["N2"].alignment = Alignment(wrap_text=True)
-    ws.column_dimensions["N"].width = 36
+    ws["O2"].alignment = Alignment(wrap_text=True)
+    ws.column_dimensions["O"].width = 36
 
     titulo_fill = PatternFill("solid", fgColor="E8F0FE")
     lbl_font = Font(bold=True)
+    enc_mes = ["Mes", "CUIT procesados"] + [m.excel_label for m in METRICAS_USO]
+
+    ws_mes = wb.create_sheet(title="Uso por mes")
+    enc_mes_resumen = ["CUIT / Usuario", "Nombre"] + enc_mes
+    ws_mes.append(enc_mes_resumen)
+    for col in range(1, len(enc_mes_resumen) + 1):
+        c = ws_mes.cell(row=1, column=col)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1F4E79")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fila_mes_global = 2
+    n_cols_mes = len(enc_mes_resumen)
+    for _hoja, d in hojas_usuario:
+        uso_mes = d.get("uso_por_mes") or []
+        for fila_mes in uso_mes:
+            ws_mes.append(
+                [
+                    d.get("cuit_fmt") or d.get("cuit"),
+                    d.get("nombre") or "",
+                    fila_mes.get("mes_fmt") or fila_mes.get("mes"),
+                    fila_mes.get("cuit", 0),
+                ]
+                + [fila_mes.get(m.mes_key, 0) for m in METRICAS_USO]
+            )
+            fila_mes_global += 1
+    if fila_mes_global == 2:
+        ws_mes.append(
+            ["—", "—", "Sin datos mensuales en los últimos 3 meses."]
+            + [""] * (n_cols_mes - 3)
+        )
+    ultima_fila_mes = max(1, ws_mes.max_row)
+    ultima_col_mes = get_column_letter(n_cols_mes)
+    if fila_mes_global > 2:
+        tabla_mes = Table(
+            displayName="TablaUsoPorMes",
+            ref=f"A1:{ultima_col_mes}{ultima_fila_mes}",
+        )
+        tabla_mes.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        ws_mes.add_table(tabla_mes)
+    ws_mes.freeze_panes = "A2"
+    for col in range(1, n_cols_mes + 1):
+        ws_mes.column_dimensions[get_column_letter(col)].width = 18 if col > 2 else 20
 
     filas_detalle = [
         ("CUIT / Usuario", lambda d: d.get("cuit_fmt") or d.get("cuit")),
         ("Nombre", lambda d: d.get("nombre") or "—"),
         ("Email", lambda d: d.get("email") or "—"),
+        ("Teléfono", lambda d: d.get("telefono") or "—"),
         ("Período desde", lambda d: d.get("valido_desde_fmt") or "—"),
         ("Período hasta", lambda d: d.get("valido_hasta_fmt") or "—"),
         ("CUIT procesados (cupo)", lambda d: d.get("cuit_usados", 0)),
         ("Cupo límite", lambda d: d.get("cuit_limite", 0)),
         ("CUIT disponibles", lambda d: d.get("cuit_disponibles", 0)),
-        ("Comprobantes emitidos (MCE)", lambda d: d.get("mce_comprobantes", 0)),
-        ("Comprobantes recibidos (MCR)", lambda d: d.get("mcr_comprobantes", 0)),
-        ("Notificaciones DFE", lambda d: d.get("dfe_notificaciones", 0)),
-        ("CUIT Nuestra Parte", lambda d: d.get("np_cuits", 0)),
+    ] + [
+        (m.excel_label, lambda d, _m=m: d.get(_m.dash_key, 0))
+        for m in METRICAS_USO
     ]
+
+    def _escribir_tabla_uso_mes(hoja_ws, fila_inicio: int, uso_mes: list[dict[str, Any]]) -> int:
+        r = fila_inicio
+        for col, tit in enumerate(enc_mes, start=1):
+            c = hoja_ws.cell(row=r, column=col, value=tit)
+            c.font = lbl_font
+            c.fill = titulo_fill
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        r += 1
+        n_cols = len(enc_mes)
+        if uso_mes:
+            for fila_mes in uso_mes:
+                hoja_ws.cell(row=r, column=1, value=fila_mes.get("mes_fmt") or fila_mes.get("mes"))
+                hoja_ws.cell(row=r, column=2, value=fila_mes.get("cuit", 0))
+                for idx, m in enumerate(METRICAS_USO, start=3):
+                    hoja_ws.cell(row=r, column=idx, value=fila_mes.get(m.mes_key, 0))
+                r += 1
+        else:
+            hoja_ws.cell(row=r, column=1, value="Sin datos mensuales en los últimos 3 meses.")
+            hoja_ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=n_cols)
+            r += 1
+        return r
 
     for hoja, d in hojas_usuario:
         det = wb.create_sheet(title=hoja)
@@ -448,39 +547,11 @@ def generar_excel_dashboard_valor() -> bytes:
         titulo_mes = r
         det.cell(row=titulo_mes, column=1, value="Uso por mes")
         det.cell(row=titulo_mes, column=1).font = Font(bold=True, size=12)
-        r = titulo_mes + 1
-        enc_mes = [
-            "Mes",
-            "CUIT procesados",
-            "Comprob. emitidos (MCE)",
-            "Comprob. recibidos (MCR)",
-            "Notificaciones DFE",
-            "CUIT Nuestra Parte",
-        ]
-        for col, tit in enumerate(enc_mes, start=1):
-            c = det.cell(row=r, column=col, value=tit)
-            c.font = lbl_font
-            c.fill = titulo_fill
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        r += 1
-        uso_mes = d.get("uso_por_mes") or []
-        if uso_mes:
-            for fila_mes in uso_mes:
-                det.cell(row=r, column=1, value=fila_mes.get("mes_fmt") or fila_mes.get("mes"))
-                det.cell(row=r, column=2, value=fila_mes.get("cuit", 0))
-                det.cell(row=r, column=3, value=fila_mes.get("mce", 0))
-                det.cell(row=r, column=4, value=fila_mes.get("mcr", 0))
-                det.cell(row=r, column=5, value=fila_mes.get("dfe", 0))
-                det.cell(row=r, column=6, value=fila_mes.get("np", 0))
-                r += 1
-        else:
-            det.cell(row=r, column=1, value="Sin datos mensuales en los últimos 3 meses.")
-            det.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-            r += 1
+        r = _escribir_tabla_uso_mes(det, titulo_mes + 1, d.get("uso_por_mes") or [])
 
         det.column_dimensions["A"].width = 32
         det.column_dimensions["B"].width = 22
-        for col in range(3, 7):
+        for col in range(3, len(enc_mes) + 1):
             det.column_dimensions[get_column_letter(col)].width = 18
         det["D4"] = f"Exportado: {date.today().strftime('%d/%m/%Y')}"
 
