@@ -846,6 +846,21 @@ def verificar_acceso(username: str, password: str) -> str | None:
         pwd = (password or "").strip()
         if not u:
             return "invalid"
+
+        # En Render: primero AUTH_USERS_JSON / admin (sin Neon). Si valida, listo.
+        if (os.environ.get("RENDER") or "").strip():
+            try:
+                env = _usuarios_desde_env_json()
+                base = env if env else _load_cuentas_sin_env_json()
+                locales = _cuentas_archivo_local()
+                if locales:
+                    base = {**base, **locales}
+                cuenta_rapida = base.get(u)
+                if cuenta_rapida is not None and verificar_password(cuenta_rapida.password, pwd):
+                    return _motivo_vigencia(cuenta_rapida)
+            except Exception:
+                _LOG.debug("Login rápido sin Neon falló", exc_info=True)
+
         try:
             pendiente = verificar_acceso_overlay(u, pwd)
         except Exception:

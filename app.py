@@ -1651,7 +1651,14 @@ def olvide_contrasena():
 @app.get("/health")
 def health():
     """Health check de Render: responde sin auth ni consultas a Neon."""
-    return Response("ok\n", mimetype="text/plain", status=200)
+    return jsonify(
+        {
+            "ok": True,
+            "build": os.environ.get("RENDER_GIT_COMMIT")
+            or os.environ.get("AIC_BUILD_ID")
+            or "a1-login-fix",
+        }
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
