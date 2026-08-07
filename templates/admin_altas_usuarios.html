@@ -332,6 +332,7 @@
 
       <h2>{{ t('admin_gestion_suscripciones_titulo') }}</h2>
       <p class="help">{{ t('admin_gestion_suscripciones_intro') }}</p>
+      <p class="help">{{ t('admin_grupos_intro') }}</p>
       {% if suscriptores %}
       <p>
         <a class="btn-dashboard" href="{{ url_for('admin_dashboard_valor_exportar') }}">{{ t('admin_dashboard_export_btn') }}</a>
@@ -351,6 +352,7 @@
         <thead>
           <tr>
             <th>{{ t('alta_cuit_label') }}</th>
+            <th>{{ t('admin_gestion_col_grupo') }}</th>
             <th>{{ t('alta_email_label') }}</th>
             <th>{{ t('admin_gestion_col_servicios') }}</th>
             <th>{{ t('admin_gestion_col_vencimiento') }}</th>
@@ -365,6 +367,7 @@
           {% for s in suscriptores %}
           <tr class="{{ 'fila-suspendida' if s.suspendida else '' }}">
             <td>{{ s.cuit_fmt or s.cuit }}</td>
+            <td>{% if s.grupo_nombre %}<span class="ok">{{ s.grupo_nombre }}</span>{% else %}<span class="help">—</span>{% endif %}</td>
             <td>
               <form method="post" class="form-email">
                 <input type="hidden" name="accion" value="actualizar_email" />

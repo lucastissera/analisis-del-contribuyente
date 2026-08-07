@@ -109,6 +109,13 @@ try:
         logging.getLogger(__name__).info("Persistencia altas (PostgreSQL): %s", st)
 except Exception as exc:
     logging.getLogger(__name__).warning("No se pudo inicializar PostgreSQL de altas: %s", exc)
+
+try:
+    from auth_registro import asegurar_grupos_registrados
+
+    asegurar_grupos_registrados()
+except Exception as exc:
+    logging.getLogger(__name__).warning("Sincronización de grupos de usuarios: %s", exc)
 from cuit_en_arca import ArcaProcesoError, CancelacionUsuarioError, ejecutar_lote_arca
 from cuit_en_arca.planilla_lote import (
     leer_planilla_lote_con_errores,
@@ -1480,32 +1487,34 @@ def admin_dashboard_valor():
 @app.get("/admin/dashboard-valor/exportar")
 def admin_dashboard_valor_exportar():
     _requiere_admin()
-    from datetime import date
-
-    from auth_uso_valor import generar_excel_dashboard_valor, listar_dashboards_valor
-
     lg = normalize_lang(session.get("lang"))
-    dashboards = listar_dashboards_valor()
-    if not dashboards:
-        flash(tr(lg, "admin_dashboard_export_vacio"), "warning")
-        return redirect(url_for("admin_altas_usuarios"))
-
     try:
+        from datetime import date
+
+        from auth_uso_valor import generar_excel_dashboard_valor, listar_dashboards_valor
+
+        dashboards = listar_dashboards_valor()
+        if not dashboards:
+            flash(tr(lg, "admin_dashboard_export_vacio"), "warning")
+            return redirect(url_for("admin_altas_usuarios"))
+
         contenido = generar_excel_dashboard_valor(dashboards)
+        if not contenido:
+            raise ValueError("Excel vacío")
+
+        nombre = f"Dashboard_Valor_Generado_{date.today().isoformat()}.xlsx"
+        buf = io.BytesIO(contenido)
+        buf.seek(0)
+        return send_file(
+            buf,
+            as_attachment=True,
+            download_name=nombre,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     except Exception:
-        logging.getLogger(__name__).exception("Error al generar Excel del dashboard de valor")
+        logging.getLogger(__name__).exception("Error al exportar dashboard de valor")
         flash(tr(lg, "admin_dashboard_export_error"), "danger")
         return redirect(url_for("admin_altas_usuarios"))
-
-    nombre = f"Dashboard_Valor_Generado_{date.today().isoformat()}.xlsx"
-    buf = io.BytesIO(contenido)
-    buf.seek(0)
-    return send_file(
-        buf,
-        as_attachment=True,
-        download_name=nombre,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
 
 
 @app.get("/admin/legal/exportar-aceptaciones")

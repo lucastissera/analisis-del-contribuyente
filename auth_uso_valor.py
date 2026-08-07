@@ -322,7 +322,12 @@ def listar_dashboards_valor() -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
     for sub in listar_usuarios_suscripcion():
-        dash = dashboard_valor_usuario(sub.get("cuit") or "")
+        cuit = sub.get("cuit") or ""
+        try:
+            dash = dashboard_valor_usuario(cuit)
+        except Exception:
+            _LOG.exception("No se pudo armar dashboard de valor para %r", cuit)
+            continue
         if dash:
             out.append(dash)
     out.sort(key=lambda d: (d.get("cuit_fmt") or d.get("cuit") or "").lower())
@@ -342,6 +347,17 @@ def _nombre_hoja_excel(d: dict[str, Any], usados: set[str]) -> str:
         n += 1
     usados.add(nombre)
     return nombre
+
+
+def _valor_celda_excel(val: Any) -> Any:
+    """Quita caracteres de control que openpyxl/Excel no admiten."""
+    if val is None or isinstance(val, (int, float, bool)):
+        return val
+    if not isinstance(val, str):
+        val = str(val)
+    import re
+
+    return re.sub(r"[\000-\010\013\014\016-\037]", "", val)
 
 
 def generar_excel_dashboard_valor(
@@ -387,12 +403,12 @@ def generar_excel_dashboard_valor(
     fila = 2
     for hoja, d in hojas_usuario:
         fila_datos = [
-            d.get("cuit_fmt") or d.get("cuit"),
-            d.get("nombre") or "",
-            d.get("email") or "",
-            d.get("telefono") or "",
-            d.get("valido_desde_fmt") or "",
-            d.get("valido_hasta_fmt") or "",
+            _valor_celda_excel(d.get("cuit_fmt") or d.get("cuit")),
+            _valor_celda_excel(d.get("nombre") or ""),
+            _valor_celda_excel(d.get("email") or ""),
+            _valor_celda_excel(d.get("telefono") or ""),
+            _valor_celda_excel(d.get("valido_desde_fmt") or ""),
+            _valor_celda_excel(d.get("valido_hasta_fmt") or ""),
             d.get("cuit_usados", 0),
             d.get("cuit_limite", 0),
             d.get("cuit_disponibles", 0),
@@ -455,9 +471,9 @@ def generar_excel_dashboard_valor(
         for fila_mes in uso_mes:
             ws_mes.append(
                 [
-                    d.get("cuit_fmt") or d.get("cuit"),
-                    d.get("nombre") or "",
-                    fila_mes.get("mes_fmt") or fila_mes.get("mes"),
+                    _valor_celda_excel(d.get("cuit_fmt") or d.get("cuit")),
+                    _valor_celda_excel(d.get("nombre") or ""),
+                    _valor_celda_excel(fila_mes.get("mes_fmt") or fila_mes.get("mes")),
                     fila_mes.get("cuit", 0),
                 ]
                 + [fila_mes.get(m.mes_key, 0) for m in METRICAS_USO]
@@ -513,7 +529,11 @@ def generar_excel_dashboard_valor(
         n_cols = len(enc_mes)
         if uso_mes:
             for fila_mes in uso_mes:
-                hoja_ws.cell(row=r, column=1, value=fila_mes.get("mes_fmt") or fila_mes.get("mes"))
+                hoja_ws.cell(
+                    row=r,
+                    column=1,
+                    value=_valor_celda_excel(fila_mes.get("mes_fmt") or fila_mes.get("mes")),
+                )
                 hoja_ws.cell(row=r, column=2, value=fila_mes.get("cuit", 0))
                 for idx, m in enumerate(METRICAS_USO, start=3):
                     hoja_ws.cell(row=r, column=idx, value=fila_mes.get(m.mes_key, 0))
@@ -526,7 +546,8 @@ def generar_excel_dashboard_valor(
 
     for hoja, d in hojas_usuario:
         det = wb.create_sheet(title=hoja)
-        det["A1"] = f"Dashboard de valor — {d.get('cuit_fmt') or d.get('cuit')}"
+        titulo = f"Dashboard de valor — {_valor_celda_excel(d.get('cuit_fmt') or d.get('cuit'))}"
+        det["A1"] = titulo
         det["A1"].font = Font(bold=True, size=14)
         det["A2"] = "← Volver al resumen"
         det["A2"].hyperlink = "#Resumen!A1"
@@ -539,8 +560,8 @@ def generar_excel_dashboard_valor(
         det["B4"].fill = titulo_fill
         r = 5
         for etiqueta, fn in filas_detalle:
-            det.cell(row=r, column=1, value=etiqueta)
-            det.cell(row=r, column=2, value=fn(d))
+            det.cell(row=r, column=1, value=_valor_celda_excel(etiqueta))
+            det.cell(row=r, column=2, value=_valor_celda_excel(fn(d)))
             r += 1
 
         r += 2

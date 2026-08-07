@@ -433,6 +433,7 @@ _OVERLAY_SYNC_KEYS = (
     "uso_np_cuits",
     "uso_por_mes",
     "servicios",
+    "grupo",
     "legal_aceptacion",
 )
 

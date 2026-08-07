@@ -1494,8 +1494,28 @@ def _descargar_comunicaciones_dfe(
     on_log=None,
     *,
     representados: bool = False,
+    usuario_cupo: str | None = None,
 ) -> None:
     """Descarga todas las comunicaciones visibles, recorriendo páginas si hace falta."""
+    from auth_grupos import aplica_a_estudio_dyc, asunto_dfe_excluido_estudio_dyc
+
+    estudio_dyc = aplica_a_estudio_dyc(usuario_cupo or "")
+
+    def _filtrar_objetivo_estudio_dyc(objetivo: list[dict]) -> list[dict]:
+        if not estudio_dyc:
+            return objetivo
+        filtrado: list[dict] = []
+        for com in objetivo:
+            asunto = (com.get("asunto") or "").strip()
+            if asunto_dfe_excluido_estudio_dyc(asunto):
+                _log(
+                    on_log,
+                    f"  • Omitida (Estudio DyC, asunto excluido): {asunto[:80]}",
+                )
+                continue
+            filtrado.append(com)
+        return filtrado
+
     total_objetivo = 0
     procesadas = 0
 
@@ -1505,9 +1525,13 @@ def _descargar_comunicaciones_dfe(
             pagina += 1
             _cerrar_popup_dfe(ve, on_log)
             _esperar_tabla_representados(ve)
+            if estudio_dyc:
+                _capturar_pagina_listado_dfe(ve, carpeta_destino, pagina, on_log)
             filas = _leer_filas_representados(ve)
-            objetivo = _seleccionar_objetivo(
-                filas, fecha_desde, fecha_hasta, representados=True
+            objetivo = _filtrar_objetivo_estudio_dyc(
+                _seleccionar_objetivo(
+                    filas, fecha_desde, fecha_hasta, representados=True
+                )
             )
             if objetivo:
                 total_objetivo += len(objetivo)
@@ -1546,7 +1570,11 @@ def _descargar_comunicaciones_dfe(
         representados=False,
     )
     _log(on_log, f"Comunicaciones detectadas: {len(filas)}.")
-    objetivo = _seleccionar_objetivo(filas, fecha_desde, fecha_hasta, representados=False)
+    if estudio_dyc:
+        _capturar_pagina_listado_dfe(ve, carpeta_destino, 1, on_log)
+    objetivo = _filtrar_objetivo_estudio_dyc(
+        _seleccionar_objetivo(filas, fecha_desde, fecha_hasta, representados=False)
+    )
     _log(on_log, f"A procesar: {len(objetivo)} comunicación(es).")
     for idx, com in enumerate(objetivo, start=1):
         _log(
@@ -1841,6 +1869,25 @@ def _volver_a_lista(ve, *, representados: bool = False) -> None:
         pass
 
 
+def _capturar_pagina_listado_dfe(
+    ve,
+    dest: Path,
+    pagina: int,
+    on_log=None,
+) -> str | None:
+    """Captura la grilla de notificaciones (Estudio DyC) antes de descargar comunicaciones."""
+    try:
+        pausa_humana(0.35, 0.55)
+        png = ve.screenshot(full_page=True)
+        ruta = dest / f"DFE_listado_pagina_{pagina:02d}.png"
+        ruta.write_bytes(png)
+        _log(on_log, f"  • Captura del listado (página {pagina}): {ruta.name}")
+        return str(ruta)
+    except Exception as exc:
+        _log(on_log, f"  • No se pudo capturar listado página {pagina}: {exc}")
+        return None
+
+
 def _imprimir_pantalla_dfe(
     ve,
     com: dict,
@@ -1965,6 +2012,7 @@ def ejecutar_descarga_dfe(
     on_log: Callable[[str], None] | None = None,
     on_paso: Callable[[str, str], None] | None = None,
     sesion: SesionPlaywrightCompartida | None = None,
+    usuario_cupo: str | None = None,
 ) -> ResultadoDfeCuit:
     """Descarga las comunicaciones del DFE de un CUIT a ``carpeta_destino``."""
     headless = _headless_desde_env() if headless is None else headless
@@ -1984,6 +2032,7 @@ def ejecutar_descarga_dfe(
             carpeta_destino=carpeta_destino,
             on_log=on_log,
             on_paso=on_paso,
+            usuario_cupo=usuario_cupo,
         )
 
     with SesionPlaywrightCompartida(headless=headless) as sesion_local:
@@ -1995,6 +2044,7 @@ def ejecutar_descarga_dfe(
             carpeta_destino=carpeta_destino,
             on_log=on_log,
             on_paso=on_paso,
+            usuario_cupo=usuario_cupo,
         )
 
 
@@ -2007,6 +2057,7 @@ def _ejecutar_descarga_dfe_impl(
     carpeta_destino: Path,
     on_log: Callable[[str], None] | None = None,
     on_paso: Callable[[str, str], None] | None = None,
+    usuario_cupo: str | None = None,
 ) -> ResultadoDfeCuit:
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
@@ -2110,6 +2161,7 @@ def _ejecutar_descarga_dfe_impl(
             resultado,
             on_log,
             representados=usar_representados,
+            usuario_cupo=usuario_cupo,
         )
         paso("descargar", "ok")
         _log(on_log, f"Listo. Archivos guardados: {resultado.total_archivos} en {carpeta_destino}")
@@ -2271,6 +2323,7 @@ def ejecutar_dfe_lote(
                     on_log=on_log,
                     on_paso=on_paso,
                     sesion=con_sesion,
+                    usuario_cupo=usuario_cupo,
                 )
                 confirmar_cupo_cuit_procesado(
                     on_cuit_exitoso,

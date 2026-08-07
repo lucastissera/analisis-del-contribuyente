@@ -288,6 +288,8 @@ def actualizar_servicios_usuario(cuit: str, servicios: dict[str, bool]) -> bool:
         _guardar_overlay_completo(overlay)
     return True
 
+
+def info_cupo_cuit(username: str) -> dict[str, Any] | None:
     """Cupo compartido entre servicios. Admin / sin overlay = ilimitado (None)."""
     from auth import es_administrador
 
@@ -310,6 +312,102 @@ def actualizar_servicios_usuario(cuit: str, servicios: dict[str, bool]) -> bool:
         "cuit_disponibles": disponibles,
         "cuit_ilimitado": False,
     }
+
+
+def _parametros_grupos_overlay(overlay: dict[str, Any]) -> dict[str, Any]:
+    raw = overlay.get("grupos_parametros")
+    return raw if isinstance(raw, dict) else {}
+
+
+def leer_parametro_grupo_overlay(grupo_id: str, clave: str, default: Any = None) -> Any:
+    from auth_grupos import normalizar_grupo_id
+
+    gid = normalizar_grupo_id(grupo_id)
+    if not gid or not (clave or "").strip():
+        return default
+    overlay = _cargar_overlay_completo()
+    bucket = _parametros_grupos_overlay(overlay).get(gid)
+    if isinstance(bucket, dict) and clave in bucket:
+        return bucket[clave]
+    return default
+
+
+def guardar_parametro_grupo_overlay(grupo_id: str, clave: str, valor: Any) -> bool:
+    from auth_grupos import normalizar_grupo_id
+
+    gid = normalizar_grupo_id(grupo_id)
+    k = (clave or "").strip()
+    if not gid or not k:
+        return False
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        params = _parametros_grupos_overlay(overlay)
+        bucket = params.get(gid)
+        if not isinstance(bucket, dict):
+            bucket = {}
+        bucket[k] = valor
+        params[gid] = bucket
+        overlay["grupos_parametros"] = params
+        _guardar_overlay_completo(overlay)
+    return True
+
+
+def asignar_grupo_usuario(cuit: str, grupo_id: str | None) -> bool:
+    from auth_grupos import normalizar_grupo_id
+
+    u = resolver_clave_overlay(cuit)
+    if not u:
+        return False
+    gid = normalizar_grupo_id(grupo_id) if grupo_id else None
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict) or u not in users:
+            return False
+        meta = users[u]
+        if not isinstance(meta, dict) or meta_es_admin(meta):
+            return False
+        if gid:
+            meta["grupo"] = gid
+        else:
+            meta.pop("grupo", None)
+        _guardar_overlay_completo(overlay)
+    return True
+
+
+def asegurar_grupos_registrados() -> dict[str, list[str]]:
+    """Asigna ``meta.grupo`` a los miembros definidos en ``auth_grupos.GRUPOS``."""
+    from auth_grupos import GRUPOS, resolver_clave_miembro_grupo
+
+    asignados: dict[str, list[str]] = {}
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict):
+            return {}
+        changed = False
+        for grupo in GRUPOS.values():
+            ok: list[str] = []
+            for nombre in grupo.miembros:
+                clave = resolver_clave_miembro_grupo(nombre)
+                if not clave:
+                    _LOG.warning(
+                        "Grupo %s: miembro %r no encontrado en usuarios_registrados.",
+                        grupo.nombre,
+                        nombre,
+                    )
+                    continue
+                meta = users.get(clave)
+                if not isinstance(meta, dict) or meta_es_admin(meta):
+                    continue
+                if meta.get("grupo") != grupo.id:
+                    meta["grupo"] = grupo.id
+                    changed = True
+                ok.append(clave)
+            asignados[grupo.id] = ok
+        if changed:
+            _guardar_overlay_completo(overlay)
+    return asignados
 
 
 def cupo_cuit_disponible(username: str) -> int:
@@ -1337,6 +1435,12 @@ def crear_usuario_admin(
             "cuit_usados": 0,
             "servicios": servicios_default(),
         }
+        from auth_grupos import GRUPOS
+
+        for grupo in GRUPOS.values():
+            if u.lower() in {m.lower() for m in grupo.miembros}:
+                users[u]["grupo"] = grupo.id
+                break
         _guardar_overlay_completo(overlay)
 
     return {
@@ -1414,12 +1518,17 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
             legal = resumen_aceptacion(meta)
         except Exception:
             pass
+        from auth_grupos import grupo_de_usuario, nombre_grupo
+
+        gid = grupo_de_usuario(cuit)
         out.append(
             {
                 "cuit": cuit,
                 "cuit_fmt": formatear_cuit(cuit),
                 "email": meta.get("email") or "",
                 "nombre": meta.get("nombre") or "",
+                "grupo": gid or "",
+                "grupo_nombre": nombre_grupo(gid) if gid else "",
                 "valido_hasta": vh.isoformat() if vh else "",
                 "valido_hasta_fmt": vh.strftime("%d/%m/%Y") if vh else "—",
                 "valido_hasta_input": vh.isoformat() if vh else "",

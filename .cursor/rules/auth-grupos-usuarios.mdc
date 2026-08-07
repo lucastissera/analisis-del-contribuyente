@@ -1,0 +1,39 @@
+---
+description: Configuración acotada por grupo de usuarios (Estudio DyC)
+globs: auth_grupos.py,auth_registro.py,app.py,cuit_en_arca/**/*.py
+alwaysApply: false
+---
+
+# Grupos de usuarios — Estudio DyC
+
+Catálogo en ``auth_grupos.py``. Grupo principal: **Estudio DyC** (``GRUPO_ESTUDIO_DYC`` / ``estudio_dyc``).
+
+## Aplicar un cambio solo al grupo
+
+```python
+from auth_grupos import GRUPO_ESTUDIO_DYC, NOMBRE_GRUPO_ESTUDIO_DYC, aplica_a_grupo, parametro_grupo
+
+if aplica_a_grupo(username, GRUPO_ESTUDIO_DYC):
+    valor = parametro_grupo(GRUPO_ESTUDIO_DYC, "mi_clave", default_global)
+```
+
+- **Nunca** aplicar por grupo a ``es_administrador`` ni a usuarios fuera del grupo.
+- Persistir overrides con ``establecer_parametro_grupo(GRUPO_ESTUDIO_DYC, clave, valor)``.
+- Al nombrar el cambio en conversación o UI admin, usar **«Estudio DyC»** (``NOMBRE_GRUPO_ESTUDIO_DYC``).
+
+## Miembros
+
+Lista en ``GRUPOS[GRUPO_ESTUDIO_DYC].miembros``. Al iniciar la app, ``asegurar_grupos_registrados()`` escribe ``meta["grupo"]`` en Neon/overlay.
+
+Para agregar o quitar miembros: editar ``auth_grupos.py`` y reiniciar (o redeploy).
+
+## DFE (Estudio DyC)
+
+- Tras el filtro de 100 por página y **antes** de descargar comunicaciones: captura de cada página del listado en la carpeta del contribuyente (`DFE_listado_pagina_XX.png`). Solo si ``aplica_a_estudio_dyc(usuario_cupo)``.
+- Asuntos excluidos (no descargar): ver ``ASUNTOS_DFE_EXCLUIDOS_ESTUDIO_DYC`` en ``auth_grupos.py``. Usar ``asunto_dfe_excluido_estudio_dyc(asunto)``.
+
+## Nuevo grupo
+
+1. Entrada en ``GRUPOS`` con ``id``, ``nombre``, ``miembros``.
+2. Constantes ``GRUPO_*`` / ``NOMBRE_GRUPO_*`` si hace falta.
+3. Documentar claves en ``grupos_parametros`` vía ``establecer_parametro_grupo``.

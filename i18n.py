@@ -297,6 +297,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin_gestion_suscripciones_intro": "Usuarios ya aprobados. Editá servicios, vencimiento, cupo, renová, suspendé o reactivá sin generar un usuario nuevo.",
         "admin_gestion_suscripciones_vacio": "Todavía no hay usuarios con suscripción aprobada.",
         "admin_gestion_col_servicios": "Servicios",
+        "admin_gestion_col_grupo": "Grupo",
+        "admin_grupos_intro": "Los grupos permiten aplicar parámetros o restricciones solo a un subconjunto de usuarios (sin afectar al admin ni al resto). Referencia: «Estudio DyC».",
         "admin_gestion_btn_guardar_servicios": "Guardar",
         "admin_gestion_ok_servicios": "Servicios de {cuit} actualizados.",
         "admin_gestion_err_servicios": "No se pudieron actualizar los servicios.",
