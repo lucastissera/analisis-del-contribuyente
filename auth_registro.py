@@ -12,6 +12,7 @@ import ssl
 import sys
 import tempfile
 import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from email.header import Header
 from email.message import EmailMessage
@@ -23,13 +24,14 @@ from urllib.request import Request, urlopen
 
 import bcrypt
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
 from app_branding import APP_NAME
 
 _LOG = logging.getLogger(__name__)
 _lock = threading.Lock()
-_neon_read_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="auth-neon-read")
+_overlay_mem_cache: dict[str, Any] | None = None
+_overlay_mem_cache_at: float = 0.0
+_overlay_mem_lock = threading.Lock()
+_OVERLAY_MEM_TTL = 30.0
 
 _CUIT_RE = re.compile(r"^\d{11}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -1023,11 +1025,11 @@ def _escribir_json(path: Path, data: Any) -> None:
 
 
 def _neon_read_timeout_sec() -> float:
-    raw = (os.environ.get("AUTH_NEON_READ_TIMEOUT") or "6").strip()
+    raw = (os.environ.get("AUTH_NEON_READ_TIMEOUT") or "5").strip()
     try:
         return max(1.0, float(raw))
     except ValueError:
-        return 6.0
+        return 5.0
 
 
 def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
@@ -1037,16 +1039,7 @@ def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
 
         db = enabled()
         if db:
-            # Timeout duro: si Neon no responde, no colgar el login (Render → 500).
-            fut = _neon_read_executor.submit(read_json, name, default)
-            try:
-                return fut.result(timeout=_neon_read_timeout_sec())
-            except FuturesTimeout:
-                _LOG.warning("Timeout leyendo PostgreSQL (%s) tras %.0fs", name, _neon_read_timeout_sec())
-                return default
-            except Exception as exc:
-                _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
-                return default
+            return read_json(name, default)
     except Exception as exc:
         _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
         if db:
@@ -1115,30 +1108,78 @@ def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
 
 def _cargar_overlay_completo() -> dict[str, Any]:
     """Blob usuarios_registrados con clave users (tolera JSON mal migrado)."""
-    data = _read_store("usuarios_registrados", {"version": 1, "users": {}})
-    if not isinstance(data, dict):
-        return {"version": 1, "users": {}}
-    users = data.get("users")
-    if isinstance(users, dict):
-        return data
-    flat = {
-        k: v
-        for k, v in data.items()
-        if isinstance(v, dict) and k not in ("version", "updated_at", "users")
-    }
-    if flat:
-        return {
-            "version": data.get("version", 1),
-            "users": flat,
-            "updated_at": data.get("updated_at"),
-        }
-    data["users"] = {}
-    return data
+    global _overlay_mem_cache, _overlay_mem_cache_at
+    ahora = time.time()
+    with _overlay_mem_lock:
+        if (
+            _overlay_mem_cache is not None
+            and (ahora - _overlay_mem_cache_at) < _OVERLAY_MEM_TTL
+        ):
+            return _overlay_mem_cache
+
+    box: dict[str, Any] = {"data": None, "err": None}
+
+    def _job() -> None:
+        try:
+            data = _read_store("usuarios_registrados", {"version": 1, "users": {}})
+            if not isinstance(data, dict):
+                data = {"version": 1, "users": {}}
+            users = data.get("users")
+            if isinstance(users, dict):
+                box["data"] = data
+                return
+            flat = {
+                k: v
+                for k, v in data.items()
+                if isinstance(v, dict) and k not in ("version", "updated_at", "users")
+            }
+            if flat:
+                box["data"] = {
+                    "version": data.get("version", 1),
+                    "users": flat,
+                    "updated_at": data.get("updated_at"),
+                }
+                return
+            data["users"] = {}
+            box["data"] = data
+        except Exception as exc:
+            box["err"] = exc
+
+    t = threading.Thread(target=_job, name="overlay-neon-read", daemon=True)
+    t.start()
+    t.join(_neon_read_timeout_sec())
+    if t.is_alive() or box["data"] is None:
+        if t.is_alive():
+            _LOG.warning(
+                "Timeout leyendo usuarios_registrados (%.0fs); login usa fallback",
+                _neon_read_timeout_sec(),
+            )
+        elif box["err"] is not None:
+            _LOG.warning("Error leyendo usuarios_registrados: %s", box["err"])
+        vacio = {"version": 1, "users": {}}
+        with _overlay_mem_lock:
+            # Cache corto del vacío para no martillar Neon en cada intento de login.
+            _overlay_mem_cache = vacio
+            _overlay_mem_cache_at = time.time()
+        return vacio
+
+    with _overlay_mem_lock:
+        _overlay_mem_cache = box["data"]
+        _overlay_mem_cache_at = time.time()
+    return box["data"]
+
+
+def invalidar_cache_overlay_memoria() -> None:
+    global _overlay_mem_cache, _overlay_mem_cache_at
+    with _overlay_mem_lock:
+        _overlay_mem_cache = None
+        _overlay_mem_cache_at = 0.0
 
 
 def _guardar_overlay_completo(overlay: dict[str, Any]) -> None:
     if not isinstance(overlay.get("users"), dict):
         overlay["users"] = {}
+    invalidar_cache_overlay_memoria()
     overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     _write_store("usuarios_registrados", overlay)
 
