@@ -31,21 +31,8 @@ _LOG_APP = logging.getLogger(__name__)
 
 def _arranque_en_background() -> None:
     """Playwright / Neon / sync: no deben bloquear el bind de gunicorn en Render."""
-    if not getattr(sys, "frozen", False):
-        try:
-            from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
-
-            asegurar_chromium_playwright()
-        except Exception as exc:
-            _LOG_APP.warning("Playwright/Chromium en background: %s", exc)
-
-    # En Render el servidor es fuente de verdad (Neon); no sincronizar desde AUTH_USERS_URL
-    # (si apunta a sí mismo con 1 worker provoca deadlock y 503 en static/login).
-    if not (os.environ.get("RENDER") or "").strip():
-        try:
-            iniciar_sincronizacion_usuarios()
-        except Exception as exc:
-            _LOG_APP.warning("Sync usuarios en background: %s", exc)
+    # Dar tiempo a que el primer /login use Neon sin pelear con el arranque.
+    time.sleep(3)
 
     try:
         from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
@@ -55,23 +42,31 @@ def _arranque_en_background() -> None:
         _LOG_APP.warning("Verificación de stores locales: %s", exc)
 
     try:
-        from auth_registro import asegurar_admin_en_db
-        from auth_registro_db import enabled, estado_db, migrar_disco_a_db_si_vacio
+        from auth_registro import asegurar_admin_en_db, asegurar_grupos_registrados
+        from auth_registro_db import enabled, migrar_disco_a_db_si_vacio
 
         if enabled():
             migrar_disco_a_db_si_vacio()
             asegurar_admin_en_db()
-            st = estado_db()
-            _LOG_APP.info("Persistencia altas (PostgreSQL): %s", st)
+            asegurar_grupos_registrados()
+            _LOG_APP.info("Persistencia altas (PostgreSQL): init diferido OK")
     except Exception as exc:
         _LOG_APP.warning("No se pudo inicializar PostgreSQL de altas: %s", exc)
 
-    try:
-        from auth_registro import asegurar_grupos_registrados
+    # En Render el servidor es fuente de verdad (Neon); no sincronizar desde AUTH_USERS_URL.
+    if not (os.environ.get("RENDER") or "").strip():
+        try:
+            iniciar_sincronizacion_usuarios()
+        except Exception as exc:
+            _LOG_APP.warning("Sync usuarios en background: %s", exc)
 
-        asegurar_grupos_registrados()
-    except Exception as exc:
-        _LOG_APP.warning("Sincronización de grupos de usuarios: %s", exc)
+    if not getattr(sys, "frozen", False):
+        try:
+            from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
+
+            asegurar_chromium_playwright()
+        except Exception as exc:
+            _LOG_APP.warning("Playwright/Chromium en background: %s", exc)
 
 
 if getattr(sys, "frozen", False):

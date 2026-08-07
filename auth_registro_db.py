@@ -86,7 +86,12 @@ def _guardar_blob_cache(name: str, data: Any) -> None:
 def _connect():
     import psycopg2
 
-    return psycopg2.connect(database_url(), connect_timeout=10)
+    # connect_timeout corto: si Neon está frío, fallar rápido y no colgar el login.
+    return psycopg2.connect(
+        database_url(),
+        connect_timeout=5,
+        options="-c statement_timeout=8000",
+    )
 
 
 def _ensure_schema(conn) -> None:
@@ -110,13 +115,24 @@ def init_db() -> None:
     with _lock:
         if _initialized:
             return
+    # No retener el lock durante el TCP/SSL a Neon (bloqueaba login/cache).
+    conn = None
+    try:
         conn = _connect()
-        try:
-            _ensure_schema(conn)
+        _ensure_schema(conn)
+        with _lock:
             _initialized = True
-            _LOG.info("Persistencia de altas: PostgreSQL listo")
-        finally:
-            conn.close()
+        _LOG.info("Persistencia de altas: PostgreSQL listo")
+    except Exception:
+        with _lock:
+            _initialized = False
+        raise
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def read_json(name: str, default: Any) -> Any:
