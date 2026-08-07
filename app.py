@@ -26,13 +26,50 @@ except ImportError:
 os.environ.setdefault("CUIT_EN_ARCA_PLAYWRIGHT", "1")
 os.environ.setdefault("CUIT_EN_ARCA_UI", "1")
 
-if not getattr(sys, "frozen", False):
-    try:
-        from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
+_LOG_APP = logging.getLogger(__name__)
 
-        asegurar_chromium_playwright()
-    except Exception:
-        pass
+
+def _arranque_en_background() -> None:
+    """Playwright / Neon / sync: no deben bloquear el bind de gunicorn en Render."""
+    if not getattr(sys, "frozen", False):
+        try:
+            from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright
+
+            asegurar_chromium_playwright()
+        except Exception as exc:
+            _LOG_APP.warning("Playwright/Chromium en background: %s", exc)
+
+    try:
+        iniciar_sincronizacion_usuarios()
+    except Exception as exc:
+        _LOG_APP.warning("Sync usuarios en background: %s", exc)
+
+    try:
+        from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
+
+        verificar_integridad_stores_locales()
+    except Exception as exc:
+        _LOG_APP.warning("Verificación de stores locales: %s", exc)
+
+    try:
+        from auth_registro import asegurar_admin_en_db
+        from auth_registro_db import enabled, estado_db, migrar_disco_a_db_si_vacio
+
+        if enabled():
+            migrar_disco_a_db_si_vacio()
+            asegurar_admin_en_db()
+            st = estado_db()
+            _LOG_APP.info("Persistencia altas (PostgreSQL): %s", st)
+    except Exception as exc:
+        _LOG_APP.warning("No se pudo inicializar PostgreSQL de altas: %s", exc)
+
+    try:
+        from auth_registro import asegurar_grupos_registrados
+
+        asegurar_grupos_registrados()
+    except Exception as exc:
+        _LOG_APP.warning("Sincronización de grupos de usuarios: %s", exc)
+
 
 if getattr(sys, "frozen", False):
     from cuit_en_arca.playwright_env import aplicar_entorno_playwright_portable
@@ -86,36 +123,12 @@ from cursor_cloud import (
     verificar_enlace as cursor_verificar_enlace,
 )
 
-try:
-    iniciar_sincronizacion_usuarios()
-except Exception:
-    pass
-
-try:
-    from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
-
-    verificar_integridad_stores_locales()
-except Exception as exc:
-    logging.getLogger(__name__).warning("Verificación de stores locales: %s", exc)
-
-try:
-    from auth_registro import asegurar_admin_en_db
-    from auth_registro_db import enabled, estado_db, migrar_disco_a_db_si_vacio
-
-    if enabled():
-        migrar_disco_a_db_si_vacio()
-        asegurar_admin_en_db()
-        st = estado_db()
-        logging.getLogger(__name__).info("Persistencia altas (PostgreSQL): %s", st)
-except Exception as exc:
-    logging.getLogger(__name__).warning("No se pudo inicializar PostgreSQL de altas: %s", exc)
-
-try:
-    from auth_registro import asegurar_grupos_registrados
-
-    asegurar_grupos_registrados()
-except Exception as exc:
-    logging.getLogger(__name__).warning("Sincronización de grupos de usuarios: %s", exc)
+# Diferir init pesado: en Render el port scan / health check no espera Playwright ni Neon.
+threading.Thread(
+    target=_arranque_en_background,
+    name="arranque-diferido",
+    daemon=True,
+).start()
 from cuit_en_arca import ArcaProcesoError, CancelacionUsuarioError, ejecutar_lote_arca
 from cuit_en_arca.planilla_lote import (
     leer_planilla_lote_con_errores,
@@ -476,6 +489,7 @@ def _session_idle_and_login():
         "legal_aceptar",
         "olvide_contrasena",
         "guia_usuario",
+        "health",
         None,
     ):
         return None
@@ -531,6 +545,7 @@ def _verificar_aceptacion_legal_pendiente():
         "api_cupo_consumir",
         "api_uso_registrar",
         "api_estado_altas",
+        "health",
         None,
     ):
         return None
@@ -1633,6 +1648,12 @@ def olvide_contrasena():
         error_msg=error_msg,
         min_len=min_len,
     )
+
+
+@app.get("/health")
+def health():
+    """Health check de Render: responde sin auth ni consultas a Neon."""
+    return Response("ok\n", mimetype="text/plain", status=200)
 
 
 @app.route("/login", methods=["GET", "POST"])

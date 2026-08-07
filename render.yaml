@@ -7,9 +7,10 @@ services:
       pip install -r requirements.txt &&
       export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers &&
       python -m playwright install chromium
+    # Gunicorn debe abrir $PORT de inmediato. Chromium ya se instala en buildCommand;
+    # el ensure en app.py corre en background y no bloquea el port scan de Render.
     startCommand: >-
       export PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers &&
-      python -c "from cuit_en_arca.ensure_playwright import asegurar_chromium_playwright; asegurar_chromium_playwright()" &&
       gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 7200
     envVars:
       - key: CUIT_EN_ARCA_PLAYWRIGHT

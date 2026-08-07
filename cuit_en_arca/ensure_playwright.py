@@ -42,6 +42,14 @@ def asegurar_chromium_playwright(*, forzar: bool = False) -> None:
     if not forzar and _chromium_instalado(destino):
         return
 
+    # En Render el Chromium se instala en buildCommand. No reintentar descarga en
+    # runtime (bloquea el port scan / health check varios minutos).
+    if (os.environ.get("RENDER") or "").strip() and not forzar:
+        raise RuntimeError(
+            f"Chromium no está en {destino}. "
+            "Revisá el buildCommand de Render (playwright install chromium)."
+        )
+
     env = os.environ.copy()
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(destino)
     cmd_install = [sys.executable, "-m", "playwright", "install", "chromium"]
