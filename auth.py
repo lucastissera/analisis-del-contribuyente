@@ -30,10 +30,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
-from app_branding import APP_NAME
+from app_branding import APP_NAME, RENDER_PUBLIC_URL
 
 _AUTH_DIR = Path(__file__).resolve().parent
 _LOG = logging.getLogger(__name__)
@@ -269,8 +269,46 @@ def _refresh_sec() -> int:
         return _DEFAULT_REFRESH_SEC
 
 
+def _hosts_este_servidor() -> set[str]:
+    hosts: set[str] = set()
+    for raw in (
+        os.environ.get("RENDER_EXTERNAL_URL") or "",
+        os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "",
+        RENDER_PUBLIC_URL,
+    ):
+        v = (raw or "").strip()
+        if not v:
+            continue
+        if "://" not in v:
+            v = "https://" + v
+        host = (urlparse(v).hostname or "").strip().lower()
+        if host:
+            hosts.add(host)
+    return hosts
+
+
+def _url_remota_apunta_a_este_servidor(url: str) -> bool:
+    """True si AUTH_USERS_URL es este mismo Render (evitar deadlock 1-worker)."""
+    host = (urlparse((url or "").strip()).hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in _hosts_este_servidor():
+        return True
+    # Heurística: hostname típico de este servicio en Render.
+    return host.endswith(".onrender.com") and "analisisdelcontribuyente" in host
+
+
 def _modo_remoto_activo() -> bool:
-    return bool(_remote_url())
+    """Remoto solo para portables/clientes. En el propio servidor web no aplica."""
+    url = _remote_url()
+    if not url:
+        return False
+    if _url_remota_apunta_a_este_servidor(url):
+        return False
+    # En Render el servidor es la fuente (Neon / AUTH_USERS_JSON), no un cliente remoto.
+    if (os.environ.get("RENDER") or "").strip():
+        return False
+    return True
 
 
 def _auth_users_file() -> Path:

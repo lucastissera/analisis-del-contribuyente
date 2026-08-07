@@ -39,10 +39,13 @@ def _arranque_en_background() -> None:
         except Exception as exc:
             _LOG_APP.warning("Playwright/Chromium en background: %s", exc)
 
-    try:
-        iniciar_sincronizacion_usuarios()
-    except Exception as exc:
-        _LOG_APP.warning("Sync usuarios en background: %s", exc)
+    # En Render el servidor es fuente de verdad (Neon); no sincronizar desde AUTH_USERS_URL
+    # (si apunta a sí mismo con 1 worker provoca deadlock y 503 en static/login).
+    if not (os.environ.get("RENDER") or "").strip():
+        try:
+            iniciar_sincronizacion_usuarios()
+        except Exception as exc:
+            _LOG_APP.warning("Sync usuarios en background: %s", exc)
 
     try:
         from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
