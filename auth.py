@@ -806,14 +806,29 @@ def _resolver_clave_usuario(username: str) -> str:
     u = (username or "").strip()
     if not u:
         return u
+    # Primero sin Neon (AUTH_USERS_JSON / admin / archivo): evita colgar el login.
     try:
-        from auth_registro import resolver_clave_overlay
+        env = _usuarios_desde_env_json()
+        base = env if env else _load_cuentas_sin_env_json()
+        if u in base:
+            return u
+        ul = u.lower()
+        for k in base:
+            if k.lower() == ul:
+                return k
+        from auth_registro import normalizar_cuit
+
+        nu = normalizar_cuit(u)
+        if nu and nu in base:
+            return nu
+    except Exception:
+        pass
+    try:
+        from auth_registro import normalizar_cuit, resolver_clave_overlay
 
         clave = resolver_clave_overlay(u)
         if clave:
             return clave
-        from auth_registro import normalizar_cuit
-
         nu = normalizar_cuit(u)
         if nu:
             return nu
@@ -831,12 +846,18 @@ def verificar_acceso(username: str, password: str) -> str | None:
         pwd = (password or "").strip()
         if not u:
             return "invalid"
-        pendiente = verificar_acceso_overlay(u, pwd)
+        try:
+            pendiente = verificar_acceso_overlay(u, pwd)
+        except Exception:
+            pendiente = None
         if pendiente == "pending_approval":
             return "pending_approval"
         if pendiente == "invalid":
             return "invalid"
-        suspendido = verificar_suspendido(u, pwd)
+        try:
+            suspendido = verificar_suspendido(u, pwd)
+        except Exception:
+            suspendido = None
         if suspendido == "suspended":
             return "suspended"
         if suspendido == "invalid":

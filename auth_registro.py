@@ -23,10 +23,13 @@ from urllib.request import Request, urlopen
 
 import bcrypt
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
 from app_branding import APP_NAME
 
 _LOG = logging.getLogger(__name__)
 _lock = threading.Lock()
+_neon_read_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="auth-neon-read")
 
 _CUIT_RE = re.compile(r"^\d{11}$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -1019,6 +1022,14 @@ def _escribir_json(path: Path, data: Any) -> None:
         raise RuntimeError(f"No se pudo guardar en {path}: {exc}") from exc
 
 
+def _neon_read_timeout_sec() -> float:
+    raw = (os.environ.get("AUTH_NEON_READ_TIMEOUT") or "6").strip()
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 6.0
+
+
 def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
     db = False
     try:
@@ -1026,7 +1037,16 @@ def _read_store(name: str, default: Any, path: Path | None = None) -> Any:
 
         db = enabled()
         if db:
-            return read_json(name, default)
+            # Timeout duro: si Neon no responde, no colgar el login (Render → 500).
+            fut = _neon_read_executor.submit(read_json, name, default)
+            try:
+                return fut.result(timeout=_neon_read_timeout_sec())
+            except FuturesTimeout:
+                _LOG.warning("Timeout leyendo PostgreSQL (%s) tras %.0fs", name, _neon_read_timeout_sec())
+                return default
+            except Exception as exc:
+                _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
+                return default
     except Exception as exc:
         _LOG.warning("Lectura PostgreSQL falló (%s): %s", name, exc)
         if db:
