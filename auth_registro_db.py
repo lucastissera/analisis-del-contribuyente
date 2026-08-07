@@ -10,7 +10,8 @@ import time
 from typing import Any
 
 _LOG = logging.getLogger(__name__)
-_lock = threading.Lock()
+# RLock: init_db / pool / cache pueden anidarse; Lock() no reentrante → deadlock en login.
+_lock = threading.RLock()
 _initialized = False
 _blob_cache: dict[str, tuple[str, float]] = {}
 _estado_db_cache: tuple[dict[str, Any], float] | None = None
@@ -85,12 +86,12 @@ def _guardar_blob_cache(name: str, data: Any) -> None:
 
 
 def _pool_max() -> int:
-    raw = (os.environ.get("AUTH_DB_POOL_MAX") or "3").strip()
+    raw = (os.environ.get("AUTH_DB_POOL_MAX") or "6").strip()
     try:
         n = int(raw)
     except ValueError:
-        n = 3
-    return max(1, min(n, 8))
+        n = 6
+    return max(2, min(n, 10))
 
 
 def _get_pool():
@@ -106,30 +107,40 @@ def _get_pool():
         if not url:
             raise RuntimeError("DATABASE_URL no configurada")
         maxconn = _pool_max()
+        # minconn=0: no conectar al crear el pool (evita colgar bajo el lock).
         _pool = pg_pool.ThreadedConnectionPool(
-            1,
+            0,
             maxconn,
             url,
-            connect_timeout=15,
+            connect_timeout=10,
         )
-        _LOG.info("Pool PostgreSQL listo (1–%d conexiones)", maxconn)
+        _LOG.info("Pool PostgreSQL listo (0–%d conexiones)", maxconn)
         return _pool
 
 
 def _connect():
-    return _get_pool().getconn()
+    try:
+        return _get_pool().getconn()
+    except Exception:
+        # Fallback si el pool está agotado o en mal estado.
+        import psycopg2
+
+        return psycopg2.connect(database_url(), connect_timeout=10)
 
 
-def _release(conn) -> None:
+def _release(conn, *, close: bool = False) -> None:
     if conn is None:
         return
     try:
-        _get_pool().putconn(conn)
+        if _pool is not None:
+            _pool.putconn(conn, close=close)
+            return
     except Exception:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        pass
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def _ensure_schema(conn) -> None:
@@ -153,13 +164,16 @@ def init_db() -> None:
     with _lock:
         if _initialized:
             return
+    # Conectar fuera del flag crítico largo; RLock cubre anidamiento con el pool.
+    conn = None
+    try:
         conn = _connect()
-        try:
-            _ensure_schema(conn)
+        _ensure_schema(conn)
+        with _lock:
             _initialized = True
-            _LOG.info("Persistencia de altas: PostgreSQL listo")
-        finally:
-            _release(conn)
+        _LOG.info("Persistencia de altas: PostgreSQL listo")
+    finally:
+        _release(conn)
 
 
 def read_json(name: str, default: Any) -> Any:
@@ -168,26 +182,28 @@ def read_json(name: str, default: Any) -> Any:
     cached = _leer_blob_cache(name)
     if cached is not None:
         return cached
+    conn = None
     try:
         init_db()
         conn = _connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT data FROM auth_registro_blob WHERE name = %s", (name,))
-                row = cur.fetchone()
-            if not row:
-                _guardar_blob_cache(name, default)
-                return default
-            data = row[0]
-            if isinstance(data, str):
-                data = json.loads(data)
-            _guardar_blob_cache(name, data)
-            return data
-        finally:
-            _release(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT data FROM auth_registro_blob WHERE name = %s", (name,))
+            row = cur.fetchone()
+        if not row:
+            _guardar_blob_cache(name, default)
+            return default
+        data = row[0]
+        if isinstance(data, str):
+            data = json.loads(data)
+        _guardar_blob_cache(name, data)
+        return data
     except Exception as exc:
         _LOG.warning("No se pudo leer %s desde PostgreSQL: %s", name, exc)
+        _release(conn, close=True)
+        conn = None
         return default
+    finally:
+        _release(conn)
 
 
 def write_json(name: str, data: Any) -> None:

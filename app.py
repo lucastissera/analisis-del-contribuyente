@@ -1669,7 +1669,19 @@ def login():
         next_val = (request.form.get("next") or "").strip()
         user = (request.form.get("usuario") or "").strip()
         pwd = request.form.get("password") or ""
-        motivo = verificar_acceso(user, pwd)
+        try:
+            motivo = verificar_acceso(user, pwd)
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Error en login/verificar_acceso: %s", exc)
+            lg = normalize_lang(session.get("lang"))
+            return render_template(
+                "login.html",
+                login_error=True,
+                login_error_msg=tr(lg, "login_error_bad"),
+                next=next_val,
+                whatsapp_url=whatsapp_new_user_url(),
+                alta_publica=alta_publica_habilitada(),
+            ), 503
         if motivo is None:
             from auth import _resolver_clave_usuario, forzar_sync_usuarios_remoto
 
