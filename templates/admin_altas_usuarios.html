@@ -164,21 +164,18 @@
         </div>
       </details>
 
-      {% if db_estado and db_estado.activo %}
-      <details class="admin-acordeon">
+      {% if db_activo %}
+      <details class="admin-acordeon" id="acordeon-db-estado"
+        data-url="{{ url_for('admin_estado_db') }}"
+        data-msg-tamano="{{ t('admin_db_tamano', mb='__MB__') }}"
+        data-msg-ok="{{ t('admin_db_tamano_ok', umbral='__U__') }}"
+        data-msg-alerta="{{ t('admin_db_alerta_tamano', mb='__MB__', umbral='__U__') }}"
+        data-msg-err="{{ t('admin_db_tamano_err', detalle='__D__') }}">
         <summary class="admin-acordeon-cabecera">{{ t('admin_db_titulo') }}</summary>
-        <div class="admin-acordeon-cuerpo">
+        <div class="admin-acordeon-cuerpo" id="db-estado-cuerpo">
           <p class="help">{{ t('admin_db_help') }}</p>
-          {% if db_estado.tamano_mb is not none %}
-          <p class="help">{{ t('admin_db_tamano', mb=db_estado.tamano_mb) }}</p>
-          {% if db_estado.alerta_tamano %}
-          <p class="warn">{{ t('admin_db_alerta_tamano', mb=db_estado.tamano_mb, umbral=db_estado.umbral_alerta_mb) }}</p>
-          {% else %}
-          <p class="ok">{{ t('admin_db_tamano_ok', umbral=db_estado.umbral_alerta_mb) }}</p>
-          {% endif %}
-          {% elif db_estado.tamano_error %}
-          <p class="warn">{{ t('admin_db_tamano_err', detalle=db_estado.tamano_error) }}</p>
-          {% endif %}
+          <p class="help" id="db-estado-cargando">{{ t('admin_db_cargando') }}</p>
+          <div id="db-estado-detalle" hidden></div>
           <p class="help">{{ t('admin_db_neon_aviso') }}</p>
         </div>
       </details>
@@ -522,5 +519,89 @@
     <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
     <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
     <script src="{{ url_for('static', filename='tema.js') }}"></script>
+    {% if db_activo %}
+    <script>
+      (function () {
+        var panel = document.getElementById("acordeon-db-estado");
+        if (!panel) return;
+        var cargado = false;
+        function esc(s) {
+          return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+        function cargar() {
+          if (cargado) return;
+          cargado = true;
+          var url = panel.getAttribute("data-url");
+          var cargando = document.getElementById("db-estado-cargando");
+          var detalle = document.getElementById("db-estado-detalle");
+          fetch(url, { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+              var j = res.j || {};
+              var html = [];
+              if (j.tamano_mb != null) {
+                html.push(
+                  "<p class=\"help\">" +
+                    esc(panel.getAttribute("data-msg-tamano").replace("__MB__", String(j.tamano_mb))) +
+                    "</p>"
+                );
+                if (j.alerta_tamano) {
+                  html.push(
+                    "<p class=\"warn\">" +
+                      esc(
+                        panel
+                          .getAttribute("data-msg-alerta")
+                          .replace("__MB__", String(j.tamano_mb))
+                          .replace("__U__", String(j.umbral_alerta_mb || ""))
+                      ) +
+                      "</p>"
+                  );
+                } else {
+                  html.push(
+                    "<p class=\"ok\">" +
+                      esc(
+                        panel
+                          .getAttribute("data-msg-ok")
+                          .replace("__U__", String(j.umbral_alerta_mb || ""))
+                      ) +
+                      "</p>"
+                  );
+                }
+              } else if (j.tamano_error || j.error) {
+                html.push(
+                  "<p class=\"warn\">" +
+                    esc(
+                      panel
+                        .getAttribute("data-msg-err")
+                        .replace("__D__", String(j.tamano_error || j.error || ""))
+                    ) +
+                    "</p>"
+                );
+              }
+              if (cargando) cargando.hidden = true;
+              if (detalle) {
+                detalle.innerHTML = html.join("");
+                detalle.hidden = false;
+              }
+            })
+            .catch(function () {
+              if (cargando) {
+                cargando.className = "warn";
+                cargando.textContent = panel
+                  .getAttribute("data-msg-err")
+                  .replace("__D__", "red");
+              }
+            });
+        }
+        panel.addEventListener("toggle", function () {
+          if (panel.open) cargar();
+        });
+      })();
+    </script>
+    {% endif %}
   </body>
 </html>

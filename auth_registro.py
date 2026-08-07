@@ -1451,9 +1451,12 @@ def crear_usuario_admin(
     }
 
 
-def listar_pendientes_aprobacion() -> list[dict[str, Any]]:
+def listar_pendientes_aprobacion(
+    users: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for cuit, meta in cargar_usuarios_overlay().items():
+    fuente = users if users is not None else cargar_usuarios_overlay()
+    for cuit, meta in fuente.items():
         if not isinstance(meta, dict):
             continue
         if meta_es_admin(meta):
@@ -1497,10 +1500,16 @@ def aprobar_cuenta(cuit: str) -> bool:
     return True
 
 
-def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
+def listar_usuarios_suscripcion(
+    users: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    from auth_grupos import grupo_desde_meta, nombre_grupo
+    from legal_aceptacion import resumen_aceptacion
+
     hoy = date.today()
     out: list[dict[str, Any]] = []
-    for cuit, meta in cargar_usuarios_overlay().items():
+    fuente = users if users is not None else cargar_usuarios_overlay()
+    for cuit, meta in fuente.items():
         if not isinstance(meta, dict):
             continue
         if meta_es_admin(meta):
@@ -1513,14 +1522,10 @@ def listar_usuarios_suscripcion() -> list[dict[str, Any]]:
         limite, usados = _leer_cupo_meta(meta)
         legal = {}
         try:
-            from legal_aceptacion import resumen_aceptacion
-
             legal = resumen_aceptacion(meta)
         except Exception:
             pass
-        from auth_grupos import grupo_de_usuario, nombre_grupo
-
-        gid = grupo_de_usuario(cuit)
+        gid = grupo_desde_meta(cuit, meta)
         out.append(
             {
                 "cuit": cuit,

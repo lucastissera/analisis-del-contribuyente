@@ -6,11 +6,15 @@ import json
 import logging
 import os
 import threading
+import time
 from typing import Any
 
 _LOG = logging.getLogger(__name__)
 _lock = threading.Lock()
 _initialized = False
+_blob_cache: dict[str, tuple[str, float]] = {}
+_estado_db_cache: tuple[dict[str, Any], float] | None = None
+_pool = None
 
 _BLOBS = (
     "usuarios_registrados",
@@ -33,10 +37,99 @@ def enabled() -> bool:
     return bool(database_url())
 
 
-def _connect():
-    import psycopg2
+def _cache_ttl_sec() -> float:
+    raw = (os.environ.get("AUTH_REGISTRO_CACHE_SEC") or "45").strip()
+    try:
+        ttl = float(raw)
+    except ValueError:
+        ttl = 45.0
+    return max(0.0, ttl)
 
-    return psycopg2.connect(database_url(), connect_timeout=15)
+
+def _invalidar_cache_blob(name: str | None = None) -> None:
+    global _estado_db_cache
+    if name is None:
+        _blob_cache.clear()
+        _estado_db_cache = None
+        return
+    _blob_cache.pop(name, None)
+    _estado_db_cache = None
+
+
+def _leer_blob_cache(name: str) -> Any | None:
+    ttl = _cache_ttl_sec()
+    if ttl <= 0:
+        return None
+    ahora = time.time()
+    with _lock:
+        entry = _blob_cache.get(name)
+        if not entry or entry[1] <= ahora:
+            return None
+        try:
+            return json.loads(entry[0])
+        except json.JSONDecodeError:
+            _blob_cache.pop(name, None)
+            return None
+
+
+def _guardar_blob_cache(name: str, data: Any) -> None:
+    ttl = _cache_ttl_sec()
+    if ttl <= 0:
+        return
+    try:
+        payload = json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return
+    with _lock:
+        _blob_cache[name] = (payload, time.time() + ttl)
+
+
+def _pool_max() -> int:
+    raw = (os.environ.get("AUTH_DB_POOL_MAX") or "3").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 3
+    return max(1, min(n, 8))
+
+
+def _get_pool():
+    global _pool
+    if _pool is not None:
+        return _pool
+    with _lock:
+        if _pool is not None:
+            return _pool
+        from psycopg2 import pool as pg_pool
+
+        url = database_url()
+        if not url:
+            raise RuntimeError("DATABASE_URL no configurada")
+        maxconn = _pool_max()
+        _pool = pg_pool.ThreadedConnectionPool(
+            1,
+            maxconn,
+            url,
+            connect_timeout=15,
+        )
+        _LOG.info("Pool PostgreSQL listo (1–%d conexiones)", maxconn)
+        return _pool
+
+
+def _connect():
+    return _get_pool().getconn()
+
+
+def _release(conn) -> None:
+    if conn is None:
+        return
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _ensure_schema(conn) -> None:
@@ -66,12 +159,15 @@ def init_db() -> None:
             _initialized = True
             _LOG.info("Persistencia de altas: PostgreSQL listo")
         finally:
-            conn.close()
+            _release(conn)
 
 
 def read_json(name: str, default: Any) -> Any:
     if name not in _BLOBS:
         raise ValueError(f"blob desconocido: {name}")
+    cached = _leer_blob_cache(name)
+    if cached is not None:
+        return cached
     try:
         init_db()
         conn = _connect()
@@ -80,13 +176,15 @@ def read_json(name: str, default: Any) -> Any:
                 cur.execute("SELECT data FROM auth_registro_blob WHERE name = %s", (name,))
                 row = cur.fetchone()
             if not row:
+                _guardar_blob_cache(name, default)
                 return default
             data = row[0]
             if isinstance(data, str):
-                return json.loads(data)
+                data = json.loads(data)
+            _guardar_blob_cache(name, data)
             return data
         finally:
-            conn.close()
+            _release(conn)
     except Exception as exc:
         _LOG.warning("No se pudo leer %s desde PostgreSQL: %s", name, exc)
         return default
@@ -112,16 +210,26 @@ def write_json(name: str, data: Any) -> None:
                 )
             conn.commit()
             _LOG.info("PostgreSQL: guardado blob %s", name)
+            _invalidar_cache_blob(name)
+            _guardar_blob_cache(name, data)
         finally:
-            conn.close()
+            _release(conn)
     except Exception as exc:
         _LOG.error("No se pudo escribir %s en PostgreSQL: %s", name, exc)
         raise
 
 
-def estado_db() -> dict[str, Any]:
+def estado_db(*, forzar: bool = False) -> dict[str, Any]:
+    global _estado_db_cache
     if not enabled():
         return {"activo": False, "url_configurada": False}
+    ttl = _cache_ttl_sec()
+    if not forzar and ttl > 0:
+        ahora = time.time()
+        with _lock:
+            cached = _estado_db_cache
+            if cached and cached[1] > ahora:
+                return dict(cached[0])
     try:
         init_db()
     except Exception as exc:
@@ -154,7 +262,10 @@ def estado_db() -> dict[str, Any]:
     except Exception as exc:
         out["error"] = str(exc)
     finally:
-        conn.close()
+        _release(conn)
+    if ttl > 0:
+        with _lock:
+            _estado_db_cache = (dict(out), time.time() + ttl)
     return out
 
 

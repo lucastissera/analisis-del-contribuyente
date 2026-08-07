@@ -373,6 +373,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "admin_db_tamano_ok": "Por debajo del umbral de aviso interno ({umbral} MB).",
         "admin_db_alerta_tamano": "Atención: la base ocupa {mb} MB (umbral interno {umbral} MB). Revisá el plan de Neon, exportá respaldos y liberá espacio si hace falta.",
         "admin_db_tamano_err": "No se pudo consultar el tamaño de la base: {detalle}",
+        "admin_db_cargando": "Consultando tamaño de la base…",
         "admin_db_neon_aviso": "Neon también puede enviarte emails desde su consola (Project → Settings → Notifications) cuando te acercás al límite del plan. La app no bloquea el servicio automáticamente: este panel es un aviso anticipado.",
         "admin_dashboard_valor_uso_mes_titulo": "Uso por mes",
         "admin_dashboard_valor_uso_mes_help": "Desglose mensual de los últimos 3 meses calendario (incluye meses anteriores aunque se haya renovado la suscripción).",

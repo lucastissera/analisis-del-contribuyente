@@ -119,10 +119,29 @@ def usuario_en_catalogo_grupo(username: str, grupo_id: str) -> bool:
     return any(m.lower() == ul for m in miembros)
 
 
+def grupo_desde_meta(username: str, meta: dict[str, Any] | None) -> str | None:
+    """Grupo a partir de meta ya cargada (sin releer overlay)."""
+    from auth_registro import meta_es_admin
+
+    if not isinstance(meta, dict) or meta_es_admin(meta):
+        return None
+    gid = normalizar_grupo_id(meta.get("grupo"))
+    if gid:
+        return gid
+    u = (username or "").strip()
+    if not u:
+        return None
+    ul = u.lower()
+    for grupo in GRUPOS.values():
+        if any(m.lower() == ul for m in grupo.miembros):
+            return grupo.id
+    return None
+
+
 def grupo_de_usuario(username: str) -> str | None:
     """Grupo del usuario (meta o catálogo). None si no pertenece a ninguno o es admin."""
     from auth import es_administrador
-    from auth_registro import cargar_usuarios_overlay, meta_es_admin, resolver_clave_usuario_overlay
+    from auth_registro import cargar_usuarios_overlay, resolver_clave_usuario_overlay
 
     u_raw = (username or "").strip()
     if not u_raw or es_administrador(u_raw):
@@ -130,16 +149,7 @@ def grupo_de_usuario(username: str) -> str | None:
     u = resolver_clave_usuario_overlay(u_raw)
     if not u:
         return None
-    meta = cargar_usuarios_overlay().get(u)
-    if not isinstance(meta, dict) or meta_es_admin(meta):
-        return None
-    gid = normalizar_grupo_id(meta.get("grupo"))
-    if gid:
-        return gid
-    for grupo in GRUPOS.values():
-        if usuario_en_catalogo_grupo(u, grupo.id):
-            return grupo.id
-    return None
+    return grupo_desde_meta(u, cargar_usuarios_overlay().get(u))
 
 
 def aplica_a_grupo(username: str, grupo_id: str) -> bool:

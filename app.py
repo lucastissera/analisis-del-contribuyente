@@ -1186,6 +1186,7 @@ def admin_altas_usuarios():
         listar_altas_recientes,
         listar_pendientes_aprobacion,
         listar_usuarios_suscripcion,
+        cargar_usuarios_overlay,
         normalizar_cuit,
         probar_email_admin,
         rechazar_cuenta,
@@ -1437,23 +1438,22 @@ def admin_altas_usuarios():
                 )
         return redirect(url_for("admin_altas_usuarios"))
 
-    pendientes = listar_pendientes_aprobacion()
     altas = listar_altas_recientes(40)
     from datetime import date as _date_cls, timedelta as _td_cls
 
     fecha_default_alta = (_date_cls.today() + _td_cls(days=_dias_suscripcion())).isoformat()
-    db_estado = None
+    overlay_usuarios = cargar_usuarios_overlay()
+    db_activo = False
     try:
-        from auth_registro_db import enabled, estado_db
+        from auth_registro_db import enabled
 
-        if enabled():
-            db_estado = estado_db()
+        db_activo = enabled()
     except Exception:
-        db_estado = None
+        db_activo = False
     return render_template(
         "admin_altas_usuarios.html",
-        pendientes=pendientes,
-        suscriptores=listar_usuarios_suscripcion(),
+        pendientes=listar_pendientes_aprobacion(overlay_usuarios),
+        suscriptores=listar_usuarios_suscripcion(overlay_usuarios),
         altas=altas,
         enlace_generado=enlace_generado,
         dias_suscripcion=_dias_suscripcion(),
@@ -1461,8 +1461,22 @@ def admin_altas_usuarios():
         min_password_len=os.environ.get("AUTH_MIN_PASSWORD_LEN", "8"),
         smtp_estado=estado_smtp(),
         servicios_ids=SERVICIOS_IDS,
-        db_estado=db_estado,
+        db_activo=db_activo,
     )
+
+
+@app.get("/admin/estado-db")
+def admin_estado_db():
+    """Diagnóstico Neon diferido (no bloquea el render de Altas)."""
+    _requiere_admin()
+    try:
+        from auth_registro_db import enabled, estado_db
+
+        if not enabled():
+            return jsonify({"activo": False, "url_configurada": False})
+        return jsonify(estado_db())
+    except Exception as exc:
+        return jsonify({"activo": False, "url_configurada": True, "error": str(exc)}), 500
 
 
 @app.get("/admin/dashboard-valor")
