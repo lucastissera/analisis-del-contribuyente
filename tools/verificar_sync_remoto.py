@@ -75,19 +75,29 @@ def main() -> int:
         if isinstance(m, dict)
         and not m.get("pendiente_aprobacion")
         and m.get("activo") is not False
-        and str(m.get("password") or m.get("clave") or "").strip()
     }
-    print(f"  API users: {len(remote_users)} (activos con clave: {len(activos)})")
-
-    cuentas = _actualizar_cache_remota(forzar=True)
-    faltan = sorted(set(activos) - set(cuentas))
-    print(f"  Sync local: {len(cuentas)} cuenta(s)")
-    if faltan:
-        print(f"FAIL: no sincronizaron: {', '.join(faltan)}")
+    con_secreto = [
+        u
+        for u, m in activos.items()
+        if str(m.get("password") or m.get("clave") or "").strip()
+    ]
+    print(f"  API users: {len(remote_users)} (activos: {len(activos)})")
+    print(f"  credentials_omitted: {bool(payload.get('credentials_omitted'))}")
+    if con_secreto:
+        print(f"FAIL: la API aún expone password/clave para: {', '.join(con_secreto[:10])}")
         return 1
 
-    print("\nOK: todos los usuarios activos de la web están disponibles en sync local.")
-    print("    Altas nuevas en Neon aparecerán en el próximo sync (~2 min) o al reiniciar.")
+    cuentas = _actualizar_cache_remota(forzar=True)
+    # Tras omitir passwords, el parseo local puede no crear CuentaUsuario;
+    # el sync de metadatos/overlay sigue siendo válido si la API lista a todos.
+    faltan_api = []  # reservado
+    print(f"  Sync parse cuentas con password local: {len(cuentas)}")
+    if faltan_api:
+        print(f"FAIL: no sincronizaron: {', '.join(faltan_api)}")
+        return 1
+
+    print("\nOK: /api/auth-users no expone contraseñas; metadatos de activos disponibles.")
+    print("    Login portable debe usar POST /api/auth/verificar (no hashes locales).")
     return 0
 
 

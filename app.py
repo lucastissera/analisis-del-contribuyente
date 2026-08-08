@@ -505,6 +505,7 @@ def _session_idle_and_login():
         "desktop_quit",
         "logout",
         "api_auth_users",
+        "api_auth_verificar",
         "api_cupo_info",
         "api_cupo_consumir",
         "api_uso_registrar",
@@ -568,6 +569,7 @@ def _verificar_aceptacion_legal_pendiente():
         "legal_privacidad",
         "legal_aceptar",
         "api_auth_users",
+        "api_auth_verificar",
         "api_cupo_info",
         "api_cupo_consumir",
         "api_uso_registrar",
@@ -3577,10 +3579,35 @@ def cancelar_descarga():
 
 @app.get("/api/auth-users")
 def api_auth_users():
-    """Listado de usuarios para sync de portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
+    """Metadatos de usuarios para sync de portables (sin passwords; Bearer token)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
         return jsonify({"error": "unauthorized"}), 401
     return jsonify(export_users_payload())
+
+
+@app.post("/api/auth/verificar")
+def api_auth_verificar():
+    """Valida usuario/contraseña en el servidor (portables; Bearer token)."""
+    if not verificar_token_remoto(request.headers.get("Authorization")):
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    usuario = (data.get("usuario") or "").strip()
+    password = data.get("password") or ""
+    if not usuario or not password:
+        return jsonify({"ok": False, "motivo": "invalid"}), 400
+    motivo = verificar_acceso(usuario, password)
+    if motivo is None:
+        from auth import _resolver_clave_usuario
+
+        clave = _resolver_clave_usuario(usuario)
+        return jsonify(
+            {
+                "ok": True,
+                "usuario": clave,
+                "es_admin": es_administrador(clave),
+            }
+        )
+    return jsonify({"ok": False, "motivo": motivo}), 401
 
 
 @app.get("/api/cupo/info")

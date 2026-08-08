@@ -528,9 +528,6 @@ def _sync_overlay_cupo_desde_remoto(payload: dict[str, Any] | None) -> None:
             if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
                 if not meta_es_admin(meta):
                     continue
-            pwd = str(meta.get("password") or meta.get("clave") or "").strip()
-            if not pwd and not meta_es_admin(meta):
-                continue
             dest = users.get(clave)
             if not isinstance(dest, dict):
                 dest = {}
@@ -571,11 +568,21 @@ def _modo_env_json_activo() -> bool:
     return bool((os.environ.get("AUTH_USERS_JSON") or "").strip())
 
 
+_CAMPOS_SECRETOS_USUARIO = frozenset(
+    {"password", "clave", "password_hash", "pwd", "password_definida"}
+)
+
+
+def _meta_sin_secretos(meta: dict[str, Any]) -> dict[str, Any]:
+    """Copia pública para sync portable: sin material de contraseña."""
+    return {k: v for k, v in meta.items() if k not in _CAMPOS_SECRETOS_USUARIO}
+
+
 def export_users_payload() -> dict[str, Any]:
-    """JSON completo de usuarios (para sync remoto de portables)."""
+    """Metadatos de usuarios para sync de portables (sin passwords/hashes)."""
     data = _leer_payload_env_json()
     if data:
-        payload = data
+        payload = json.loads(json.dumps(data))  # copia profunda simple
     else:
         cuentas = _load_cuentas_sin_env_json()
         payload = {
@@ -600,6 +607,12 @@ def export_users_payload() -> dict[str, Any]:
                     users[u] = meta
     except Exception:
         pass
+    users = payload.get("users")
+    if isinstance(users, dict):
+        payload["users"] = {
+            u: _meta_sin_secretos(m) if isinstance(m, dict) else m for u, m in users.items()
+        }
+    payload["credentials_omitted"] = True
     return payload
 
 
@@ -610,6 +623,73 @@ def verificar_token_remoto(auth_header: str | None) -> bool:
     if not auth_header:
         return False
     return auth_header.strip() == f"Bearer {expected}"
+
+
+def _url_api_auth_verificar() -> str:
+    """Deriva /api/auth/verificar desde AUTH_USERS_URL (.../api/auth-users)."""
+    base = (_remote_url() or "").rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/api/auth-users"):
+        return base[: -len("/auth-users")] + "/auth/verificar"
+    if base.endswith("/auth-users"):
+        return base[: -len("/auth-users")] + "/auth/verificar"
+    return base.rsplit("/", 1)[0] + "/auth/verificar"
+
+
+def _intentar_verificar_remoto(
+    username: str, password: str
+) -> tuple[bool, str | None] | None:
+    """Verifica credenciales contra el servidor.
+
+    Returns:
+        (True, None) acceso OK;
+        (False, motivo) rechazado;
+        None si no hay red / endpoint no disponible (usar fallback local).
+    """
+    verify_url = _url_api_auth_verificar()
+    if not verify_url.lower().startswith("https://"):
+        return None
+    token = _remote_token()
+    if not token:
+        return None
+    body = json.dumps(
+        {"usuario": (username or "").strip(), "password": password or ""},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    headers = {
+        "User-Agent": f"{APP_NAME}/auth-verify",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    req = Request(verify_url, data=body, headers=headers, method="POST")
+    try:
+        with urlopen(req, timeout=20) as resp:
+            raw = resp.read()
+        data = json.loads(raw.decode("utf-8-sig"))
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            _LOG.warning("Token remoto rechazado en /api/auth/verificar (%s)", exc.code)
+            return None
+        if exc.code == 404:
+            _LOG.warning("Servidor sin /api/auth/verificar; usar caché local si existe")
+            return None
+        try:
+            data = json.loads(exc.read().decode("utf-8-sig"))
+            if isinstance(data, dict) and data.get("motivo"):
+                return False, str(data.get("motivo") or "invalid")
+        except Exception:
+            pass
+        return False, "invalid"
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
+        _LOG.warning("No se pudo verificar acceso remoto: %s", exc)
+        return None
+    if not isinstance(data, dict):
+        return False, "invalid"
+    if data.get("ok") is True:
+        return True, None
+    return False, str(data.get("motivo") or "invalid")
 
 
 def es_administrador(username: str) -> bool:
@@ -867,6 +947,13 @@ def verificar_acceso(username: str, password: str) -> str | None:
         if not u:
             return "invalid"
 
+        # Portable/local con sync: validar en el servidor (ya no viajan hashes en /api/auth-users).
+        if _modo_remoto_activo() and not (os.environ.get("RENDER") or "").strip():
+            remoto = _intentar_verificar_remoto(u, pwd)
+            if remoto is not None:
+                ok, motivo = remoto
+                return None if ok else (motivo or "invalid")
+
         # En Render: primero AUTH_USERS_JSON / admin (sin Neon). Si valida, listo.
         if (os.environ.get("RENDER") or "").strip():
             try:
@@ -876,7 +963,11 @@ def verificar_acceso(username: str, password: str) -> str | None:
                 if locales:
                     base = {**base, **locales}
                 cuenta_rapida = base.get(u)
-                if cuenta_rapida is not None and verificar_password(cuenta_rapida.password, pwd):
+                if (
+                    cuenta_rapida is not None
+                    and (cuenta_rapida.password or "").strip()
+                    and verificar_password(cuenta_rapida.password, pwd)
+                ):
                     return _motivo_vigencia(cuenta_rapida)
             except Exception:
                 _LOG.debug("Login rápido sin Neon falló", exc_info=True)
@@ -898,7 +989,11 @@ def verificar_acceso(username: str, password: str) -> str | None:
         if suspendido == "invalid":
             return "invalid"
         cuenta = _load_cuentas().get(u)
-        if cuenta is None or not verificar_password(cuenta.password, pwd):
+        if (
+            cuenta is None
+            or not (cuenta.password or "").strip()
+            or not verificar_password(cuenta.password, pwd)
+        ):
             return "invalid"
         return _motivo_vigencia(cuenta)
     except Exception:
