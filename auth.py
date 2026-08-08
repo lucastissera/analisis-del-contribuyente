@@ -175,20 +175,37 @@ def _dir_exe_portable() -> Path | None:
     return Path(sys.executable).resolve().parent
 
 
-def _auth_remote_txt() -> Path | None:
+def _candidatos_auth_remote(nombre: str) -> list[Path]:
+    """Rutas posibles de auth_remote (.enc / .txt): junto al .exe y raíz del proyecto."""
+    out: list[Path] = []
     exe_dir = _dir_exe_portable()
-    if exe_dir is None:
-        return None
-    p = exe_dir / "auth_remote.txt"
-    return p if p.is_file() else None
+    if exe_dir is not None:
+        out.append(exe_dir / nombre)
+    out.append(_AUTH_DIR / nombre)
+    # Deduplicar conservando orden
+    vistos: set[str] = set()
+    unicos: list[Path] = []
+    for p in out:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in vistos:
+            continue
+        vistos.add(key)
+        unicos.append(p)
+    return unicos
+
+
+def _auth_remote_txt() -> Path | None:
+    for p in _candidatos_auth_remote("auth_remote.txt"):
+        if p.is_file():
+            return p
+    return None
 
 
 def _auth_remote_enc() -> Path | None:
-    exe_dir = _dir_exe_portable()
-    if exe_dir is None:
-        return None
-    p = exe_dir / "auth_remote.enc"
-    return p if p.is_file() else None
+    for p in _candidatos_auth_remote("auth_remote.enc"):
+        if p.is_file():
+            return p
+    return None
 
 
 def _leer_auth_remote_desde_txt(path: Path) -> tuple[str, str]:
