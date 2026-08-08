@@ -968,7 +968,10 @@ def verificar_acceso(username: str, password: str) -> str | None:
                     and (cuenta_rapida.password or "").strip()
                     and verificar_password(cuenta_rapida.password, pwd)
                 ):
-                    return _motivo_vigencia(cuenta_rapida)
+                    vigencia = _motivo_vigencia(cuenta_rapida)
+                    if vigencia is None:
+                        _intentar_migrar_password_legacy(u, pwd)
+                    return vigencia
             except Exception:
                 _LOG.debug("Login rápido sin Neon falló", exc_info=True)
 
@@ -995,10 +998,35 @@ def verificar_acceso(username: str, password: str) -> str | None:
             or not verificar_password(cuenta.password, pwd)
         ):
             return "invalid"
-        return _motivo_vigencia(cuenta)
+        vigencia = _motivo_vigencia(cuenta)
+        if vigencia is None:
+            _intentar_migrar_password_legacy(u, pwd)
+        return vigencia
     except Exception:
         _LOG.exception("verificar_acceso falló para usuario %r", (username or "")[:64])
         return "invalid"
+
+
+def _intentar_migrar_password_legacy(clave: str, password_plano: str) -> None:
+    """Tras login OK en el servidor, convierte passwords en claro a bcrypt."""
+    if not (os.environ.get("RENDER") or "").strip() and not (
+        os.environ.get("DATABASE_URL") or os.environ.get("AUTH_DATABASE_URL") or ""
+    ).strip():
+        # Solo migrar donde hay persistencia de altas (web/Neon), no en caché portable.
+        try:
+            from auth_registro_db import enabled
+
+            if not enabled():
+                return
+        except Exception:
+            return
+    try:
+        from auth_registro import migrar_password_si_legacy
+
+        if migrar_password_si_legacy(clave, password_plano):
+            _LOG.info("Migración bcrypt aplicada post-login (%s)", clave)
+    except Exception:
+        _LOG.debug("Migración bcrypt omitida para %s", clave, exc_info=True)
 
 
 def verify_credentials(username: str, password: str) -> bool:

@@ -1090,15 +1090,85 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(pwd, bcrypt.gensalt(rounds=12)).decode("ascii")
 
 
+def password_es_bcrypt(stored: str | None) -> bool:
+    s = (stored or "").strip()
+    return s.startswith("$2") and len(s) >= 50
+
+
+def password_es_legacy(stored: str | None) -> bool:
+    s = (stored or "").strip()
+    return bool(s) and not password_es_bcrypt(s)
+
+
+def _rechazar_passwords_legacy() -> bool:
+    v = (os.environ.get("AUTH_REJECT_LEGACY_PASSWORDS") or "").strip().lower()
+    return v in ("1", "true", "yes", "on", "si", "sí")
+
+
 def verificar_password(stored: str, password: str) -> bool:
     s = (stored or "").strip()
     pwd = (password or "").encode("utf-8")
-    if s.startswith("$2"):
+    if password_es_bcrypt(s):
         try:
             return bcrypt.checkpw(pwd, s.encode("ascii"))
         except ValueError:
             return False
+    if _rechazar_passwords_legacy():
+        _LOG.warning("Credencial legacy rechazada (AUTH_REJECT_LEGACY_PASSWORDS=1)")
+        return False
     return s == (password or "")
+
+
+def listar_passwords_legacy() -> list[dict[str, Any]]:
+    """Cuentas en overlay con contraseña no-bcrypt (sin exponer el secreto)."""
+    out: list[dict[str, Any]] = []
+    for clave, meta in cargar_usuarios_overlay().items():
+        if not isinstance(meta, dict):
+            continue
+        stored = str(meta.get("password") or meta.get("clave") or "")
+        if not password_es_legacy(stored):
+            continue
+        out.append(
+            {
+                "usuario": clave,
+                "es_admin": meta_es_admin(meta),
+                "activo": meta.get("activo") is not False,
+                "pendiente_aprobacion": bool(meta.get("pendiente_aprobacion")),
+                "email": meta.get("email") or "",
+            }
+        )
+    out.sort(key=lambda x: (not x.get("es_admin"), x.get("usuario") or ""))
+    return out
+
+
+def migrar_password_si_legacy(clave: str, password_plano: str) -> bool:
+    """Si la cuenta tiene password en claro y coincide, la reescribe con bcrypt."""
+    u = resolver_clave_overlay(clave) or (clave or "").strip()
+    pwd = password_plano or ""
+    if not u or not pwd:
+        return False
+    with _lock:
+        overlay = _cargar_overlay_completo()
+        users = overlay.get("users")
+        if not isinstance(users, dict):
+            return False
+        meta = users.get(u)
+        if not isinstance(meta, dict):
+            return False
+        stored = str(meta.get("password") or meta.get("clave") or "")
+        if not password_es_legacy(stored):
+            return False
+        if stored != pwd:
+            return False
+        meta["password"] = hash_password(pwd)
+        meta.pop("clave", None)
+        meta["password_migrada_bcrypt"] = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        overlay["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        _write_store("usuarios_registrados", overlay)
+        _LOG.info("Password migrada a bcrypt para usuario %s", u)
+        return True
 
 
 def cargar_usuarios_overlay() -> dict[str, dict[str, Any]]:
