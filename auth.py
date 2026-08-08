@@ -270,11 +270,31 @@ def _normalizar_token_remoto(token: str) -> str:
 
 
 def _remote_token() -> str:
-    token = _normalizar_token_remoto(os.environ.get("AUTH_USERS_REMOTE_TOKEN") or "")
-    if token:
-        return token
-    _, token_txt = _leer_auth_remote_txt()
-    return _normalizar_token_remoto(token_txt)
+    """Token actual (el primero de ``_remote_tokens``)."""
+    tokens = _remote_tokens()
+    return tokens[0] if tokens else ""
+
+
+def _remote_tokens() -> list[str]:
+    """Tokens Bearer válidos: actual + opcional ``AUTH_USERS_REMOTE_TOKEN_PREVIOUS``.
+
+    Durante una rotación, en Render poné el nuevo en ``AUTH_USERS_REMOTE_TOKEN``
+    y el viejo en ``AUTH_USERS_REMOTE_TOKEN_PREVIOUS`` hasta redistribuir portables.
+    """
+    vistos: list[str] = []
+    for raw in (
+        os.environ.get("AUTH_USERS_REMOTE_TOKEN") or "",
+        os.environ.get("AUTH_USERS_REMOTE_TOKEN_PREVIOUS") or "",
+    ):
+        t = _normalizar_token_remoto(raw)
+        if t and t not in vistos:
+            vistos.append(t)
+    if not vistos:
+        _, token_txt = _leer_auth_remote_txt()
+        t = _normalizar_token_remoto(token_txt)
+        if t:
+            vistos.append(t)
+    return vistos
 
 
 def _refresh_sec() -> int:
@@ -617,12 +637,16 @@ def export_users_payload() -> dict[str, Any]:
 
 
 def verificar_token_remoto(auth_header: str | None) -> bool:
-    expected = _remote_token()
-    if not expected:
+    import hmac
+
+    tokens = _remote_tokens()
+    if not tokens or not auth_header:
         return False
-    if not auth_header:
-        return False
-    return auth_header.strip() == f"Bearer {expected}"
+    header = auth_header.strip()
+    for expected in tokens:
+        if hmac.compare_digest(header, f"Bearer {expected}"):
+            return True
+    return False
 
 
 def _url_api_auth_verificar() -> str:
