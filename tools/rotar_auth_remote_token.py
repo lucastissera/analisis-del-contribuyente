@@ -129,7 +129,7 @@ def main() -> int:
         print("  Token actual: (no encontrado en .env / auth_remote)")
     print(f"  Token nuevo: {nuevo}")
     print()
-    print("En Render → Environment (Secrets), pegá:")
+    print("En Render -> Environment (Secrets), pega:")
     print(f"  AUTH_USERS_REMOTE_TOKEN={nuevo}")
     if viejo and viejo != nuevo:
         print(f"  AUTH_USERS_REMOTE_TOKEN_PREVIOUS={viejo}")
