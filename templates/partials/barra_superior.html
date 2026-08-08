@@ -1,5 +1,9 @@
 <div class="barra-superior">
-<script>window.MC_MODO_ESCRITORIO = {{ modo_escritorio|tojson }};</script>
+<script>
+  window.MC_MODO_ESCRITORIO = {{ modo_escritorio|tojson }};
+  window.CSRF_TOKEN = {{ csrf_token()|tojson }};
+</script>
+<script src="{{ url_for('static', filename='csrf.js') }}"></script>
 {% if modo_escritorio %}
 <script src="{{ url_for('static', filename='desktop_vivo.js') }}"></script>
 {% endif %}
@@ -59,7 +63,10 @@
     {% endif %}
     {% if mostrar_logout | default(true) %}
     <div class="barra-logout">
-      <a href="{{ url_for('logout') }}">{{ t('logout_link') }}</a>
+      <form method="post" action="{{ url_for('logout') }}" class="form-logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="barra-logout-btn">{{ t('logout_link') }}</button>
+      </form>
       {% if suscripcion_dias_restantes is not none %}
       <div class="barra-suscripcion{% if suscripcion_dias_restantes < 0 %} barra-suscripcion-vencida{% elif suscripcion_cuit_disponibles is not none and suscripcion_cuit_disponibles <= 0 %} barra-suscripcion-sin-cupo{% endif %}">
         {% if suscripcion_dias_restantes < 0 %}

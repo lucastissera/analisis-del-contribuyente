@@ -247,7 +247,7 @@ def verificar_flujo_integrado() -> None:
     _ok("CUIT en panel de suscripciones activas")
 
     # 7. Login cliente + barra suscripción
-    client.get("/logout", follow_redirects=True)
+    client.post("/logout", follow_redirects=True)
     r = client.post(
         "/login",
         data={"usuario": _TEST_CUIT_FMT, "password": _TEST_PASS},
@@ -262,7 +262,7 @@ def verificar_flujo_integrado() -> None:
         _ok("Login cliente OK, indicador de suscripción en UI")
 
     # 8. Renovar suscripción (como admin)
-    client.get("/logout", follow_redirects=True)
+    client.post("/logout", follow_redirects=True)
     client.post("/login", data={"usuario": _ADMIN_USER, "password": _ADMIN_PASS})
     r = client.post(
         "/admin/altas-usuarios",
@@ -277,7 +277,7 @@ def verificar_flujo_integrado() -> None:
     _ok(f"Renovación OK ({info2['dias_restantes']} días restantes)")
 
     # 9. Rutas públicas login
-    client.get("/logout", follow_redirects=True)
+    client.post("/logout", follow_redirects=True)
     r = client.get("/login")
     if r.status_code != 200:
         _fail(f"GET /login status {r.status_code}")

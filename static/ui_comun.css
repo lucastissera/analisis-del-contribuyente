@@ -68,12 +68,26 @@ html.modo-oscuro .btn-tema .icono-sol {
   font-size: 0.9rem;
   text-align: right;
 }
-.barra-logout a {
+.barra-logout a,
+.barra-logout-btn {
   color: var(--color-link);
   text-decoration: none;
 }
-.barra-logout a:hover {
+.barra-logout a:hover,
+.barra-logout-btn:hover {
   text-decoration: underline;
+}
+.form-logout {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+.barra-logout-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 .barra-suscripcion {
   margin-top: 0.35rem;

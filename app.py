@@ -253,6 +253,12 @@ _en_prod_cookies = bool((os.environ.get("RENDER") or "").strip()) or (
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = _en_prod_cookies
+# CSRF en POST de formularios / fetch (sesión). APIs Bearer y desktop localhost: exempt.
+app.config.setdefault("WTF_CSRF_TIME_LIMIT", None)
+app.config.setdefault("WTF_CSRF_CHECK_DEFAULT", True)
+from flask_wtf.csrf import CSRFProtect  # noqa: E402
+
+csrf = CSRFProtect(app)
 # download_id -> (bytes, nombre_archivo, mimetype)
 DESCARGAS: dict[str, tuple[bytes, str, str]] = {}
 
@@ -1822,6 +1828,7 @@ def _respuesta_cierre_desktop() -> Response:
 
 
 @app.route("/desktop/alive", methods=["GET", "POST"])
+@csrf.exempt
 def desktop_alive():
     """Latido de la ventana del .exe (solo localhost)."""
     if not _es_app_escritorio():
@@ -1833,8 +1840,13 @@ def desktop_alive():
     return "", 204
 
 
-@app.get("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
+    """Cierre de sesión solo por POST (+ CSRF). GET no muta (evita logout por img/link forzado)."""
+    if request.method == "GET":
+        if session.get("user"):
+            return redirect(url_for("index"))
+        return redirect(url_for("login"))
     _limpiar_sesion_flask()
     if getattr(sys, "frozen", False):
         return _respuesta_cierre_desktop()
@@ -1843,6 +1855,7 @@ def logout():
 
 
 @app.route("/desktop-quit", methods=["GET", "POST"])
+@csrf.exempt
 def desktop_quit():
     """Solo .exe local: cierra el proceso (sin consola no hay otra forma obvia de salir)."""
     if not getattr(sys, "frozen", False):
@@ -3578,6 +3591,7 @@ def cancelar_descarga():
 
 
 @app.get("/api/auth-users")
+@csrf.exempt
 def api_auth_users():
     """Metadatos de usuarios para sync de portables (sin passwords; Bearer token)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
@@ -3586,6 +3600,7 @@ def api_auth_users():
 
 
 @app.post("/api/auth/verificar")
+@csrf.exempt
 def api_auth_verificar():
     """Valida usuario/contraseña en el servidor (portables; Bearer token)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
@@ -3611,6 +3626,7 @@ def api_auth_verificar():
 
 
 @app.get("/api/cupo/info")
+@csrf.exempt
 def api_cupo_info():
     """Consulta cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
@@ -3628,6 +3644,7 @@ def api_cupo_info():
 
 
 @app.post("/api/cupo/consumir")
+@csrf.exempt
 def api_cupo_consumir():
     """Registra consumo de cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
@@ -3659,6 +3676,7 @@ def api_cupo_consumir():
 
 
 @app.post("/api/uso/registrar")
+@csrf.exempt
 def api_uso_registrar():
     """Registra métricas de uso desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
     if not verificar_token_remoto(request.headers.get("Authorization")):
