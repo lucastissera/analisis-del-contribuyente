@@ -106,7 +106,6 @@ from auth import (
     export_users_payload,
     iniciar_sincronizacion_usuarios,
     verificar_acceso,
-    verificar_token_remoto,
     whatsapp_new_user_url,
 )
 from cursor_cloud import (
