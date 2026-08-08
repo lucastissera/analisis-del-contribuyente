@@ -93,6 +93,8 @@ AUTH_USERS_REFRESH_SEC=120
 
 **Token de dispositivo (`dev_…`):** tras un login OK en `/api/auth/verificar`, el servidor emite un Bearer ligado al usuario. El portable lo usa para cupo/uso; ese token **no** puede bajar el listado global ni gastar cupo de otro usuario. Corte opcional en Render: `AUTH_CUPO_REQUIRE_DEVICE=1` (deja de aceptar el Bearer global en cupo/uso).
 
+**Entitlement firmado (Ed25519):** el mismo login puede devolver un JSON firmado de vida corta (cupo/vigencia). El portable lo guarda cifrado y, sin red, lo usa como tope confiable (no el contador local editable). Requiere `AUTH_ENTITLEMENT_PRIVATE_KEY` en Render (`python tools/generar_entitlement_keys.py`). TTL default 48 h (`AUTH_ENTITLEMENT_TTL_SEC`).
+
 **Rotación segura:** `python tools/rotar_auth_remote_token.py` genera un token nuevo. En Render poné el nuevo en `AUTH_USERS_REMOTE_TOKEN` y el viejo en `AUTH_USERS_REMOTE_TOKEN_PREVIOUS` (ambos válidos hasta redistribuir portables). Luego `--aplicar` en local y, cuando no queden copias viejas, borrá `PREVIOUS`. Alternativa más cerrada: solo `auth_users.enc` sin sync remota (sin clientes Neon automáticos).
 
 ## Desarrollo local y build portable

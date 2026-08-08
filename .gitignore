@@ -2,6 +2,7 @@
 .env
 .env.local
 .auth_token_rotation.local
+.entitlement_private.key
 
 # Credenciales reales — NO subir a Git / Render (usar *.example.* como plantilla)
 auth_users.json

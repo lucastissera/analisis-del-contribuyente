@@ -1880,6 +1880,15 @@ def login():
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
         _rate_limit_usuario_fallo("login", user)
         lg = normalize_lang(session.get("lang"))
+        if motivo == "rate_limit":
+            return render_template(
+                "login.html",
+                login_error=True,
+                login_error_msg=tr(lg, "err_rate_limit", minutos=5),
+                next=next_val,
+                whatsapp_url=whatsapp_new_user_url(),
+                alta_publica=alta_publica_habilitada(),
+            ), 429
         login_error_pending = motivo == "pending_approval"
         login_error_suspended = motivo == "suspended"
         return render_template(
@@ -3792,7 +3801,8 @@ def api_auth_verificar():
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
-    rl = _rate_limit_usuario_consulta("verify", usuario)
+    # Mismo bucket "login" que la web: el bloqueo por intentos vale también en portable.
+    rl = _rate_limit_usuario_consulta("login", usuario)
     if rl is not None:
         return _respuesta_rate_limit(rl, api=True)
     if not usuario or not password:
@@ -3802,7 +3812,7 @@ def api_auth_verificar():
         from auth import _resolver_clave_usuario
         from auth_dispositivos import emitir_token_dispositivo
 
-        _rate_limit_usuario_ok("verify", usuario)
+        _rate_limit_usuario_ok("login", usuario)
         clave = _resolver_clave_usuario(usuario)
         try:
             device_token = emitir_token_dispositivo(clave, etiqueta="portable")
@@ -3816,8 +3826,16 @@ def api_auth_verificar():
         }
         if device_token:
             payload["device_token"] = device_token
+        try:
+            from auth_entitlements import emitir_entitlement_usuario
+
+            firmado = emitir_entitlement_usuario(clave)
+            if firmado:
+                payload["entitlement_signed"] = firmado
+        except Exception:
+            logging.getLogger(__name__).exception("No se pudo emitir entitlement")
         return jsonify(payload)
-    _rate_limit_usuario_fallo("verify", usuario)
+    _rate_limit_usuario_fallo("login", usuario)
     return jsonify({"ok": False, "motivo": motivo}), 401
 
 

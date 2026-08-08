@@ -441,7 +441,15 @@ def cupo_cuit_disponible(username: str) -> int:
                 remoto = info_cupo_cuit_remoto(u)
                 if remoto is not None:
                     return int(remoto.get("cuit_disponibles", 0))
-                # Fail-closed: sin servidor no se confía en el contador local editable.
+                # Sin servidor: tope firmado de corta vida (entitlement), no el JSON local.
+                try:
+                    from auth_entitlements import cupo_desde_entitlement
+
+                    firmado = cupo_desde_entitlement(u)
+                    if firmado is not None:
+                        return int(firmado)
+                except Exception:
+                    pass
                 if not _ultimo_error_cupo:
                     _set_error_cupo(
                         "Sin conexión al servidor de cupo. No se puede procesar hasta reconectar."
@@ -449,6 +457,14 @@ def cupo_cuit_disponible(username: str) -> int:
                 return 0
         except Exception as exc:
             _LOG.debug("Cupo remoto no disponible para %s: %s", u, exc)
+            try:
+                from auth_entitlements import cupo_desde_entitlement
+
+                firmado = cupo_desde_entitlement(u)
+                if firmado is not None:
+                    return int(firmado)
+            except Exception:
+                pass
             _set_error_cupo(f"Sin conexión al servidor de cupo: {exc}")
             return 0
     info = info_cupo_cuit(u)

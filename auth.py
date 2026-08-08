@@ -720,30 +720,53 @@ def _intentar_verificar_remoto(
             raw = resp.read()
         data = json.loads(raw.decode("utf-8-sig"))
     except HTTPError as exc:
-        if exc.code in (401, 403):
-            _LOG.warning("Token remoto rechazado en /api/auth/verificar (%s)", exc.code)
-            return None
+        payload: dict[str, Any] | None = None
+        try:
+            payload = json.loads(exc.read().decode("utf-8-sig"))
+            if not isinstance(payload, dict):
+                payload = None
+        except Exception:
+            payload = None
+        # Rate-limit del servidor: no hacer fallback local (el bloqueo debe valer en portable).
+        if exc.code == 429 or (payload and payload.get("error") == "rate_limit"):
+            return False, "rate_limit"
         if exc.code == 404:
             _LOG.warning("Servidor sin /api/auth/verificar; usar caché local si existe")
             return None
-        try:
-            data = json.loads(exc.read().decode("utf-8-sig"))
-            if isinstance(data, dict) and data.get("motivo"):
-                return False, str(data.get("motivo") or "invalid")
-        except Exception:
-            pass
+        # 401 con cuerpo de verificación = credencial/estado rechazado (no es fallo de red).
+        if exc.code in (401, 403) and payload is not None:
+            if payload.get("error") == "unauthorized":
+                _LOG.warning(
+                    "Token remoto rechazado en /api/auth/verificar (%s)", exc.code
+                )
+                return None
+            return False, str(payload.get("motivo") or "invalid")
+        if exc.code in (401, 403):
+            _LOG.warning("Token remoto rechazado en /api/auth/verificar (%s)", exc.code)
+            return None
+        if payload and payload.get("motivo"):
+            return False, str(payload.get("motivo") or "invalid")
         return False, "invalid"
     except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
         _LOG.warning("No se pudo verificar acceso remoto: %s", exc)
         return None
     if not isinstance(data, dict):
         return False, "invalid"
+    if data.get("error") == "rate_limit":
+        return False, "rate_limit"
     if data.get("ok") is True:
+        clave = (data.get("usuario") or username or "").strip()
         device = (data.get("device_token") or "").strip()
-        if device:
-            clave = (data.get("usuario") or username or "").strip()
-            if clave:
-                recordar_device_token(clave, device)
+        if device and clave:
+            recordar_device_token(clave, device)
+        ent_blob = data.get("entitlement_signed")
+        if isinstance(ent_blob, dict) and clave:
+            try:
+                from auth_entitlements import guardar_entitlement_local
+
+                guardar_entitlement_local(clave, ent_blob)
+            except Exception:
+                _LOG.debug("No se pudo guardar entitlement del login remoto", exc_info=True)
         return True, None
     return False, str(data.get("motivo") or "invalid")
 
@@ -1022,6 +1045,11 @@ def verificar_acceso(username: str, password: str) -> str | None:
             if remoto is not None:
                 ok, motivo = remoto
                 return None if ok else (motivo or "invalid")
+            # Sin red: permitir login local solo con entitlement firmado vigente (o admin).
+            # Se valida la clave más abajo; acá solo marcamos el requisito.
+            _offline_requiere_entitlement = True
+        else:
+            _offline_requiere_entitlement = False
 
         # En Render: primero AUTH_USERS_JSON / admin (sin Neon). Si valida, listo.
         if (os.environ.get("RENDER") or "").strip():
@@ -1070,6 +1098,14 @@ def verificar_acceso(username: str, password: str) -> str | None:
         vigencia = _motivo_vigencia(cuenta)
         if vigencia is None:
             _intentar_migrar_password_legacy(u, pwd)
+        if vigencia is None and _offline_requiere_entitlement and not es_administrador(u):
+            try:
+                from auth_entitlements import entitlement_vigente_para_login
+
+                if not entitlement_vigente_para_login(u):
+                    return "expired"
+            except Exception:
+                return "expired"
         return vigencia
     except Exception:
         _LOG.exception("verificar_acceso falló para usuario %r", (username or "")[:64])

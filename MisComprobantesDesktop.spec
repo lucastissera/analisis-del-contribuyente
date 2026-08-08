@@ -55,6 +55,7 @@ a = Analysis(
         "auth_dispositivos",
         "auth_rate_limit",
         "auth_auditoria",
+        "auth_entitlements",
         "auth_registro",
         "auth_registro_db",
         "auth_uso_valor",
