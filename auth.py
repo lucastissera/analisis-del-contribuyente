@@ -637,16 +637,43 @@ def export_users_payload() -> dict[str, Any]:
 
 
 def verificar_token_remoto(auth_header: str | None) -> bool:
-    import hmac
+    """True si el Bearer es el token global de sync o un token de dispositivo."""
+    try:
+        from auth_dispositivos import resolver_autorizacion_api
 
-    tokens = _remote_tokens()
-    if not tokens or not auth_header:
+        return resolver_autorizacion_api(auth_header) is not None
+    except Exception:
+        import hmac
+
+        tokens = _remote_tokens()
+        if not tokens or not auth_header:
+            return False
+        header = auth_header.strip()
+        for expected in tokens:
+            if hmac.compare_digest(header, f"Bearer {expected}"):
+                return True
         return False
-    header = auth_header.strip()
-    for expected in tokens:
-        if hmac.compare_digest(header, f"Bearer {expected}"):
-            return True
-    return False
+
+
+# Tokens de dispositivo emitidos por /api/auth/verificar (portable → cupo/uso).
+_device_tokens_sesion: dict[str, str] = {}
+
+
+def recordar_device_token(usuario: str, token: str) -> None:
+    u = (usuario or "").strip()
+    t = (token or "").strip()
+    if u and t:
+        _device_tokens_sesion[u] = t
+
+
+def token_api_para_usuario(usuario: str | None = None) -> str:
+    """Preferir token de dispositivo del usuario; si no, Bearer global de sync."""
+    u = (usuario or "").strip()
+    if u:
+        t = (_device_tokens_sesion.get(u) or "").strip()
+        if t:
+            return t
+    return _remote_token()
 
 
 def _url_api_auth_verificar() -> str:
@@ -712,6 +739,11 @@ def _intentar_verificar_remoto(
     if not isinstance(data, dict):
         return False, "invalid"
     if data.get("ok") is True:
+        device = (data.get("device_token") or "").strip()
+        if device:
+            clave = (data.get("usuario") or username or "").strip()
+            if clave:
+                recordar_device_token(clave, device)
         return True, None
     return False, str(data.get("motivo") or "invalid")
 

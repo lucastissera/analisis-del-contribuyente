@@ -3624,11 +3624,52 @@ def cancelar_descarga():
     return jsonify({"ok": True})
 
 
+def _auth_api_remota():
+    """(tipo, usuario_ligado|None) o None. Sync solo con token global."""
+    from auth_dispositivos import resolver_autorizacion_api
+
+    return resolver_autorizacion_api(request.headers.get("Authorization"))
+
+
+def _usuario_desde_auth_cupo(pedido: str) -> tuple[str | None, tuple | None]:
+    """Resuelve usuario para cupo/uso. Device token manda; body no puede suplantar.
+
+    Returns:
+        (clave, None) OK; (None, (jsonify..., status)) error HTTP.
+    """
+    from auth_dispositivos import cupo_exige_device_token
+    from auth_registro import resolver_clave_usuario_overlay
+
+    auth = _auth_api_remota()
+    if auth is None:
+        return None, (jsonify({"error": "unauthorized"}), 401)
+    tipo, usuario_token = auth
+    pedido_u = (pedido or "").strip()
+    if tipo == "device":
+        if not usuario_token:
+            return None, (jsonify({"error": "unauthorized"}), 401)
+        if pedido_u and pedido_u != usuario_token:
+            # No permitir gastar cupo de otro usuario con token ajeno.
+            clave_ped = resolver_clave_usuario_overlay(pedido_u) or pedido_u
+            clave_tok = resolver_clave_usuario_overlay(usuario_token) or usuario_token
+            if clave_ped != clave_tok:
+                return None, (jsonify({"error": "usuario_no_coincide"}), 403)
+        clave = resolver_clave_usuario_overlay(usuario_token) or usuario_token
+        return clave, None
+    # Token global (compatibilidad). Opcionalmente exigir device.
+    if cupo_exige_device_token():
+        return None, (jsonify({"error": "device_token_requerido"}), 401)
+    if not pedido_u:
+        return None, (jsonify({"error": "usuario_requerido"}), 400)
+    return (resolver_clave_usuario_overlay(pedido_u) or pedido_u), None
+
+
 @app.get("/api/auth-users")
 @csrf.exempt
 def api_auth_users():
-    """Metadatos de usuarios para sync de portables (sin passwords; Bearer token)."""
-    if not verificar_token_remoto(request.headers.get("Authorization")):
+    """Metadatos de usuarios para sync de portables (solo Bearer global)."""
+    auth = _auth_api_remota()
+    if auth is None or auth[0] != "global":
         return jsonify({"error": "unauthorized"}), 401
     return jsonify(export_users_payload())
 
@@ -3636,8 +3677,9 @@ def api_auth_users():
 @app.post("/api/auth/verificar")
 @csrf.exempt
 def api_auth_verificar():
-    """Valida usuario/contraseña en el servidor (portables; Bearer token)."""
-    if not verificar_token_remoto(request.headers.get("Authorization")):
+    """Valida usuario/contraseña y emite token de dispositivo (Bearer global)."""
+    auth = _auth_api_remota()
+    if auth is None or auth[0] != "global":
         return jsonify({"error": "unauthorized"}), 401
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
@@ -3647,30 +3689,34 @@ def api_auth_verificar():
     motivo = verificar_acceso(usuario, password)
     if motivo is None:
         from auth import _resolver_clave_usuario
+        from auth_dispositivos import emitir_token_dispositivo
 
         clave = _resolver_clave_usuario(usuario)
-        return jsonify(
-            {
-                "ok": True,
-                "usuario": clave,
-                "es_admin": es_administrador(clave),
-            }
-        )
+        try:
+            device_token = emitir_token_dispositivo(clave, etiqueta="portable")
+        except Exception:
+            logging.getLogger(__name__).exception("No se pudo emitir device token")
+            device_token = ""
+        payload = {
+            "ok": True,
+            "usuario": clave,
+            "es_admin": es_administrador(clave),
+        }
+        if device_token:
+            payload["device_token"] = device_token
+        return jsonify(payload)
     return jsonify({"ok": False, "motivo": motivo}), 401
 
 
 @app.get("/api/cupo/info")
 @csrf.exempt
 def api_cupo_info():
-    """Consulta cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
-    if not verificar_token_remoto(request.headers.get("Authorization")):
-        return jsonify({"error": "unauthorized"}), 401
-    usuario = (request.args.get("usuario") or "").strip()
-    if not usuario:
-        return jsonify({"error": "usuario_requerido"}), 400
-    from auth_registro import info_cupo_cuit, resolver_clave_usuario_overlay
+    """Consulta cupo CUIT (device token preferido; global aún admitido)."""
+    clave, err = _usuario_desde_auth_cupo(request.args.get("usuario") or "")
+    if err is not None:
+        return err
+    from auth_registro import info_cupo_cuit
 
-    clave = resolver_clave_usuario_overlay(usuario) or usuario
     info = info_cupo_cuit(clave)
     if info is None:
         return jsonify({"error": "sin_cupo", "usuario": clave}), 404
@@ -3680,20 +3726,17 @@ def api_cupo_info():
 @app.post("/api/cupo/consumir")
 @csrf.exempt
 def api_cupo_consumir():
-    """Registra consumo de cupo CUIT desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
-    if not verificar_token_remoto(request.headers.get("Authorization")):
-        return jsonify({"error": "unauthorized"}), 401
+    """Registra consumo de cupo (identidad desde device token si aplica)."""
     data = request.get_json(silent=True) or {}
-    usuario = (data.get("usuario") or "").strip()
+    clave, err = _usuario_desde_auth_cupo(data.get("usuario") or "")
+    if err is not None:
+        return err
     try:
         cantidad = max(1, int(data.get("cantidad") or 1))
     except (TypeError, ValueError):
         cantidad = 1
-    if not usuario:
-        return jsonify({"error": "usuario_requerido"}), 400
-    from auth_registro import consumir_cuit_exitoso, info_cupo_cuit, resolver_clave_usuario_overlay
+    from auth_registro import consumir_cuit_exitoso, info_cupo_cuit
 
-    clave = resolver_clave_usuario_overlay(usuario) or usuario
     if info_cupo_cuit(clave) is None:
         return jsonify({"error": "sin_cupo", "usuario": clave}), 404
     if not consumir_cuit_exitoso(clave, cantidad):
@@ -3712,18 +3755,14 @@ def api_cupo_consumir():
 @app.post("/api/uso/registrar")
 @csrf.exempt
 def api_uso_registrar():
-    """Registra métricas de uso desde portables (Bearer AUTH_USERS_REMOTE_TOKEN)."""
-    if not verificar_token_remoto(request.headers.get("Authorization")):
-        return jsonify({"error": "unauthorized"}), 401
+    """Registra métricas de uso (identidad desde device token si aplica)."""
     data = request.get_json(silent=True) or {}
-    usuario = (data.get("usuario") or "").strip()
-    if not usuario:
-        return jsonify({"error": "usuario_requerido"}), 400
-    from auth_registro import resolver_clave_usuario_overlay
+    clave, err = _usuario_desde_auth_cupo(data.get("usuario") or "")
+    if err is not None:
+        return err
     from auth_uso_valor import _incrementar_uso
     from uso_metricas import meta_keys_uso
 
-    clave = resolver_clave_usuario_overlay(usuario) or usuario
     campos: dict[str, int] = {}
     for key in meta_keys_uso():
         try:

@@ -69,6 +69,7 @@ _STORE_FILES: dict[str, str] = {
     "usuarios_registrados": "usuarios_registrados.json",
     "solicitudes_pendientes": "solicitudes_pendientes.json",
     "altas_completadas": "altas_completadas.json",
+    "dispositivos_api": "dispositivos_api.json",
 }
 
 _integridad_store_ok: bool | None = None
@@ -582,14 +583,14 @@ def info_cupo_cuit_remoto(username: str) -> dict[str, Any] | None:
     from urllib.request import Request, urlopen
 
     try:
-        from auth import _remote_token
+        from auth import token_api_para_usuario
     except Exception:
         return None
 
     url_base = _url_api_cupo_info_remota()
-    token = (_remote_token() or "").strip()
     u_raw = (username or "").strip()
     u = resolver_clave_usuario_overlay(u_raw) or u_raw
+    token = (token_api_para_usuario(u) or "").strip()
     if not url_base or not token or not u:
         return None
     url = f"{url_base}?usuario={quote(u)}"
@@ -657,14 +658,14 @@ def _consumir_cuit_remoto(username: str, cantidad: int = 1) -> bool:
     from urllib.request import Request, urlopen
 
     try:
-        from auth import _remote_token
+        from auth import token_api_para_usuario
     except Exception:
         _set_error_cupo("Sync remoto no configurado.")
         return False
 
     url = _url_api_cupo_remota()
-    token = (_remote_token() or "").strip()
     u_raw = (username or "").strip()
+    token = (token_api_para_usuario(u_raw) or "").strip()
     if not url:
         _set_error_cupo("Falta la URL del servidor en auth_remote.enc / auth_remote.txt.")
         return False
@@ -736,13 +737,13 @@ def registrar_uso_remoto(username: str, incrementos: dict[str, int]) -> bool:
     if not incrementos:
         return True
     try:
-        from auth import _remote_token
+        from auth import token_api_para_usuario
     except Exception:
         return False
 
     url = _url_api_uso_remota()
-    token = (_remote_token() or "").strip()
     u_raw = (username or "").strip()
+    token = (token_api_para_usuario(u_raw) or "").strip()
     if not url or not token or not u_raw:
         return False
 

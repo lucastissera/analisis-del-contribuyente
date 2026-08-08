@@ -52,6 +52,7 @@ a = Analysis(
         "werkzeug",
         "auth",
         "auth_crypto",
+        "auth_dispositivos",
         "auth_registro",
         "auth_registro_db",
         "auth_uso_valor",

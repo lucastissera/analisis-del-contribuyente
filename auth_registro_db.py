@@ -19,6 +19,7 @@ _BLOBS = (
     "usuarios_registrados",
     "solicitudes_pendientes",
     "altas_completadas",
+    "dispositivos_api",
 )
 
 

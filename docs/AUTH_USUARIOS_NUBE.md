@@ -89,7 +89,9 @@ AUTH_USERS_REFRESH_SEC=120
 
 **Importante (portable):** si existen **`auth_remote.txt`** y **`auth_users.enc`** juntos, el `.enc` **no se ignora**. El admin local del `.enc` (p. ej. Lucas generado con `setup_auth_portable.bat`) **siempre puede ingresar**, aunque falle la sync remota (sin token, sin internet o Render dormido). Los clientes de Neon se suman vía sync cuando hay token e internet; las claves del `.enc` prevalecen sobre el remoto para el mismo usuario.
 
-**Token en `auth_remote.txt` / `.enc`:** es un secreto de cliente embebido en la carpeta del `.exe`. Impide que terceros descarguen `/api/auth-users` sin el portable, pero **no** protege contra quien ya tiene la carpeta (copia del dist, USB, etc.). No commitear; rotar en Render si se expone.
+**Token en `auth_remote.txt` / `.enc`:** es un secreto de cliente embebido en la carpeta del `.exe` para **sync y login** (`/api/auth-users`, `/api/auth/verificar`). Impide que terceros descarguen el listado sin el portable, pero **no** protege contra quien ya tiene la carpeta. No commitear; rotar en Render si se expone.
+
+**Token de dispositivo (`dev_…`):** tras un login OK en `/api/auth/verificar`, el servidor emite un Bearer ligado al usuario. El portable lo usa para cupo/uso; ese token **no** puede bajar el listado global ni gastar cupo de otro usuario. Corte opcional en Render: `AUTH_CUPO_REQUIRE_DEVICE=1` (deja de aceptar el Bearer global en cupo/uso).
 
 **Rotación segura:** `python tools/rotar_auth_remote_token.py` genera un token nuevo. En Render poné el nuevo en `AUTH_USERS_REMOTE_TOKEN` y el viejo en `AUTH_USERS_REMOTE_TOKEN_PREVIOUS` (ambos válidos hasta redistribuir portables). Luego `--aplicar` en local y, cuando no queden copias viejas, borrá `PREVIOUS`. Alternativa más cerrada: solo `auth_users.enc` sin sync remota (sin clientes Neon automáticos).
 
