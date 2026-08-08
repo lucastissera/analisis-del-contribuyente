@@ -246,13 +246,13 @@ def _secret_key_aplicacion() -> str:
 app.secret_key = _secret_key_aplicacion()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 app.config["SESSION_REFRESH_EACH_REQUEST"] = True
-# Cookies de sesión: en Render/HTTPS van endurecidas; en local HTTP no forzar Secure.
-_en_https_prod = bool((os.environ.get("RENDER") or "").strip()) or (
+# Cookies de sesión: en Render solo HTTPS; HttpOnly evita JS; SameSite reduce CSRF básico.
+_en_prod_cookies = bool((os.environ.get("RENDER") or "").strip()) or (
     (os.environ.get("FLASK_ENV") or "").strip().lower() == "production"
 )
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = _en_https_prod
+app.config["SESSION_COOKIE_SECURE"] = _en_prod_cookies
 # download_id -> (bytes, nombre_archivo, mimetype)
 DESCARGAS: dict[str, tuple[bytes, str, str]] = {}
 
