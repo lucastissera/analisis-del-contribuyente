@@ -27,11 +27,11 @@ _hits: dict[str, deque[float]] = defaultdict(deque)
 
 _PRESETS: dict[str, tuple[str, str, int, int]] = {
     # bucket: (env_max, env_window, default_max, default_window)
-    "login": ("AUTH_RL_LOGIN_MAX", "AUTH_RL_LOGIN_WINDOW", 10, 900),
+    "login": ("AUTH_RL_LOGIN_MAX", "AUTH_RL_LOGIN_WINDOW", 10, 300),
     "alta": ("AUTH_RL_ALTA_MAX", "AUTH_RL_ALTA_WINDOW", 5, 3600),
     "activar": ("AUTH_RL_ALTA_MAX", "AUTH_RL_ALTA_WINDOW", 10, 3600),
     "reset": ("AUTH_RL_RESET_MAX", "AUTH_RL_RESET_WINDOW", 5, 3600),
-    "verify": ("AUTH_RL_VERIFY_MAX", "AUTH_RL_VERIFY_WINDOW", 20, 900),
+    "verify": ("AUTH_RL_VERIFY_MAX", "AUTH_RL_VERIFY_WINDOW", 20, 300),
 }
 
 
