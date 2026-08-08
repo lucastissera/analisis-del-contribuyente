@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""Rota AUTH_USERS_REMOTE_TOKEN (sync portable ↔ Render).
+"""Rota AUTH_USERS_REMOTE_TOKEN (sync portable <-> Render).
 
-Qué logra: si el token viejo quedó en un USB/dist filtrado, deja de servir
+Que logra: si el token viejo quedo en un USB/dist filtrado, deja de servir
 para llamar a /api/auth-users, /api/auth/verificar, cupo, etc.
 
 Orden seguro (con ventana de gracia):
 
-  1. Deploy del código que acepta AUTH_USERS_REMOTE_TOKEN_PREVIOUS (ya en main).
-  2. python tools/rotar_auth_remote_token.py          # solo muestra valores
-  3. En Render → Environment:
-       AUTH_USERS_REMOTE_TOKEN=<nuevo>
-       AUTH_USERS_REMOTE_TOKEN_PREVIOUS=<viejo>
-  4. python tools/rotar_auth_remote_token.py --aplicar  # .env + auth_remote.enc locales
-  5. Redistribuí el portable (o regenerá auth_remote.enc en cada copia).
-  6. Cuando no queden portables con el token viejo, borrá PREVIOUS en Render.
+  1. Deploy del codigo que acepta AUTH_USERS_REMOTE_TOKEN_PREVIOUS (ya en main).
+  2. python tools/rotar_auth_remote_token.py
+       -> escribe el token nuevo en .auth_token_rotation.local (gitignored)
+  3. En Render -> Environment:
+       AUTH_USERS_REMOTE_TOKEN=<nuevo del archivo local>
+       AUTH_USERS_REMOTE_TOKEN_PREVIOUS=<valor que hoy tiene AUTH_USERS_REMOTE_TOKEN en Render>
+  4. python tools/rotar_auth_remote_token.py --aplicar
+  5. Redistribuir portable / regenerar auth_remote.enc
+  6. Cuando no queden portables viejos, borrar PREVIOUS en Render.
 
-Sin --aplicar no toca archivos (modo checklist).
+Sin --aplicar no toca .env ni auth_remote.enc.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+STAGING = ROOT / ".auth_token_rotation.local"
 
 try:
     from dotenv import load_dotenv
@@ -53,6 +56,14 @@ def _url_sync() -> str:
     from auth import _remote_url
 
     return (_remote_url() or AUTH_USERS_API_URL or "").strip()
+
+
+def _mask(token: str) -> str:
+    if not token:
+        return "(vacio)"
+    if len(token) <= 8:
+        return "*" * len(token)
+    return f"...{token[-4:]} (len={len(token)})"
 
 
 def _upsert_env(path: Path, updates: dict[str, str]) -> None:
@@ -90,17 +101,44 @@ def _escribir_remote_locales(url: str, token: str) -> None:
         ROOT / "dist" / APP_EXE_BASENAME / "auth_remote.enc",
     ]
     for ruta in destinos:
-        if ruta.parent == ROOT or ruta.parent.is_dir() or "dist" in ruta.parts:
-            ruta.parent.mkdir(parents=True, exist_ok=True)
-            escribir_archivo_cifrado(ruta, payload)
-            print(f"  actualizado: {ruta}")
-            txt = ruta.with_suffix(".txt")
-            if txt.is_file() and txt.name == "auth_remote.txt":
-                try:
-                    txt.unlink()
-                    print(f"  eliminado (reemplazado por .enc): {txt}")
-                except OSError as exc:
-                    print(f"  aviso: no se pudo borrar {txt}: {exc}", file=sys.stderr)
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        escribir_archivo_cifrado(ruta, payload)
+        print(f"  actualizado: {ruta}")
+        txt = ruta.with_suffix(".txt")
+        if txt.is_file() and txt.name == "auth_remote.txt":
+            try:
+                txt.unlink()
+                print(f"  eliminado (reemplazado por .enc): {txt}")
+            except OSError as exc:
+                print(f"  aviso: no se pudo borrar {txt}: {exc}", file=sys.stderr)
+
+
+def _leer_staging() -> str:
+    if not STAGING.is_file():
+        return ""
+    try:
+        for ln in STAGING.read_text(encoding="utf-8").splitlines():
+            ln = ln.strip()
+            if ln.startswith("AUTH_USERS_REMOTE_TOKEN="):
+                return ln.split("=", 1)[1].strip()
+    except OSError:
+        return ""
+    return ""
+
+
+def _escribir_staging(nuevo: str, url: str) -> None:
+    STAGING.write_text(
+        "\n".join(
+            [
+                "# Generado por tools/rotar_auth_remote_token.py — NO subir a Git",
+                f"AUTH_USERS_URL={url}",
+                f"AUTH_USERS_REMOTE_TOKEN={nuevo}",
+                "# En Render, PREVIOUS = el valor ACTUAL de AUTH_USERS_REMOTE_TOKEN (antes de pegar el nuevo).",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -108,48 +146,46 @@ def main() -> int:
     parser.add_argument(
         "--aplicar",
         action="store_true",
-        help="Escribe .env + auth_remote.enc con el token nuevo (después de pegar en Render)",
+        help="Escribe .env + auth_remote.enc con el token nuevo (despues de pegar en Render)",
     )
     parser.add_argument(
         "--token-nuevo",
         default="",
-        help="Token nuevo (por defecto: secrets.token_urlsafe(48))",
+        help="Token nuevo (por defecto: reusa .auth_token_rotation.local o genera uno)",
     )
     args = parser.parse_args()
 
     viejo = _token_actual()
-    nuevo = (args.token_nuevo or "").strip() or secrets.token_urlsafe(48)
     url = _url_sync()
-
-    print("=== Rotación AUTH_USERS_REMOTE_TOKEN ===")
-    print(f"  URL sync: {url or '(sin URL)'}")
-    if viejo:
-        print(f"  Token actual (oculto): …{viejo[-6:]}  (len={len(viejo)})")
-    else:
-        print("  Token actual: (no encontrado en .env / auth_remote)")
-    print(f"  Token nuevo: {nuevo}")
-    print()
-    print("En Render -> Environment (Secrets), pega:")
-    print(f"  AUTH_USERS_REMOTE_TOKEN={nuevo}")
-    if viejo and viejo != nuevo:
-        print(f"  AUTH_USERS_REMOTE_TOKEN_PREVIOUS={viejo}")
-    else:
-        print("  AUTH_USERS_REMOTE_TOKEN_PREVIOUS=  (opcional; solo si había token viejo)")
-    print()
-    print(
-        "Luego, en esta máquina: python tools/rotar_auth_remote_token.py --aplicar"
-        "\n  (o repetí con --token-nuevo el mismo valor si regenerás en otra sesión)."
-    )
-    print(
-        "Cuando todos los portables usen el nuevo, borrá AUTH_USERS_REMOTE_TOKEN_PREVIOUS en Render."
-    )
+    nuevo = (args.token_nuevo or "").strip() or _leer_staging() or secrets.token_urlsafe(48)
 
     if not args.aplicar:
-        print("\nModo checklist: no se modificó ningún archivo.")
+        _escribir_staging(nuevo, url)
+
+    print("=== Rotacion AUTH_USERS_REMOTE_TOKEN ===")
+    print(f"  URL sync: {url or '(sin URL)'}")
+    print(f"  Token actual: {_mask(viejo)}")
+    print(f"  Token nuevo:  {_mask(nuevo)}")
+    print(f"  Detalle del nuevo: {STAGING.name} (local, no se imprime en claro aqui)")
+    print()
+    print("Pasos en Render -> Environment:")
+    print("  1) Copiar el valor ACTUAL de AUTH_USERS_REMOTE_TOKEN a AUTH_USERS_REMOTE_TOKEN_PREVIOUS")
+    print(f"  2) Pegar el nuevo desde {STAGING.name} en AUTH_USERS_REMOTE_TOKEN")
+    print("  3) Guardar / redeploy si hace falta")
+    print()
+    print("Luego en esta maquina:")
+    print("  python tools/rotar_auth_remote_token.py --aplicar")
+    print("Redistribuir portable. Al final, borrar PREVIOUS en Render.")
+
+    if not args.aplicar:
+        print("\nModo checklist: no se modifico .env ni auth_remote.enc.")
         return 0
 
     if not url:
         print("ERROR: falta URL de sync (AUTH_USERS_URL / auth_remote).", file=sys.stderr)
+        return 1
+    if not nuevo:
+        print("ERROR: no hay token nuevo (corre sin --aplicar primero).", file=sys.stderr)
         return 1
 
     env_path = ROOT / ".env"
@@ -159,7 +195,7 @@ def main() -> int:
     _upsert_env(env_path, updates)
     print(f"\n  actualizado: {env_path}")
     _escribir_remote_locales(url, nuevo)
-    print("\nListo en local. Confirmá Render y probá sync / login portable.")
+    print("\nListo en local. Confirma Render y prueba sync / login portable.")
     return 0
 
 

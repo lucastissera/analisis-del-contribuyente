@@ -22,6 +22,7 @@ _PROHIBIDOS = frozenset(
     {
         ".env",
         ".env.local",
+        ".auth_token_rotation.local",
         "auth_users.json",
         "auth_users.enc",
         "auth_remote.txt",

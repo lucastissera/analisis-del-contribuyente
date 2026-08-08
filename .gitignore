@@ -1,6 +1,7 @@
 # Variables locales (SECRET_KEY, rutas, credenciales, etc.)
 .env
 .env.local
+.auth_token_rotation.local
 
 # Credenciales reales — NO subir a Git / Render (usar *.example.* como plantilla)
 auth_users.json
