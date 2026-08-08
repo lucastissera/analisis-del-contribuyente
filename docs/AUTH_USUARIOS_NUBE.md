@@ -87,7 +87,7 @@ AUTH_USERS_REMOTE_TOKEN=un-token-largo-y-secreto
 AUTH_USERS_REFRESH_SEC=120
 ```
 
-**Importante (portable):** si existen **`auth_remote.txt`** y **`auth_users.enc`** juntos, el `.enc` **no se ignora**. El admin local del `.enc` (p. ej. Lucas generado con `setup_auth_portable.bat`) **siempre puede ingresar**, aunque falle la sync remota (sin token, sin internet o Render dormido). Los clientes de Neon se suman vía sync cuando hay token e internet; las claves del `.enc` prevalecen sobre el remoto para el mismo usuario.
+**Importante (portable):** si existen **`auth_remote`** y **`auth_users.enc`** juntos, el `.enc` **no se ignora** del todo: sirve para un **admin de fábrica** que no esté en Neon. Para el **mismo usuario** que ya viene del servidor, manda la ficha remota (vigencia, cupo, rol). El cupo se consulta y descuenta solo en el servidor; sin conexión el portable **no** procesa CUITs (no se confía en el contador local).
 
 **Token en `auth_remote.txt` / `.enc`:** es un secreto de cliente embebido en la carpeta del `.exe` para **sync y login** (`/api/auth-users`, `/api/auth/verificar`). Impide que terceros descarguen el listado sin el portable, pero **no** protege contra quien ya tiene la carpeta. No commitear; rotar en Render si se expone.
 
@@ -115,8 +115,8 @@ Con **`auth_remote.txt`** configurado:
 | Capa | Qué hace |
 |------|-----------|
 | **Stores `.enc`** | Cupo y altas locales en `%LOCALAPPDATA%\DepuracionExcelComprobantes\` se guardan cifrados (`usuarios_registrados.enc`, etc.). Si alguien edita el archivo, la app **deja de funcionar** y muestra error en el login. |
-| **Servidor autoritativo** | El descuento de cupo va a Render/Neon (`POST /api/cupo/consumir`). Editar archivos locales **no** engaña al panel admin. |
-| **Consulta remota** | Antes de procesar, el portable puede consultar cupo real (`GET /api/cupo/info`). |
+| **Servidor autoritativo** | Consulta y descuento de cupo solo vía Render/Neon. Sin red → cupo 0 (no se procesa). Editar archivos locales no engaña al panel. |
+| **Ficha remota** | Vigencia/rol del servidor pisan `auth_users.enc` para el mismo usuario. |
 | **Caché login** | `auth_users_cache.enc` también verifica integridad al descifrar. |
 
 **Importante:** el cifrado embebido impide cambios casuales (Bloc de notas), pero **no** es DRM absoluto: un atacante avanzado podría extraer la clave del `.exe`. La defensa comercial fuerte es el **servidor + Neon** como fuente de verdad del cupo.

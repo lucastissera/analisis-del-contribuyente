@@ -417,9 +417,14 @@ def asegurar_grupos_registrados() -> dict[str, list[str]]:
 
 
 def cupo_cuit_disponible(username: str) -> int:
+    """CUIT restantes. En portable con sync: solo vale la respuesta del servidor."""
+    from auth import es_administrador
+
     u_raw = (username or "").strip()
     if not u_raw:
         return 0
+    if es_administrador(u_raw):
+        return 1_000_000_000
     u = resolver_clave_usuario_overlay(u_raw) or u_raw
     try:
         from auth_registro_db import enabled
@@ -435,8 +440,16 @@ def cupo_cuit_disponible(username: str) -> int:
                 remoto = info_cupo_cuit_remoto(u)
                 if remoto is not None:
                     return int(remoto.get("cuit_disponibles", 0))
+                # Fail-closed: sin servidor no se confía en el contador local editable.
+                if not _ultimo_error_cupo:
+                    _set_error_cupo(
+                        "Sin conexión al servidor de cupo. No se puede procesar hasta reconectar."
+                    )
+                return 0
         except Exception as exc:
             _LOG.debug("Cupo remoto no disponible para %s: %s", u, exc)
+            _set_error_cupo(f"Sin conexión al servidor de cupo: {exc}")
+            return 0
     info = info_cupo_cuit(u)
     if info is None:
         return 1_000_000_000
@@ -444,7 +457,10 @@ def cupo_cuit_disponible(username: str) -> int:
 
 
 def refrescar_cupo_usuario_remoto(username: str) -> dict[str, Any] | None:
-    """Portable: consulta cupo en el servidor y actualiza caché local."""
+    """Portable: consulta cupo en el servidor y actualiza caché local.
+
+    Con sync activo no se usa el contador local si el servidor no responde.
+    """
     u = resolver_clave_usuario_overlay((username or "").strip())
     if not u:
         return None
@@ -455,8 +471,21 @@ def refrescar_cupo_usuario_remoto(username: str) -> dict[str, Any] | None:
             remoto = info_cupo_cuit_remoto(u)
             if remoto is not None:
                 return remoto
+            return {
+                "cuit_limite": 0,
+                "cuit_usados": 0,
+                "cuit_disponibles": 0,
+                "cuit_ilimitado": False,
+                "error": "sin_servidor",
+            }
     except Exception:
-        pass
+        return {
+            "cuit_limite": 0,
+            "cuit_usados": 0,
+            "cuit_disponibles": 0,
+            "cuit_ilimitado": False,
+            "error": "sin_servidor",
+        }
     return info_cupo_cuit(u)
 
 
@@ -779,6 +808,9 @@ def control_cupo_cuit(username: str | None):
 
     El consumo se confirma al cerrar cada CUIT con éxito. Si el usuario cancela
     durante ese CUIT, no se descuenta; los ya confirmados en el mismo lote sí.
+
+    En portable con sync remoto siempre aplica control (el servidor manda);
+    no se omite por falta de overlay local.
     """
     u = (username or "").strip()
     if not u:
@@ -787,7 +819,17 @@ def control_cupo_cuit(username: str | None):
 
     if es_administrador(u):
         return None, None
-    if info_cupo_cuit(u) is None:
+
+    remoto = False
+    try:
+        from auth import _modo_remoto_activo
+        from auth_registro_db import enabled
+
+        remoto = bool(_modo_remoto_activo()) and not enabled()
+    except Exception:
+        remoto = False
+
+    if not remoto and info_cupo_cuit(u) is None:
         return None, None
 
     def hay_cupo() -> bool:

@@ -776,15 +776,19 @@ def _cuentas_archivo_local() -> dict[str, CuentaUsuario]:
 
 
 def _fusionar_cuentas(
+    preferente: dict[str, CuentaUsuario],
     base: dict[str, CuentaUsuario],
-    extra: dict[str, CuentaUsuario],
 ) -> dict[str, CuentaUsuario]:
-    """Combina listados; ``base`` (local junto al .exe) prevalece sobre ``extra`` (remoto)."""
-    if not extra:
+    """Combina listados; ``preferente`` pisa las claves de ``base``.
+
+    Con sync remoto activo el servidor (caché) es preferente frente a
+    ``auth_users.enc`` local, para vigencia/rol/cupo.
+    """
+    if not preferente:
         return dict(base)
     if not base:
-        return dict(extra)
-    return {**extra, **base}
+        return dict(preferente)
+    return {**base, **preferente}
 
 
 def _load_cuentas_sin_env_json() -> dict[str, CuentaUsuario]:
@@ -795,15 +799,16 @@ def _load_cuentas_sin_env_json() -> dict[str, CuentaUsuario]:
     if _modo_remoto_activo():
         with _lock:
             if _cache_usuarios:
-                return _fusionar_cuentas(locales, _cache_usuarios)
+                # Servidor/caché pisa auth_users.enc local.
+                return _fusionar_cuentas(_cache_usuarios, locales)
         remotos = _actualizar_cache_remota()
         if remotos:
-            return _fusionar_cuentas(locales, remotos)
+            return _fusionar_cuentas(remotos, locales)
         if locales:
             return dict(locales)
         fallback = _usuarios_desde_entorno()
         if fallback:
-            return _fusionar_cuentas(locales, fallback)
+            return _fusionar_cuentas(fallback, locales)
         return {}
 
     if locales:
@@ -829,7 +834,7 @@ def _actualizar_cache_remota(*, forzar: bool = False) -> dict[str, CuentaUsuario
     cuentas, meta = _fetch_remoto()
     locales = _cuentas_archivo_local()
     if cuentas:
-        merged = _fusionar_cuentas(locales, cuentas)
+        merged = _fusionar_cuentas(cuentas, locales)
         _guardar_cache(merged, origen=_remote_url(), meta=meta)
         _sync_overlay_cupo_desde_remoto(meta)
         with _lock:
@@ -845,7 +850,7 @@ def _actualizar_cache_remota(*, forzar: bool = False) -> dict[str, CuentaUsuario
 
     cache, fetched_at = _leer_cache()
     if cache:
-        merged = _fusionar_cuentas(locales, cache)
+        merged = _fusionar_cuentas(cache, locales)
         with _lock:
             _cache_usuarios = merged
             _cache_obtenido_en = fetched_at or time.time()
@@ -927,6 +932,7 @@ def _load_cuentas() -> dict[str, CuentaUsuario]:
     env_cuentas = _usuarios_desde_env_json()
     base = env_cuentas if env_cuentas else _load_cuentas_sin_env_json()
     locales = _cuentas_archivo_local()
+    remoto = _modo_remoto_activo()
     try:
         from auth_registro import cargar_usuarios_overlay, meta_es_admin
 
@@ -939,13 +945,20 @@ def _load_cuentas() -> dict[str, CuentaUsuario]:
                 cuenta = parsed.get(u)
                 if not cuenta:
                     continue
-                if u not in base or meta_es_admin(meta):
+                # Con sync: overlay (reflejo del servidor) manda. Sin sync: admin o altas nuevas.
+                if remoto or u not in base or meta_es_admin(meta):
                     base[u] = cuenta
     except Exception:
         _LOG.debug("Overlay de usuarios registrados no disponible", exc_info=True)
     if locales:
-        for u, cuenta in locales.items():
-            base[u] = cuenta
+        if remoto:
+            # Solo cuentas exclusivas del .enc local (p. ej. admin de fábrica no en Neon).
+            for u, cuenta in locales.items():
+                if u not in base:
+                    base[u] = cuenta
+        else:
+            for u, cuenta in locales.items():
+                base[u] = cuenta
     return base
 
 
