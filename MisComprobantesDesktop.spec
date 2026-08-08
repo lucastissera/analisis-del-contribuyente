@@ -142,6 +142,8 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="static/logo.ico",
+    # -OO: menos asserts/docstrings en bytecode (endurecimiento liviano; no es DRM).
+    optimize=2,
 )
 
 coll = COLLECT(
