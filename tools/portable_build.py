@@ -127,14 +127,52 @@ def main() -> int:
         shutil.copy2(ejemplo_remoto, DIST_DIR / "auth_remote.example.txt")
     _copiar_usuarios_portable()
     _instalar_chromium_portable()
+    _intentar_firma_authenticode()
     print(
         f"\nListo: {DIST_DIR}\n"
         "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n"
         "IMPORTANTE cupo: generá auth_remote.enc con setup_auth_portable.py --token …\n"
-        "  (sync Neon). Sin esto el cupo NO se descuenta en el servidor.\n",
+        "  (sync Neon). Sin esto el cupo NO se descuenta en el servidor.\n"
+        "Firma Authenticode: docs/FIRMA_AUTHENTICODE.md (opcional si AIC_SIGN_PFX).\n",
         flush=True,
     )
     return 0
+
+
+def _intentar_firma_authenticode() -> None:
+    """Si hay AIC_SIGN_PFX, firma el .exe (P2.13). Sin cert: omite sin fallar el build."""
+    pfx = (os.environ.get("AIC_SIGN_PFX") or "").strip()
+    if not pfx:
+        print(
+            "Authenticode: omitido (definí AIC_SIGN_PFX para firmar; ver docs/FIRMA_AUTHENTICODE.md).",
+            flush=True,
+        )
+        return
+    ps1 = ROOT / "tools" / "firmar_portable.ps1"
+    if not ps1.is_file():
+        print(f"Aviso: no está {ps1}", file=sys.stderr)
+        return
+    exe = DIST_DIR / f"{APP_EXE_BASENAME}.exe"
+    env = os.environ.copy()
+    env.setdefault("AIC_SIGN_EXE", str(exe))
+    print("Authenticode: ejecutando firmar_portable.ps1…", flush=True)
+    r = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ps1),
+        ],
+        cwd=str(ROOT),
+        env=env,
+    )
+    if r.returncode != 0:
+        print(
+            "AVISO: falló la firma Authenticode (el build del portable igual quedó).",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

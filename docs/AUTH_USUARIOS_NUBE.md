@@ -95,6 +95,8 @@ AUTH_USERS_REFRESH_SEC=120
 
 **Entitlement firmado (Ed25519):** el mismo login puede devolver un JSON firmado de vida corta (cupo/vigencia). El portable lo guarda cifrado y, sin red, lo usa como tope confiable (no el contador local editable). Requiere `AUTH_ENTITLEMENT_PRIVATE_KEY` en Render (`python tools/generar_entitlement_keys.py`). TTL default 48 h (`AUTH_ENTITLEMENT_TTL_SEC`).
 
+**Authenticode:** firma digital del `.exe` en Windows (SmartScreen). Ver `docs/FIRMA_AUTHENTICODE.md` y `tools/firmar_portable.ps1`.
+
 **Rotación segura:** `python tools/rotar_auth_remote_token.py` genera un token nuevo. En Render poné el nuevo en `AUTH_USERS_REMOTE_TOKEN` y el viejo en `AUTH_USERS_REMOTE_TOKEN_PREVIOUS` (ambos válidos hasta redistribuir portables). Luego `--aplicar` en local y, cuando no queden copias viejas, borrá `PREVIOUS`. Alternativa más cerrada: solo `auth_users.enc` sin sync remota (sin clientes Neon automáticos).
 
 ## Desarrollo local y build portable

@@ -3,6 +3,8 @@
 .env.local
 .auth_token_rotation.local
 .entitlement_private.key
+*.pfx
+*.p12
 
 # Credenciales reales — NO subir a Git / Render (usar *.example.* como plantilla)
 auth_users.json

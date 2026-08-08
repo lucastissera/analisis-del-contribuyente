@@ -1,0 +1,18 @@
+# Dependencias de alto nivel (editar acá).
+# Regenerar el lockfile pineado:
+#   python tools/actualizar_lockfile.py
+#
+# Render / build usan requirements.txt (versiones exactas).
+
+pandas>=2.0.0
+openpyxl>=3.1.0
+flask>=3.0.0
+flask-wtf>=1.2.0
+python-dotenv>=1.0.0
+gunicorn>=22.0.0
+playwright>=1.46.0
+cryptography>=42.0.0
+bcrypt>=4.0.0
+psycopg2-binary>=2.9.9
+pillow>=10.0.0
+pdfplumber>=0.11.0
