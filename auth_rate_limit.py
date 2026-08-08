@@ -6,13 +6,15 @@ tiene su contador; para multi-nodo haría falta Redis u otro store compartido.
 Variables opcionales (intentos / ventana en segundos):
 
   AUTH_RL_LOGIN_MAX=10
-  AUTH_RL_LOGIN_WINDOW=900
+  AUTH_RL_LOGIN_WINDOW=300
   AUTH_RL_ALTA_MAX=5
   AUTH_RL_ALTA_WINDOW=3600
   AUTH_RL_RESET_MAX=5
   AUTH_RL_RESET_WINDOW=3600
   AUTH_RL_VERIFY_MAX=20
-  AUTH_RL_VERIFY_WINDOW=900
+  AUTH_RL_VERIFY_WINDOW=300
+
+Login/verify se limitan por usuario (no por IP), para no bloquear otras cuentas.
 """
 
 from __future__ import annotations
@@ -73,6 +75,15 @@ def comprobar_limite(
         if registrar:
             q.append(ahora)
         return True, 0
+
+
+def limpiar_limite(bucket: str, clave: str) -> None:
+    """Borra el contador (p. ej. tras login OK de ese usuario)."""
+    b = (bucket or "login").strip().lower() or "login"
+    k = (clave or "anon").strip().lower() or "anon"
+    key = f"{b}:{k}"
+    with _lock:
+        _hits.pop(key, None)
 
 
 def reset_limites_tests() -> None:

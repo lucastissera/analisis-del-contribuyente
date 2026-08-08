@@ -1004,6 +1004,34 @@ def _rate_limit_bloqueado(bucket: str, *claves: str):
     return None
 
 
+def _clave_rl_por_usuario(usuario: str) -> str:
+    """Clave de rate-limit por cuenta (no por IP)."""
+    u = (usuario or "").strip().lower()
+    return f"user:{u}" if u else "user:anon"
+
+
+def _rate_limit_usuario_consulta(bucket: str, usuario: str):
+    """Consulta bloqueo por usuario sin registrar intento. None = permitido."""
+    from auth_rate_limit import comprobar_limite
+
+    ok, retry = comprobar_limite(bucket, _clave_rl_por_usuario(usuario), registrar=False)
+    return None if ok else retry
+
+
+def _rate_limit_usuario_fallo(bucket: str, usuario: str) -> None:
+    """Suma un intento fallido solo para esa cuenta."""
+    from auth_rate_limit import comprobar_limite
+
+    comprobar_limite(bucket, _clave_rl_por_usuario(usuario), registrar=True)
+
+
+def _rate_limit_usuario_ok(bucket: str, usuario: str) -> None:
+    """Limpia el contador tras login correcto de esa cuenta."""
+    from auth_rate_limit import limpiar_limite
+
+    limpiar_limite(bucket, _clave_rl_por_usuario(usuario))
+
+
 def _respuesta_rate_limit(retry_after: int, *, api: bool = False):
     lg = normalize_lang(session.get("lang"))
     msg = tr(lg, "err_rate_limit", minutos=max(1, (int(retry_after) + 59) // 60))
@@ -1806,7 +1834,8 @@ def login():
         next_val = (request.form.get("next") or "").strip()
         user = (request.form.get("usuario") or "").strip()
         pwd = request.form.get("password") or ""
-        rl = _rate_limit_bloqueado("login", _client_ip(), f"user:{user.lower()}" if user else "")
+        # Bloqueo por usuario (no por IP): otra cuenta con clave correcta puede entrar.
+        rl = _rate_limit_usuario_consulta("login", user)
         if rl is not None:
             lg = normalize_lang(session.get("lang"))
             return render_template(
@@ -1835,6 +1864,7 @@ def login():
         if motivo is None:
             from auth import _resolver_clave_usuario, forzar_sync_usuarios_remoto
 
+            _rate_limit_usuario_ok("login", user)
             session["user"] = _resolver_clave_usuario(user)
             session["es_admin"] = es_administrador(session["user"])
             session["last_activity"] = time.time()
@@ -1848,6 +1878,7 @@ def login():
             except Exception:
                 pass
             return redirect(_safe_internal_path(next_val or request.args.get("next")))
+        _rate_limit_usuario_fallo("login", user)
         lg = normalize_lang(session.get("lang"))
         login_error_pending = motivo == "pending_approval"
         login_error_suspended = motivo == "suspended"
@@ -3761,9 +3792,7 @@ def api_auth_verificar():
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
-    rl = _rate_limit_bloqueado(
-        "verify", _client_ip(), f"user:{(usuario or '').lower()}" if usuario else ""
-    )
+    rl = _rate_limit_usuario_consulta("verify", usuario)
     if rl is not None:
         return _respuesta_rate_limit(rl, api=True)
     if not usuario or not password:
@@ -3773,6 +3802,7 @@ def api_auth_verificar():
         from auth import _resolver_clave_usuario
         from auth_dispositivos import emitir_token_dispositivo
 
+        _rate_limit_usuario_ok("verify", usuario)
         clave = _resolver_clave_usuario(usuario)
         try:
             device_token = emitir_token_dispositivo(clave, etiqueta="portable")
@@ -3787,6 +3817,7 @@ def api_auth_verificar():
         if device_token:
             payload["device_token"] = device_token
         return jsonify(payload)
+    _rate_limit_usuario_fallo("verify", usuario)
     return jsonify({"ok": False, "motivo": motivo}), 401
 
 
