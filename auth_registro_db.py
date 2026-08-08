@@ -20,6 +20,7 @@ _BLOBS = (
     "solicitudes_pendientes",
     "altas_completadas",
     "dispositivos_api",
+    "auditoria_admin",
 )
 
 

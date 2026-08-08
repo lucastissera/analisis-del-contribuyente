@@ -977,6 +977,47 @@ def _contexto_legal_template() -> dict:
     }
 
 
+def _client_ip() -> str:
+    """IP del cliente (respeta X-Forwarded-For de Render/Cloudflare)."""
+    xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    if xff:
+        return xff[:64]
+    return ((request.remote_addr or "").replace("::ffff:", "") or "anon")[:64]
+
+
+def _rate_limit_bloqueado(bucket: str, *claves: str):
+    """Si alguna clave supera el límite, devuelve (retry_after_sec); si no, None."""
+    from auth_rate_limit import comprobar_limite
+
+    keys = [k.strip() for k in claves if (k or "").strip()]
+    if not keys:
+        keys = [_client_ip()]
+    peor = 0
+    for k in keys:
+        ok, retry = comprobar_limite(bucket, k, registrar=False)
+        if not ok:
+            peor = max(peor, retry)
+    if peor > 0:
+        return peor
+    for k in keys:
+        comprobar_limite(bucket, k, registrar=True)
+    return None
+
+
+def _respuesta_rate_limit(retry_after: int, *, api: bool = False):
+    lg = normalize_lang(session.get("lang"))
+    msg = tr(lg, "err_rate_limit", minutos=max(1, (int(retry_after) + 59) // 60))
+    if api:
+        resp = jsonify(
+            {"error": "rate_limit", "retry_after": int(retry_after), "mensaje": msg}
+        )
+        resp.status_code = 429
+    else:
+        resp = Response(msg, status=429, mimetype="text/plain; charset=utf-8")
+    resp.headers["Retry-After"] = str(max(1, int(retry_after)))
+    return resp
+
+
 @app.get("/legal/terminos")
 def legal_terminos():
     return render_template("legal/terminos.html", **_contexto_legal_template())
@@ -1042,6 +1083,10 @@ def solicitar_acceso():
                 normalizar_cuit,
                 notificar_admin_nueva_solicitud_async,
             )
+
+            rl = _rate_limit_bloqueado("alta", _client_ip())
+            if rl is not None:
+                return _respuesta_rate_limit(rl)
 
             cuit = (request.form.get("cuit") or "").strip()
             email = (request.form.get("email") or "").strip()
@@ -1175,6 +1220,9 @@ def activar_cuenta(token: str):
 
         error_msg = None
         if request.method == "POST":
+            rl = _rate_limit_bloqueado("activar", _client_ip(), (token or "")[:24])
+            if rl is not None:
+                return _respuesta_rate_limit(rl)
             pwd = request.form.get("password") or ""
             pwd2 = request.form.get("password2") or ""
             if pwd != pwd2:
@@ -1288,8 +1336,18 @@ def admin_altas_usuarios():
     enlace_generado = session.pop("admin_enlace_alta", None)
 
     if request.method == "POST":
+        from auth_auditoria import registrar_accion_admin
+
         accion = (request.form.get("accion") or "").strip()
         cuit = (request.form.get("cuit") or "").strip()
+        actor = (session.get("user") or "").strip()
+        if accion:
+            registrar_accion_admin(
+                actor,
+                accion,
+                objetivo=cuit,
+                ip=_client_ip(),
+            )
         if accion == "aprobar":
             if aprobar_cuenta(cuit):
                 flash(
@@ -1521,7 +1579,10 @@ def admin_altas_usuarios():
                 )
         return redirect(url_for("admin_altas_usuarios"))
 
+    from auth_auditoria import listar_acciones_admin
+
     altas = listar_altas_recientes(40)
+    auditoria_admin = listar_acciones_admin(30)
     from datetime import date as _date_cls, timedelta as _td_cls
 
     fecha_default_alta = (_date_cls.today() + _td_cls(days=_dias_suscripcion())).isoformat()
@@ -1538,6 +1599,7 @@ def admin_altas_usuarios():
         pendientes=listar_pendientes_aprobacion(overlay_usuarios),
         suscriptores=listar_usuarios_suscripcion(overlay_usuarios),
         altas=altas,
+        auditoria_admin=auditoria_admin,
         enlace_generado=enlace_generado,
         dias_suscripcion=_dias_suscripcion(),
         fecha_default_alta=fecha_default_alta,
@@ -1672,6 +1734,9 @@ def olvide_contrasena():
             session.pop("reset_email", None)
 
     if request.method == "POST":
+        rl = _rate_limit_bloqueado("reset", _client_ip())
+        if rl is not None:
+            return _respuesta_rate_limit(rl)
         accion = (request.form.get("paso") or "identificar").strip()
         if accion == "identificar":
             cuit = (request.form.get("cuit") or "").strip()
@@ -1741,6 +1806,19 @@ def login():
         next_val = (request.form.get("next") or "").strip()
         user = (request.form.get("usuario") or "").strip()
         pwd = request.form.get("password") or ""
+        rl = _rate_limit_bloqueado("login", _client_ip(), f"user:{user.lower()}" if user else "")
+        if rl is not None:
+            lg = normalize_lang(session.get("lang"))
+            return render_template(
+                "login.html",
+                login_error=True,
+                login_error_msg=tr(
+                    lg, "err_rate_limit", minutos=max(1, (int(rl) + 59) // 60)
+                ),
+                next=next_val,
+                whatsapp_url=whatsapp_new_user_url(),
+                alta_publica=alta_publica_habilitada(),
+            ), 429
         try:
             motivo = verificar_acceso(user, pwd)
         except Exception as exc:
@@ -3683,6 +3761,11 @@ def api_auth_verificar():
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
+    rl = _rate_limit_bloqueado(
+        "verify", _client_ip(), f"user:{(usuario or '').lower()}" if usuario else ""
+    )
+    if rl is not None:
+        return _respuesta_rate_limit(rl, api=True)
     if not usuario or not password:
         return jsonify({"ok": False, "motivo": "invalid"}), 400
     motivo = verificar_acceso(usuario, password)

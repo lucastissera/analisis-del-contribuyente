@@ -70,6 +70,7 @@ _STORE_FILES: dict[str, str] = {
     "solicitudes_pendientes": "solicitudes_pendientes.json",
     "altas_completadas": "altas_completadas.json",
     "dispositivos_api": "dispositivos_api.json",
+    "auditoria_admin": "auditoria_admin.json",
 }
 
 _integridad_store_ok: bool | None = None

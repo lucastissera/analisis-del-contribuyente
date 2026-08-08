@@ -515,6 +515,32 @@
         </tbody>
       </table>
       {% endif %}
+
+      <h2 style="margin-top: 1.75rem;">{{ t('admin_auditoria_titulo') }}</h2>
+      {% if not auditoria_admin %}
+      <p class="help">{{ t('admin_auditoria_vacio') }}</p>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t('admin_auditoria_col_fecha') }}</th>
+            <th>{{ t('admin_auditoria_col_actor') }}</th>
+            <th>{{ t('admin_auditoria_col_accion') }}</th>
+            <th>{{ t('admin_auditoria_col_objetivo') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in auditoria_admin %}
+          <tr>
+            <td>{{ e.ts or '—' }}</td>
+            <td>{{ e.actor or '—' }}</td>
+            <td>{{ e.accion or '—' }}</td>
+            <td>{{ e.objetivo or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
     </div>
     <script type="application/json" id="i18n-js">{{ i18n_js | tojson }}</script>
     <script src="{{ url_for('static', filename='clave_fiscal.js') }}"></script>
