@@ -262,6 +262,40 @@ csrf = CSRFProtect(app)
 # download_id -> (bytes, nombre_archivo, mimetype)
 DESCARGAS: dict[str, tuple[bytes, str, str]] = {}
 
+# CSP básica compatible con scripts/estilos inline actuales y SheetJS (inversiones).
+_SECURITY_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.sheetjs.com; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' https://api.bluelytics.com.ar; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.after_request
+def _cabeceras_seguridad(resp: Response):
+    """Cabeceras HTTP defensivas (punto 7 auditoría): nosniff, anti-clickjacking, CSP."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    resp.headers.setdefault("Content-Security-Policy", _SECURITY_CSP)
+    if _en_prod_cookies:
+        resp.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return resp
+
+
 from cuit_en_arca.entrega_web import init_descargas  # noqa: E402
 
 init_descargas(DESCARGAS)
