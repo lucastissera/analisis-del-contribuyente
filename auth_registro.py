@@ -1156,12 +1156,9 @@ def _cargar_overlay_completo() -> dict[str, Any]:
             )
         elif box["err"] is not None:
             _LOG.warning("Error leyendo usuarios_registrados: %s", box["err"])
-        vacio = {"version": 1, "users": {}}
-        with _overlay_mem_lock:
-            # Cache corto del vacío para no martillar Neon en cada intento de login.
-            _overlay_mem_cache = vacio
-            _overlay_mem_cache_at = time.time()
-        return vacio
+        # No cachear vacío largo: un timeout no debe dejar a /api/auth-users
+        # sin usuarios (rompe sync de portables / Estudio DyC).
+        return {"version": 1, "users": {}}
 
     with _overlay_mem_lock:
         _overlay_mem_cache = box["data"]

@@ -299,13 +299,16 @@ def _url_remota_apunta_a_este_servidor(url: str) -> bool:
 
 
 def _modo_remoto_activo() -> bool:
-    """Remoto solo para portables/clientes. En el propio servidor web no aplica."""
+    """Remoto para portables/clientes locales.
+
+    En Render el servidor es la fuente (Neon): no sincroniza desde AUTH_USERS_URL.
+    Importante: NO desactivar solo porque la URL sea *.onrender.com — eso rompe el
+    login local/portable de usuarios Estudio DyC y demás altas en Neon.
+    """
     url = _remote_url()
     if not url:
         return False
-    if _url_remota_apunta_a_este_servidor(url):
-        return False
-    # En Render el servidor es la fuente (Neon / AUTH_USERS_JSON), no un cliente remoto.
+    # Solo cuando este proceso ES el servidor web en Render.
     if (os.environ.get("RENDER") or "").strip():
         return False
     return True
@@ -576,8 +579,8 @@ def export_users_payload() -> dict[str, Any]:
                     if meta.get("pendiente_aprobacion") or meta.get("activo") is False:
                         if not meta_es_admin(meta):
                             continue
-                    if u not in users or meta_es_admin(meta):
-                        users[u] = meta
+                    # Neon es fuente de verdad: siempre pisa AUTH_USERS_JSON legacy.
+                    users[u] = meta
     except Exception:
         pass
     return payload
