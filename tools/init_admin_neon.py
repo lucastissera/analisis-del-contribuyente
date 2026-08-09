@@ -4,7 +4,7 @@
 Uso (con DATABASE_URL en el entorno):
 
     python tools/init_admin_neon.py
-    python tools/init_admin_neon.py --user Lucas --password "Lucas1992."
+    python tools/init_admin_neon.py --user Lucas --password "CAMBIAR_POR_UN_SECRETO_UNICO"
 
 Variables opcionales: AUTH_ADMIN_USER, AUTH_ADMIN_PASSWORD, AUTH_ADMIN_VALIDO_HASTA.
 """

@@ -474,14 +474,25 @@ def _fetch_remoto() -> tuple[dict[str, CuentaUsuario], dict[str, Any] | None]:
         with urlopen(req, timeout=20) as resp:
             raw = resp.read()
         data = json.loads(raw.decode("utf-8-sig"))
+        if isinstance(data, dict) and data.get("error") in ("gone", "disabled"):
+            _LOG.info(
+                "Sync /api/auth-users deshabilitado en servidor; login vía /api/auth/verificar."
+            )
+            return {}, None
         cuentas = _parse_users_payload(data)
         if not cuentas:
-            _LOG.warning("Listado remoto de usuarios vacío (%s)", url)
+            _LOG.debug("Listado remoto de usuarios vacío (%s)", url)
             return {}, data if isinstance(data, dict) else None
         meta = data if isinstance(data, dict) else None
         return cuentas, meta
     except HTTPError as exc:
-        _LOG.warning("HTTP %s al descargar usuarios remotos: %s", exc.code, url)
+        if exc.code in (404, 410):
+            _LOG.info(
+                "HTTP %s en listado remoto (deshabilitado); usar /api/auth/verificar.",
+                exc.code,
+            )
+        else:
+            _LOG.warning("HTTP %s al descargar usuarios remotos: %s", exc.code, url)
     except URLError as exc:
         _LOG.warning("Sin conexión al listado remoto de usuarios: %s", exc.reason)
     except (json.JSONDecodeError, TimeoutError, OSError, ValueError) as exc:
@@ -704,8 +715,26 @@ def _intentar_verificar_remoto(
     token = _remote_token()
     if not token:
         return None
+    device_id = ""
+    public_key = ""
+    etiqueta = "portable"
+    try:
+        from auth_instalacion import etiqueta_instalacion, identidad_instalacion
+
+        ident = identidad_instalacion()
+        device_id = ident.get("device_id") or ""
+        public_key = ident.get("public_key") or ""
+        etiqueta = etiqueta_instalacion()
+    except Exception:
+        _LOG.debug("Sin identidad de instalación local", exc_info=True)
     body = json.dumps(
-        {"usuario": (username or "").strip(), "password": password or ""},
+        {
+            "usuario": (username or "").strip(),
+            "password": password or "",
+            "device_id": device_id,
+            "public_key": public_key,
+            "etiqueta": etiqueta,
+        },
         ensure_ascii=False,
     ).encode("utf-8")
     headers = {
@@ -767,6 +796,12 @@ def _intentar_verificar_remoto(
                 guardar_entitlement_local(clave, ent_blob)
             except Exception:
                 _LOG.debug("No se pudo guardar entitlement del login remoto", exc_info=True)
+        perfil = data.get("perfil")
+        if isinstance(perfil, dict) and clave:
+            try:
+                _sync_overlay_cupo_desde_remoto({"users": {clave: perfil}})
+            except Exception:
+                _LOG.debug("No se pudo sync perfil post-login", exc_info=True)
         return True, None
     return False, str(data.get("motivo") or "invalid")
 

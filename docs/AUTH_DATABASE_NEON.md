@@ -44,7 +44,7 @@ Sin `DATABASE_URL`, la app sigue usando archivos JSON locales (portables y desar
 
 ```bash
 set AUTH_ADMIN_USER=Lucas
-set AUTH_ADMIN_PASSWORD=Lucas1992.
+set AUTH_ADMIN_PASSWORD=CAMBIAR_POR_UN_SECRETO_UNICO
 set DATABASE_URL=postgresql://...
 python tools/init_admin_neon.py
 ```

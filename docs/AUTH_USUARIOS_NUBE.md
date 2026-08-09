@@ -40,13 +40,13 @@ Ejemplo con administrador, vencimiento y metadatos:
   "updated_at": "2026-06-08T15:30:00+00:00",
   "users": {
     "Lucas": {
-      "password": "Lucas1992.",
+      "password": "CAMBIAR_POR_UN_SECRETO_UNICO",
       "rol": "admin",
       "valido_hasta": "2027-06-08"
     },
     "juan": {
-      "password": "clave-segura-2",
-      "email": "juan@gmail.com",
+      "password": "CAMBIAR_POR_OTRO_SECRETO",
+      "email": "juan@example.com",
       "valido_desde": "2026-01-01",
       "valido_hasta": "2027-06-08",
       "activo": true
@@ -65,14 +65,16 @@ Ejemplo con administrador, vencimiento y metadatos:
 En el dashboard de Render → **Environment** (como *Secret*):
 
 ```env
-AUTH_USERS_JSON={"version":1,"users":{"Lucas":{"password":"Lucas1992.","rol":"admin","valido_hasta":"2027-06-08"},"prueba":{"password":"prueba","valido_hasta":"2026-06-30"}}}
+# Preferido: Neon (DATABASE_URL) + AUTH_ADMIN_USER / AUTH_ADMIN_PASSWORD de respaldo.
+# AUTH_USERS_JSON es legacy; si existe, usá placeholders (nunca contraseñas reales).
 AUTH_USERS_REMOTE_TOKEN=un-token-largo-y-secreto
 AUTH_ADMIN_USER=Lucas
+AUTH_CUPO_REQUIRE_DEVICE=1
 ```
 
-Para editar usuarios: modificás `AUTH_USERS_JSON` en el dashboard y guardás (Render redeploya solo).
+Los usuarios viven en Neon. No exportes el directorio completo a portables: `/api/auth-users` responde **410** salvo escape `AUTH_EXPORT_AUTH_USERS=1`.
 
-**Portables** — archivo `auth_remote.txt` junto al `.exe`:
+**Portables** — `auth_remote.enc` (o `.txt`) junto al `.exe` con URL + token. El login usa `POST /api/auth/verificar` (la URL de sync puede seguir apuntando a `/api/auth-users` solo para derivar la base):
 
 ```text
 https://analisisdelcontribuyente.onrender.com/api/auth-users
@@ -89,9 +91,9 @@ AUTH_USERS_REFRESH_SEC=120
 
 **Importante (portable):** si existen **`auth_remote`** y **`auth_users.enc`** juntos, el `.enc` **no se ignora** del todo: sirve para un **admin de fábrica** que no esté en Neon. Para el **mismo usuario** que ya viene del servidor, manda la ficha remota (vigencia, cupo, rol). El cupo se consulta y descuenta solo en el servidor; sin conexión el portable **no** procesa CUITs (no se confía en el contador local).
 
-**Token en `auth_remote.txt` / `.enc`:** es un secreto de cliente embebido en la carpeta del `.exe` para **sync y login** (`/api/auth-users`, `/api/auth/verificar`). Impide que terceros descarguen el listado sin el portable, pero **no** protege contra quien ya tiene la carpeta. No commitear; rotar en Render si se expone.
+**Token en `auth_remote.txt` / `.enc`:** bootstrap para `POST /api/auth/verificar` (y escape legacy de `/api/auth-users`). No commitear; rotar en Render si se expone. El directorio global de usuarios **ya no se exporta** por defecto (HTTP 410).
 
-**Token de dispositivo (`dev_…`):** tras un login OK en `/api/auth/verificar`, el servidor emite un Bearer ligado al usuario. El portable lo usa para cupo/uso; ese token **no** puede bajar el listado global ni gastar cupo de otro usuario. Corte opcional en Render: `AUTH_CUPO_REQUIRE_DEVICE=1` (deja de aceptar el Bearer global en cupo/uso).
+**Token de dispositivo (`dev_…`):** tras login OK se emite un Bearer ligado a usuario + `device_id` de instalación. Cupo/uso **exigen** ese token (el Bearer global ya no sirve para cupo). Panel admin → Altas → sección Dispositivos (revocar / renombrar).
 
 **Entitlement firmado (Ed25519):** el mismo login puede devolver un JSON firmado de vida corta (cupo/vigencia). El portable lo guarda cifrado y, sin red, lo usa como tope confiable (no el contador local editable). Requiere `AUTH_ENTITLEMENT_PRIVATE_KEY` en Render (`python tools/generar_entitlement_keys.py`). TTL default 48 h (`AUTH_ENTITLEMENT_TTL_SEC`).
 

@@ -25,19 +25,33 @@ try:
 except ImportError:
     pass
 
+# Nunca operar contra Neon/Render reales desde este script.
+for _k in (
+    "DATABASE_URL",
+    "AUTH_DATABASE_URL",
+    "RENDER",
+    "AUTH_USERS_REMOTE_TOKEN",
+    "AUTH_EXPORT_AUTH_USERS",
+):
+    os.environ.pop(_k, None)
+
 # Directorio aislado para la prueba
 _TEST_DIR = Path(tempfile.mkdtemp(prefix="aic_alta_test_"))
 os.environ["AUTH_REGISTRATIONS_DIR"] = str(_TEST_DIR)
 os.environ.setdefault("AUTH_ALTA_PUBLICA", "1")
 os.environ.setdefault("AUTH_SUBSCRIPTION_DAYS", "30")
 
-# Admin mínimo si no hay AUTH_USERS_JSON
+# Admin mínimo aislado (password aleatoria por corrida; no hardcodear secretos reales)
+import secrets as _secrets
+
+_ADMIN_TEST_PASS = _secrets.token_urlsafe(16)
 if not (os.environ.get("AUTH_USERS_JSON") or "").strip():
     os.environ["AUTH_USERS_JSON"] = (
-        '{"version":1,"users":{"admin_test":{"password":"AdminTest123!","rol":"admin","valido_hasta":"2099-12-31"}}}'
+        '{"version":1,"users":{"admin_test":{"password":%s,"rol":"admin","valido_hasta":"2099-12-31"}}}'
+        % (__import__("json").dumps(_ADMIN_TEST_PASS))
     )
     _ADMIN_USER = "admin_test"
-    _ADMIN_PASS = "AdminTest123!"
+    _ADMIN_PASS = _ADMIN_TEST_PASS
 else:
     import json as _json
 

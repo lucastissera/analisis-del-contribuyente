@@ -1370,10 +1370,13 @@ def admin_altas_usuarios():
         cuit = (request.form.get("cuit") or "").strip()
         actor = (session.get("user") or "").strip()
         if accion:
+            objetivo_audit = cuit
+            if accion in ("revocar_dispositivo", "renombrar_dispositivo"):
+                objetivo_audit = (request.form.get("token_hash") or "")[:16]
             registrar_accion_admin(
                 actor,
                 accion,
-                objetivo=cuit,
+                objetivo=objetivo_audit,
                 ip=_client_ip(),
             )
         if accion == "aprobar":
@@ -1605,12 +1608,31 @@ def admin_altas_usuarios():
                     ),
                     "warning",
                 )
+        elif accion == "revocar_dispositivo":
+            from auth_dispositivos import revocar_dispositivo
+
+            th = (request.form.get("token_hash") or "").strip()
+            if revocar_dispositivo(th, por=actor or "admin"):
+                flash(tr(lg, "admin_disp_ok_revocado"), "success")
+            else:
+                flash(tr(lg, "admin_disp_err"), "warning")
+        elif accion == "renombrar_dispositivo":
+            from auth_dispositivos import renombrar_dispositivo
+
+            th = (request.form.get("token_hash") or "").strip()
+            etiq = (request.form.get("etiqueta") or "").strip()
+            if renombrar_dispositivo(th, etiq):
+                flash(tr(lg, "admin_disp_ok_renombrado"), "success")
+            else:
+                flash(tr(lg, "admin_disp_err"), "warning")
         return redirect(url_for("admin_altas_usuarios"))
 
     from auth_auditoria import listar_acciones_admin
+    from auth_dispositivos import listar_dispositivos
 
     altas = listar_altas_recientes(40)
     auditoria_admin = listar_acciones_admin(30)
+    dispositivos = listar_dispositivos(incluir_revocados=True)
     from datetime import date as _date_cls, timedelta as _td_cls
 
     fecha_default_alta = (_date_cls.today() + _td_cls(days=_dias_suscripcion())).isoformat()
@@ -1628,6 +1650,7 @@ def admin_altas_usuarios():
         suscriptores=listar_usuarios_suscripcion(overlay_usuarios),
         altas=altas,
         auditoria_admin=auditoria_admin,
+        dispositivos=dispositivos,
         enlace_generado=enlace_generado,
         dias_suscripcion=_dias_suscripcion(),
         fecha_default_alta=fecha_default_alta,
@@ -3749,45 +3772,82 @@ def _auth_api_remota():
 
 
 def _usuario_desde_auth_cupo(pedido: str) -> tuple[str | None, tuple | None]:
-    """Resuelve usuario para cupo/uso. Device token manda; body no puede suplantar.
+    """Resuelve usuario para cupo/uso. Solo device token; body no puede suplantar.
 
     Returns:
         (clave, None) OK; (None, (jsonify..., status)) error HTTP.
     """
-    from auth_dispositivos import cupo_exige_device_token
     from auth_registro import resolver_clave_usuario_overlay
 
     auth = _auth_api_remota()
     if auth is None:
         return None, (jsonify({"error": "unauthorized"}), 401)
     tipo, usuario_token = auth
-    pedido_u = (pedido or "").strip()
-    if tipo == "device":
-        if not usuario_token:
-            return None, (jsonify({"error": "unauthorized"}), 401)
-        if pedido_u and pedido_u != usuario_token:
-            # No permitir gastar cupo de otro usuario con token ajeno.
-            clave_ped = resolver_clave_usuario_overlay(pedido_u) or pedido_u
-            clave_tok = resolver_clave_usuario_overlay(usuario_token) or usuario_token
-            if clave_ped != clave_tok:
-                return None, (jsonify({"error": "usuario_no_coincide"}), 403)
-        clave = resolver_clave_usuario_overlay(usuario_token) or usuario_token
-        return clave, None
-    # Token global (compatibilidad). Opcionalmente exigir device.
-    if cupo_exige_device_token():
+    if tipo != "device" or not usuario_token:
         return None, (jsonify({"error": "device_token_requerido"}), 401)
-    if not pedido_u:
-        return None, (jsonify({"error": "usuario_requerido"}), 400)
-    return (resolver_clave_usuario_overlay(pedido_u) or pedido_u), None
+    pedido_u = (pedido or "").strip()
+    if pedido_u and pedido_u != usuario_token:
+        clave_ped = resolver_clave_usuario_overlay(pedido_u) or pedido_u
+        clave_tok = resolver_clave_usuario_overlay(usuario_token) or usuario_token
+        if clave_ped != clave_tok:
+            return None, (jsonify({"error": "usuario_no_coincide"}), 403)
+    clave = resolver_clave_usuario_overlay(usuario_token) or usuario_token
+    return clave, None
+
+
+def _perfil_publico_usuario(clave: str) -> dict:
+    """Metadatos sin secretos para el propio usuario (post-login /api)."""
+    from auth import _meta_sin_secretos
+
+    perfil: dict = {"usuario": clave}
+    try:
+        from auth_registro import cargar_usuarios_overlay, info_cupo_cuit, info_suscripcion_usuario
+
+        meta = (cargar_usuarios_overlay() or {}).get(clave)
+        if isinstance(meta, dict):
+            perfil.update(_meta_sin_secretos(meta))
+        cupo = info_cupo_cuit(clave)
+        if isinstance(cupo, dict):
+            perfil.update(
+                {
+                    "cuit_limite": cupo.get("cuit_limite"),
+                    "cuit_usados": cupo.get("cuit_usados"),
+                    "cuit_disponibles": cupo.get("cuit_disponibles"),
+                    "cuit_ilimitado": cupo.get("cuit_ilimitado"),
+                }
+            )
+        sus = info_suscripcion_usuario(clave)
+        if isinstance(sus, dict):
+            vh = sus.get("valido_hasta")
+            perfil["valido_hasta"] = (
+                vh.isoformat() if hasattr(vh, "isoformat") else sus.get("valido_hasta_fmt") or vh
+            )
+            perfil["dias_restantes"] = sus.get("dias_restantes")
+    except Exception:
+        logging.getLogger(__name__).debug("Perfil público incompleto", exc_info=True)
+    return perfil
 
 
 @app.get("/api/auth-users")
 @csrf.exempt
 def api_auth_users():
-    """Metadatos de usuarios para sync de portables (solo Bearer global)."""
+    """Deshabilitado por defecto (Fase 1.2). Escape: AUTH_EXPORT_AUTH_USERS=1."""
     auth = _auth_api_remota()
     if auth is None or auth[0] != "global":
         return jsonify({"error": "unauthorized"}), 401
+    flag = (os.environ.get("AUTH_EXPORT_AUTH_USERS") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on", "si", "sí"):
+        return (
+            jsonify(
+                {
+                    "error": "gone",
+                    "message": "Usá POST /api/auth/verificar; el directorio global ya no se exporta.",
+                    "credentials_omitted": True,
+                    "users": {},
+                }
+            ),
+            410,
+        )
     return jsonify(export_users_payload())
 
 
@@ -3801,7 +3861,9 @@ def api_auth_verificar():
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
-    # Mismo bucket "login" que la web: el bloqueo por intentos vale también en portable.
+    device_id = (data.get("device_id") or "").strip()[:120]
+    public_key = (data.get("public_key") or "").strip()[:200]
+    etiqueta = (data.get("etiqueta") or "portable").strip()[:80] or "portable"
     rl = _rate_limit_usuario_consulta("login", usuario)
     if rl is not None:
         return _respuesta_rate_limit(rl, api=True)
@@ -3815,7 +3877,12 @@ def api_auth_verificar():
         _rate_limit_usuario_ok("login", usuario)
         clave = _resolver_clave_usuario(usuario)
         try:
-            device_token = emitir_token_dispositivo(clave, etiqueta="portable")
+            device_token = emitir_token_dispositivo(
+                clave,
+                etiqueta=etiqueta,
+                device_id=device_id,
+                public_key=public_key,
+            )
         except Exception:
             logging.getLogger(__name__).exception("No se pudo emitir device token")
             device_token = ""
@@ -3823,13 +3890,15 @@ def api_auth_verificar():
             "ok": True,
             "usuario": clave,
             "es_admin": es_administrador(clave),
+            "device_id": device_id,
+            "perfil": _perfil_publico_usuario(clave),
         }
         if device_token:
             payload["device_token"] = device_token
         try:
             from auth_entitlements import emitir_entitlement_usuario
 
-            firmado = emitir_entitlement_usuario(clave)
+            firmado = emitir_entitlement_usuario(clave, device_id=device_id)
             if firmado:
                 payload["entitlement_signed"] = firmado
         except Exception:
@@ -3839,10 +3908,20 @@ def api_auth_verificar():
     return jsonify({"ok": False, "motivo": motivo}), 401
 
 
+@app.get("/api/auth/perfil")
+@csrf.exempt
+def api_auth_perfil():
+    """Metadatos del propio usuario (solo device token)."""
+    clave, err = _usuario_desde_auth_cupo("")
+    if err is not None:
+        return err
+    return jsonify({"ok": True, "usuario": clave, "perfil": _perfil_publico_usuario(clave)})
+
+
 @app.get("/api/cupo/info")
 @csrf.exempt
 def api_cupo_info():
-    """Consulta cupo CUIT (device token preferido; global aún admitido)."""
+    """Consulta cupo CUIT (solo device token)."""
     clave, err = _usuario_desde_auth_cupo(request.args.get("usuario") or "")
     if err is not None:
         return err
@@ -3857,7 +3936,7 @@ def api_cupo_info():
 @app.post("/api/cupo/consumir")
 @csrf.exempt
 def api_cupo_consumir():
-    """Registra consumo de cupo (identidad desde device token si aplica)."""
+    """Registra consumo de cupo (solo device token)."""
     data = request.get_json(silent=True) or {}
     clave, err = _usuario_desde_auth_cupo(data.get("usuario") or "")
     if err is not None:
@@ -3886,7 +3965,7 @@ def api_cupo_consumir():
 @app.post("/api/uso/registrar")
 @csrf.exempt
 def api_uso_registrar():
-    """Registra métricas de uso (identidad desde device token si aplica)."""
+    """Registra métricas de uso (solo device token)."""
     data = request.get_json(silent=True) or {}
     clave, err = _usuario_desde_auth_cupo(data.get("usuario") or "")
     if err is not None:

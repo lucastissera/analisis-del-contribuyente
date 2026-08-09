@@ -516,6 +516,64 @@
       </table>
       {% endif %}
 
+      <h2 style="margin-top: 1.75rem;">{{ t('admin_disp_titulo') }}</h2>
+      <p class="help">{{ t('admin_disp_intro') }}</p>
+      {% if not dispositivos %}
+      <p class="help">{{ t('admin_disp_vacio') }}</p>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t('admin_disp_col_usuario') }}</th>
+            <th>{{ t('admin_disp_col_etiqueta') }}</th>
+            <th>{{ t('admin_disp_col_device') }}</th>
+            <th>{{ t('admin_disp_col_ultimo') }}</th>
+            <th>{{ t('admin_disp_col_estado') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in dispositivos %}
+          <tr>
+            <td>{{ d.usuario or '—' }}</td>
+            <td>
+              {% if not d.revocado %}
+              <form method="post" class="inline-form" style="display:flex;gap:0.35rem;align-items:center;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="accion" value="renombrar_dispositivo">
+                <input type="hidden" name="token_hash" value="{{ d.token_hash }}">
+                <input type="text" name="etiqueta" value="{{ d.etiqueta or '' }}" maxlength="80" style="min-width:8rem;">
+                <button type="submit" class="btn btn-secondary btn-sm">{{ t('admin_disp_renombrar') }}</button>
+              </form>
+              {% else %}
+              {{ d.etiqueta or '—' }}
+              {% endif %}
+            </td>
+            <td><code style="font-size:0.75rem;">{{ (d.device_id or '—')[:24] }}{% if d.device_id and d.device_id|length > 24 %}…{% endif %}</code></td>
+            <td>{{ d.ultimo_uso or d.creado or '—' }}</td>
+            <td>
+              {% if d.revocado %}
+              <span class="warn">{{ t('admin_disp_revocado') }}</span>
+              {% else %}
+              <span class="ok">{{ t('admin_disp_activo') }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if not d.revocado %}
+              <form method="post" class="inline-form" onsubmit="return confirm('{{ t('admin_disp_confirmar_revocar') }}');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="accion" value="revocar_dispositivo">
+                <input type="hidden" name="token_hash" value="{{ d.token_hash }}">
+                <button type="submit" class="btn btn-danger btn-sm">{{ t('admin_disp_revocar') }}</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
       <h2 style="margin-top: 1.75rem;">{{ t('admin_auditoria_titulo') }}</h2>
       {% if not auditoria_admin %}
       <p class="help">{{ t('admin_auditoria_vacio') }}</p>

@@ -127,7 +127,9 @@ def verificar_entitlement_firmado(blob: dict[str, Any] | None) -> dict[str, Any]
     return ent
 
 
-def emitir_entitlement_usuario(usuario: str) -> dict[str, Any] | None:
+def emitir_entitlement_usuario(
+    usuario: str, *, device_id: str = ""
+) -> dict[str, Any] | None:
     """Arma y firma entitlement desde overlay/cupo del servidor."""
     u = (usuario or "").strip()
     if not u:
@@ -141,7 +143,11 @@ def emitir_entitlement_usuario(usuario: str) -> dict[str, Any] | None:
     claims: dict[str, Any] = {
         "usuario": u,
         "es_admin": bool(es_administrador(u)),
+        "sub": u,
     }
+    did = (device_id or "").strip()
+    if did:
+        claims["device_id"] = did
     try:
         claims["servicios"] = servicios_usuario(u) or {}
     except Exception:
@@ -252,9 +258,18 @@ def entitlement_vigente_para_login(usuario: str) -> bool:
     ent = cargar_entitlement_local(usuario)
     if not ent:
         return False
+    claim_did = (ent.get("device_id") or "").strip()
+    if claim_did:
+        try:
+            from auth_instalacion import identidad_instalacion
+
+            local_did = (identidad_instalacion().get("device_id") or "").strip()
+            if local_did and local_did != claim_did:
+                return False
+        except Exception:
+            return False
     if ent.get("es_admin"):
         return True
     if ent.get("activo") is False:
         return False
-    # dias_restantes negativos = suscripción vencida al emitir; igual respetamos exp del token
     return True
