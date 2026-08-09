@@ -243,6 +243,16 @@ def _secret_key_aplicacion() -> str:
 
 
 app.secret_key = _secret_key_aplicacion()
+
+# Portable: verificar manifiesto firmado al arrancar (telemetría / soporte).
+if getattr(sys, "frozen", False):
+    try:
+        from auth_manifest import verificar_al_inicio
+
+        verificar_al_inicio()
+    except Exception as exc:
+        _LOG_APP.warning("Verificación de manifiesto portable: %s", exc)
+
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 # Cookies de sesión: en Render solo HTTPS; HttpOnly evita JS; SameSite reduce CSRF básico.
@@ -3864,6 +3874,7 @@ def api_auth_verificar():
     device_id = (data.get("device_id") or "").strip()[:120]
     public_key = (data.get("public_key") or "").strip()[:200]
     etiqueta = (data.get("etiqueta") or "portable").strip()[:80] or "portable"
+    integridad = data.get("integridad") if isinstance(data.get("integridad"), dict) else {}
     rl = _rate_limit_usuario_consulta("login", usuario)
     if rl is not None:
         return _respuesta_rate_limit(rl, api=True)
@@ -3872,7 +3883,7 @@ def api_auth_verificar():
     motivo = verificar_acceso(usuario, password)
     if motivo is None:
         from auth import _resolver_clave_usuario
-        from auth_dispositivos import emitir_token_dispositivo
+        from auth_dispositivos import emitir_token_dispositivo, registrar_integridad
 
         _rate_limit_usuario_ok("login", usuario)
         clave = _resolver_clave_usuario(usuario)
@@ -3886,6 +3897,22 @@ def api_auth_verificar():
         except Exception:
             logging.getLogger(__name__).exception("No se pudo emitir device token")
             device_token = ""
+        if device_token and integridad:
+            try:
+                ok_raw = integridad.get("integrity_ok")
+                registrar_integridad(
+                    device_id=device_id,
+                    usuario=clave,
+                    build_id=str(integridad.get("build_id") or ""),
+                    app_version=str(integridad.get("app_version") or ""),
+                    root_hash=str(integridad.get("root_hash") or ""),
+                    integrity_ok=None if ok_raw is None else bool(ok_raw),
+                    detail=str(integridad.get("detail") or ""),
+                )
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "No se pudo registrar integridad en login", exc_info=True
+                )
         payload = {
             "ok": True,
             "usuario": clave,
@@ -3916,6 +3943,31 @@ def api_auth_perfil():
     if err is not None:
         return err
     return jsonify({"ok": True, "usuario": clave, "perfil": _perfil_publico_usuario(clave)})
+
+
+@app.post("/api/instalacion/integridad")
+@csrf.exempt
+def api_instalacion_integridad():
+    """Telemetría de manifiesto (solo device token)."""
+    from auth_dispositivos import registrar_integridad, resolver_device_meta
+
+    meta = resolver_device_meta(request.headers.get("Authorization"))
+    if not meta:
+        return jsonify({"error": "device_token_requerido"}), 401
+    data = request.get_json(silent=True) or {}
+    ok_raw = data.get("integrity_ok")
+    ok = registrar_integridad(
+        device_id=str(meta.get("device_id") or data.get("device_id") or ""),
+        usuario=str(meta.get("usuario") or ""),
+        build_id=str(data.get("build_id") or ""),
+        app_version=str(data.get("app_version") or ""),
+        root_hash=str(data.get("root_hash") or ""),
+        integrity_ok=None if ok_raw is None else bool(ok_raw),
+        detail=str(data.get("detail") or ""),
+    )
+    if not ok:
+        return jsonify({"error": "no_actualizado"}), 404
+    return jsonify({"ok": True})
 
 
 @app.get("/api/cupo/info")

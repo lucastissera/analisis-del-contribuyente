@@ -127,31 +127,63 @@ def main() -> int:
         shutil.copy2(ejemplo_remoto, DIST_DIR / "auth_remote.example.txt")
     _copiar_usuarios_portable()
     _instalar_chromium_portable()
-    _intentar_firma_authenticode()
+    # Authenticode antes del manifiesto: el hash del .exe debe incluir la firma.
+    if _intentar_firma_authenticode() != 0:
+        return 1
+    if _generar_manifest_firmado() != 0:
+        print(
+            "AVISO: manifiesto no firmado (el portable igual se generó; "
+            "definí AUTH_ENTITLEMENT_PRIVATE_KEY para firmar).",
+            file=sys.stderr,
+        )
     print(
         f"\nListo: {DIST_DIR}\n"
-        "Distribuí la carpeta completa (exe + _internal + ms-playwright).\n"
+        "Distribuí la carpeta completa (exe + _internal + ms-playwright + manifest.signed.json).\n"
         "IMPORTANTE cupo: generá auth_remote.enc con setup_auth_portable.py --token …\n"
         "  (sync Neon). Sin esto el cupo NO se descuenta en el servidor.\n"
-        "Firma Authenticode: docs/FIRMA_AUTHENTICODE.md (opcional si AIC_SIGN_PFX).\n",
+        "Firma Authenticode: docs/FIRMA_AUTHENTICODE.md "
+        "(AIC_SIGN_PFX; AIC_SIGN_REQUIRED=1 para fallar sin cert).\n",
         flush=True,
     )
     return 0
 
 
-def _intentar_firma_authenticode() -> None:
-    """Si hay AIC_SIGN_PFX, firma el .exe (P2.13). Sin cert: omite sin fallar el build."""
+def _generar_manifest_firmado() -> int:
+    """Hashes + firma Ed25519 del dist (Fase 2.1)."""
+    script = ROOT / "tools" / "generar_manifest_portable.py"
+    if not script.is_file():
+        print(f"Aviso: no está {script}", file=sys.stderr)
+        return 1
+    print("Generando manifest.signed.json…", flush=True)
+    r = subprocess.run(
+        [sys.executable, str(script), "--dist", str(DIST_DIR)],
+        cwd=str(ROOT),
+    )
+    return r.returncode
+
+
+def _intentar_firma_authenticode() -> int:
+    """Si hay AIC_SIGN_PFX, firma el .exe. Con AIC_SIGN_REQUIRED=1 falla sin cert."""
     pfx = (os.environ.get("AIC_SIGN_PFX") or "").strip()
+    required = (os.environ.get("AIC_SIGN_REQUIRED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     if not pfx:
-        print(
-            "Authenticode: omitido (definí AIC_SIGN_PFX para firmar; ver docs/FIRMA_AUTHENTICODE.md).",
-            flush=True,
+        msg = (
+            "Authenticode: omitido (definí AIC_SIGN_PFX; ver docs/FIRMA_AUTHENTICODE.md)."
         )
-        return
+        if required:
+            print(f"ERROR: {msg} AIC_SIGN_REQUIRED=1.", file=sys.stderr)
+            return 1
+        print(msg, flush=True)
+        return 0
     ps1 = ROOT / "tools" / "firmar_portable.ps1"
     if not ps1.is_file():
         print(f"Aviso: no está {ps1}", file=sys.stderr)
-        return
+        return 1 if required else 0
     exe = DIST_DIR / f"{APP_EXE_BASENAME}.exe"
     env = os.environ.copy()
     env.setdefault("AIC_SIGN_EXE", str(exe))
@@ -170,9 +202,13 @@ def _intentar_firma_authenticode() -> None:
     )
     if r.returncode != 0:
         print(
-            "AVISO: falló la firma Authenticode (el build del portable igual quedó).",
+            "ERROR: falló la firma Authenticode."
+            if required
+            else "AVISO: falló la firma Authenticode (el build del portable igual quedó).",
             file=sys.stderr,
         )
+        return 1 if required else 0
+    return 0
 
 
 if __name__ == "__main__":

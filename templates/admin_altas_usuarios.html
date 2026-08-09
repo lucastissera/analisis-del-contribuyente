@@ -527,6 +527,8 @@
             <th>{{ t('admin_disp_col_usuario') }}</th>
             <th>{{ t('admin_disp_col_etiqueta') }}</th>
             <th>{{ t('admin_disp_col_device') }}</th>
+            <th>{{ t('admin_disp_col_build') }}</th>
+            <th>{{ t('admin_disp_col_integridad') }}</th>
             <th>{{ t('admin_disp_col_ultimo') }}</th>
             <th>{{ t('admin_disp_col_estado') }}</th>
             <th></th>
@@ -550,6 +552,20 @@
               {% endif %}
             </td>
             <td><code style="font-size:0.75rem;">{{ (d.device_id or '—')[:24] }}{% if d.device_id and d.device_id|length > 24 %}…{% endif %}</code></td>
+            <td style="font-size:0.8rem;">
+              {% if d.app_version or d.build_id %}
+              {{ d.app_version or '—' }}<br><code style="font-size:0.7rem;">{{ (d.build_id or '')[:18] }}{% if d.build_id and d.build_id|length > 18 %}…{% endif %}</code>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if d.integrity_ok is sameas true %}
+              <span class="ok" title="{{ d.integrity_detail or '' }}">{{ t('admin_disp_int_ok') }}</span>
+              {% elif d.integrity_ok is sameas false %}
+              <span class="warn" title="{{ d.integrity_detail or '' }}">{{ t('admin_disp_int_bad') }}</span>
+              {% else %}
+              <span class="help">{{ t('admin_disp_int_unk') }}</span>
+              {% endif %}
+            </td>
             <td>{{ d.ultimo_uso or d.creado or '—' }}</td>
             <td>
               {% if d.revocado %}

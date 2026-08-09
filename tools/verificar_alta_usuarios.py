@@ -25,6 +25,20 @@ try:
 except ImportError:
     pass
 
+if (os.environ.get("AIC_TEST_MODE") or "").strip().lower() not in (
+    "1",
+    "true",
+    "yes",
+    "on",
+):
+    print(
+        "ABORT: este script exige AIC_TEST_MODE=1 "
+        "(evita tocar Neon/Render por accidente).\n"
+        "  Ejemplo (Git Bash): AIC_TEST_MODE=1 python tools/verificar_alta_usuarios.py",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
 # Nunca operar contra Neon/Render reales desde este script.
 for _k in (
     "DATABASE_URL",

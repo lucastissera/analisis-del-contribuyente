@@ -727,6 +727,13 @@ def _intentar_verificar_remoto(
         etiqueta = etiqueta_instalacion()
     except Exception:
         _LOG.debug("Sin identidad de instalación local", exc_info=True)
+    integridad: dict[str, Any] = {}
+    try:
+        from auth_manifest import payload_telemetria
+
+        integridad = payload_telemetria()
+    except Exception:
+        _LOG.debug("Sin telemetría de manifiesto", exc_info=True)
     body = json.dumps(
         {
             "usuario": (username or "").strip(),
@@ -734,6 +741,7 @@ def _intentar_verificar_remoto(
             "device_id": device_id,
             "public_key": public_key,
             "etiqueta": etiqueta,
+            "integridad": integridad,
         },
         ensure_ascii=False,
     ).encode("utf-8")

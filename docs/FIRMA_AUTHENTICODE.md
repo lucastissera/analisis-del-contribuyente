@@ -19,6 +19,7 @@ Sin firma, Windows / SmartScreen suele advertir “editor desconocido” al abri
 | `AIC_SIGN_PFX_PASSWORD` | Contraseña del `.pfx` |
 | `AIC_SIGN_TIMESTAMP_URL` | Opcional (default DigiCert) |
 | `AIC_SIGN_EXE` | Opcional; ruta al `.exe` |
+| `AIC_SIGN_REQUIRED` | Si `1`, el build **falla** sin certificado / si `signtool` falla |
 
 ## Firmar
 

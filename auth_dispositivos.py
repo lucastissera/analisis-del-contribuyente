@@ -110,10 +110,62 @@ def emitir_token_dispositivo(
             "device_id": did,
             "public_key": (public_key or "").strip()[:200],
             "revocado": False,
+            "build_id": "",
+            "app_version": "",
+            "root_hash": "",
+            "integrity_ok": None,
+            "integrity_detail": "",
+            "integrity_at": "",
         }
         _guardar(data)
     _LOG.info("Token de dispositivo emitido para %s device_id=%s", u, did or "-")
     return plain
+
+
+def registrar_integridad(
+    *,
+    token_hash: str = "",
+    device_id: str = "",
+    usuario: str = "",
+    build_id: str = "",
+    app_version: str = "",
+    root_hash: str = "",
+    integrity_ok: bool | None = None,
+    detail: str = "",
+) -> bool:
+    """Actualiza telemetría de integridad en el token de dispositivo."""
+    h = (token_hash or "").strip()
+    did = (device_id or "").strip()
+    u = (usuario or "").strip()
+    with _lock:
+        data = _cargar()
+        tokens = data.get("tokens") or {}
+        target_h = h
+        if not target_h and (did or u):
+            for digest, meta in tokens.items():
+                if not isinstance(meta, dict) or meta.get("revocado"):
+                    continue
+                if did and (meta.get("device_id") or "") == did:
+                    if u and (meta.get("usuario") or "") != u:
+                        continue
+                    target_h = digest
+                    break
+                if not did and u and (meta.get("usuario") or "") == u:
+                    target_h = digest
+        meta = tokens.get(target_h) if target_h else None
+        if not isinstance(meta, dict):
+            return False
+        meta["build_id"] = (build_id or "")[:80]
+        meta["app_version"] = (app_version or "")[:40]
+        meta["root_hash"] = (root_hash or "")[:80]
+        meta["integrity_ok"] = integrity_ok
+        meta["integrity_detail"] = (detail or "")[:120]
+        meta["integrity_at"] = _ahora_iso()
+        meta["ultimo_uso"] = _ahora_iso()
+        tokens[target_h] = meta
+        data["tokens"] = tokens
+        _guardar(data)
+    return True
 
 
 def _buscar_device(token: str) -> dict[str, Any] | None:
@@ -208,6 +260,12 @@ def listar_dispositivos(*, incluir_revocados: bool = True) -> list[dict[str, Any
                 "revocado_en": meta.get("revocado_en") or "",
                 "revocado_por": meta.get("revocado_por") or "",
                 "tiene_public_key": bool((meta.get("public_key") or "").strip()),
+                "build_id": meta.get("build_id") or "",
+                "app_version": meta.get("app_version") or "",
+                "root_hash": meta.get("root_hash") or "",
+                "integrity_ok": meta.get("integrity_ok"),
+                "integrity_detail": meta.get("integrity_detail") or "",
+                "integrity_at": meta.get("integrity_at") or "",
             }
         )
     filas.sort(key=lambda r: str(r.get("ultimo_uso") or r.get("creado") or ""), reverse=True)
