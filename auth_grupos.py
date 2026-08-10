@@ -28,6 +28,7 @@ ASUNTOS_DFE_EXCLUIDOS_ESTUDIO_DYC: tuple[str, ...] = (
 _MIEMBROS_ESTUDIO_DYC: tuple[str, ...] = (
     "sofiaa",
     "matiasl",
+    "matiasn",
     "carlosc",
     "milenaa",
     "santiagop",
