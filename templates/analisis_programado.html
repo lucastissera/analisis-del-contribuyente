@@ -50,6 +50,9 @@
       .checks label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
       .horario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.8rem; align-items: end; }
       .horario-grid label strong { display: block; margin-bottom: 0.25rem; font-size: 0.82rem; }
+      .horario-extra { margin-top: 0.85rem; }
+      .horario-extra label { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
+      .horario-extra .help { margin: 0.35rem 0 0 1.6rem; }
       .filas-manual { display: flex; flex-direction: column; gap: 0.7rem; }
       .fila-manual {
         position: relative;
@@ -170,6 +173,13 @@
               <input type="hidden" name="ap_minuto" id="ap-minuto" value="0" />
             </label>
           </div>
+          <div class="horario-extra">
+            <label>
+              <input type="checkbox" name="ap_repeticion_semanal" id="ap-repeticion" value="1" />
+              <span>{{ t('ap_repeticion_semanal') }}</span>
+            </label>
+            <p class="help">{{ t('ap_repeticion_semanal_help') }}</p>
+          </div>
         </div>
 
         <div class="panel">
@@ -272,6 +282,7 @@
         estadoInactivo: {{ t('ap_estado_inactivo')|tojson }},
         estadoActivo: {{ t('ap_estado_activo')|tojson }},
         estadoPausado: {{ t('ap_estado_pausado')|tojson }},
+        estadoRepeticion: {{ t('ap_estado_repeticion')|tojson }},
         limpiarConfirm: {{ t('ap_limpiar_confirm')|tojson }},
         limpiarDatosConfirm: {{ t('btn_limpiar_datos_confirm')|tojson }},
         cancelarConfirm: {{ t('btn_cancelar_descarga_confirm')|tojson }},
@@ -317,6 +328,9 @@
           var hora = String(cfg.hora || 0).padStart(2, "0") + ":" + String(cfg.minuto || 0).padStart(2, "0");
           html = "<p>" + I18N.estadoActivo.replace("{dia}", I18N.dias[cfg.dia_semana] || "?")
             .replace("{hora}", hora).replace("{sistemas}", sis) + "</p>";
+          if (cfg.repeticion_semanal) {
+            html += "<p>" + (I18N.estadoRepeticion || "") + "</p>";
+          }
           if (cfg.carpeta_destino) html += "<p class=\"ruta\">" + cfg.carpeta_destino + "</p>";
         }
         if (cfg && cfg.ultima_ejecucion) {
@@ -353,13 +367,15 @@
         document.querySelectorAll('input[name="ap_sistemas"]').forEach(function (cb) {
           cb.checked = (cfg.sistemas || []).indexOf(cb.value) >= 0;
         });
-        document.getElementById("ap-dia").value = String(cfg.dia_semana || 0);
+        document.getElementById("ap-dia").value = String(cfg.dia_semana != null ? cfg.dia_semana : 0);
         var h = cfg.hora != null ? cfg.hora : 9;
         var m = cfg.minuto != null ? cfg.minuto : 0;
         document.getElementById("ap-hora-input").value =
           String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
         document.getElementById("ap-hora").value = h;
         document.getElementById("ap-minuto").value = m;
+        var rep = document.getElementById("ap-repeticion");
+        if (rep) rep.checked = !!cfg.repeticion_semanal;
         if (cfg.carpeta_destino) {
           document.getElementById("ap-carpeta-destino").value = cfg.carpeta_destino;
           document.getElementById("carpeta-label").textContent = cfg.carpeta_destino;
@@ -559,6 +575,8 @@
           document.querySelectorAll('input[name="ap_sistemas"]').forEach(function (cb) { cb.checked = false; });
           document.getElementById("ap-dia").value = "0";
           document.getElementById("ap-hora-input").value = "09:00";
+          var rep = document.getElementById("ap-repeticion");
+          if (rep) rep.checked = false;
           sincronizarHoraOculta();
           document.getElementById("ap-carpeta-destino").value = "";
           document.getElementById("carpeta-label").textContent = "—";

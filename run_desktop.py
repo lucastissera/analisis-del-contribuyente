@@ -24,12 +24,6 @@ import webbrowser
 from pathlib import Path
 
 from app_branding import APP_EXE_BASENAME, APP_LOG_FILENAME, APP_NAME
-from cuit_en_arca.browser_desktop import (
-    flags_navegador_app,
-    preparar_perfil_sin_cuenta,
-    registrar_lanzamiento_navegador,
-    ruta_perfil_navegador,
-)
 
 
 def _puerto_deseado() -> int:
@@ -114,6 +108,8 @@ def _args_ventana_app(url: str) -> list[str]:
     además fijamos posición y tamaño al área de trabajo (sin tapar la barra de
     tareas). No se usa pantalla completa.
     """
+    from cuit_en_arca.browser_desktop import flags_navegador_app
+
     args = [
         f"--app={url}",
         "--start-maximized",
@@ -152,6 +148,12 @@ def _abrir_interfaz(url: str) -> None:
         except Exception:
             pass
         return
+
+    from cuit_en_arca.browser_desktop import (
+        preparar_perfil_sin_cuenta,
+        registrar_lanzamiento_navegador,
+        ruta_perfil_navegador,
+    )
 
     args_ventana = _args_ventana_app(url)
 
@@ -260,6 +262,7 @@ def main() -> None:
     except ImportError:
         pass
     if getattr(sys, "frozen", False):
+        from cuit_en_arca.browser_desktop import ruta_perfil_navegador
         from cuit_en_arca.playwright_env import aplicar_entorno_playwright_portable
 
         aplicar_entorno_playwright_portable()

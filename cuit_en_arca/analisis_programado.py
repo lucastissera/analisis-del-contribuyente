@@ -90,6 +90,7 @@ class ConfigAnalisisProgramado:
     dia_semana: int = 0  # 0=lunes … 6=domingo (datetime.weekday)
     hora: int = 9
     minuto: int = 0
+    repeticion_semanal: bool = False
     sistemas: list[str] = field(default_factory=list)
     carpeta_destino: str = ""
     filas: list[dict[str, Any]] = field(default_factory=list)
@@ -140,6 +141,7 @@ def cargar_config() -> ConfigAnalisisProgramado:
             dia_semana=int(data.get("dia_semana", 0)),
             hora=int(data.get("hora", 9)),
             minuto=int(data.get("minuto", 0)),
+            repeticion_semanal=bool(data.get("repeticion_semanal", False)),
             sistemas=sistemas,
             carpeta_destino=str(data.get("carpeta_destino") or ""),
             filas=list(data.get("filas") or []),
@@ -172,11 +174,17 @@ def pausar_programacion_tras_ejecucion(
     *,
     ultimo_resultado: dict[str, Any] | None = None,
 ) -> ConfigAnalisisProgramado:
-    """Marca la ejecución como hecha y pausa hasta que el usuario guarde de nuevo."""
-    cfg.activo = False
+    """Marca la ejecución como hecha.
+
+    Sin repetición semanal: pausa hasta que el usuario guarde de nuevo.
+    Con repetición: sigue activa para el mismo día/hora de la semana siguiente
+    (hace falta que la app esté abierta a ese horario).
+    """
     cfg.ultima_ejecucion = ahora_ar_naive().isoformat(timespec="seconds")
     if ultimo_resultado is not None:
         cfg.ultimo_resultado = ultimo_resultado
+    if not cfg.repeticion_semanal:
+        cfg.activo = False
     guardar_config(cfg)
     return cfg
 

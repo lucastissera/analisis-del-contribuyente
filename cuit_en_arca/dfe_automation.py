@@ -160,7 +160,7 @@ def _nombre_carpeta_cuit_dfe(
     *,
     fallback: str = "",
 ) -> str:
-    """``{CUIT} - {razón social}`` para la subcarpeta de un contribuyente."""
+    """``{razón social} - {CUIT}`` para la subcarpeta de un contribuyente."""
     cuit_n = _cuit_dfe_n(cuit or fallback)
     cuit_fmt = (
         _cuit_dfe_fmt(cuit_n)
@@ -169,7 +169,7 @@ def _nombre_carpeta_cuit_dfe(
     )
     rs = _nombre_seguro((razon_social or "").strip(), fallback="")
     if rs and rs != cuit_fmt and not re.fullmatch(r"[\d\-]+", rs):
-        return _nombre_seguro(f"{cuit_fmt} - {rs}", fallback=cuit_fmt)[:180]
+        return _nombre_seguro(f"{rs} - {cuit_fmt}", fallback=cuit_fmt)[:180]
     return cuit_fmt
 
 

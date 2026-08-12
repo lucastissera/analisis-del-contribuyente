@@ -31,8 +31,9 @@ _LOG_APP = logging.getLogger(__name__)
 
 def _arranque_en_background() -> None:
     """Playwright / Neon / sync: no deben bloquear el bind de gunicorn en Render."""
-    # Dar tiempo a que el primer /login use Neon sin pelear con el arranque.
-    time.sleep(3)
+    # En web, ceder un momento al primer /login. En el .exe no hace falta: demora el arranque.
+    if not getattr(sys, "frozen", False):
+        time.sleep(3)
 
     try:
         from auth_registro import integridad_store_local_ok, verificar_integridad_stores_locales
@@ -126,7 +127,7 @@ threading.Thread(
     name="arranque-diferido",
     daemon=True,
 ).start()
-from cuit_en_arca import ArcaProcesoError, CancelacionUsuarioError, ejecutar_lote_arca
+from cuit_en_arca.errores import ArcaProcesoError, CancelacionUsuarioError
 from cuit_en_arca.planilla_lote import (
     leer_planilla_lote_con_errores,
     parsear_entrada_manual,
@@ -205,20 +206,12 @@ from plantillas_imputacion import (
     reemplazar_archivo_plantilla,
 )
 
-from sumar_imp_total import (
-    COLUMNAS_A_AJUSTAR,
-    COLUMNAS_DETALLE_SIN_RESUMEN,
-    COLUMNAS_TOTAL_RESUMEN,
-    enriquecer_contrapartes_con_imputacion,
-    escribir_excel_informe_completo,
-    escribir_excel_informe_dual,
-    leer_mapa_imputaciones_desde_archivo,
-    periodos_orden_crono,
-    procesar_archivo,
-    resumen_totales_por_imputacion,
-    total_resumen_pantalla,
-    totales_resumen_por_periodo,
-)
+def _sumar_imp():
+    """Carga diferida: pandas/openpyxl del procesador no deben demorar el login."""
+    import sumar_imp_total as m
+
+    return m
+
 
 def _secret_key_aplicacion() -> str:
     """En producción (Render) exige SECRET_KEY aleatoria; en local permite fallback de desarrollo."""
@@ -825,7 +818,7 @@ def _mapa_imputaciones_desde_peticion(
         try:
             raw, nombre = leer_bytes_plantilla(plantilla_id)
             buf = io.BytesIO(raw)
-            mapa = leer_mapa_imputaciones_desde_archivo(
+            mapa = _sumar_imp().leer_mapa_imputaciones_desde_archivo(
                 buf, nombre_archivo=nombre, ui_lang=lg
             )
             return mapa, None, None, None
@@ -842,7 +835,7 @@ def _mapa_imputaciones_desde_peticion(
         datos = f_imp.read()
         buf_imp = io.BytesIO(datos)
         try:
-            mapa = leer_mapa_imputaciones_desde_archivo(
+            mapa = _sumar_imp().leer_mapa_imputaciones_desde_archivo(
                 buf_imp, nombre_archivo=nombre_imp, ui_lang=lg
             )
             return mapa, None, datos, nombre_imp
@@ -2169,6 +2162,7 @@ def procesar():
         nl = n.lower()
         return nl.endswith(".xlsx") or nl.endswith(".csv")
 
+    sit = _sumar_imp()
     mapa_imputaciones, err_imp, datos_imp_bytes, imp_nombre_orig = (
         _mapa_imputaciones_desde_peticion(lg)
     )
@@ -2217,7 +2211,7 @@ def procesar():
                 tpp_r,
                 nce_r,
                 tabla_r,
-            ) = procesar_archivo(
+            ) = sit.procesar_archivo(
                 buf_r,
                 0,
                 nombre_archivo=nombre_r,
@@ -2230,7 +2224,7 @@ def procesar():
                 tpp_e,
                 nce_e,
                 tabla_e,
-            ) = procesar_archivo(
+            ) = sit.procesar_archivo(
                 buf_e,
                 0,
                 nombre_archivo=nombre_e,
@@ -2244,29 +2238,29 @@ def procesar():
                 "index.html", error=tr(lg, "err_processing", exc=exc)
             )
 
-        tabla_r = enriquecer_contrapartes_con_imputacion(tabla_r, mapa_imputaciones)
+        tabla_r = sit.enriquecer_contrapartes_con_imputacion(tabla_r, mapa_imputaciones)
         res_imp_r = (
-            resumen_totales_por_imputacion(tabla_r) if con_cols_imp else None
+            sit.resumen_totales_por_imputacion(tabla_r) if con_cols_imp else None
         )
         res_imp_e = None
 
-        per_r = periodos_orden_crono(
+        per_r = sit.periodos_orden_crono(
             tpp_r,
             nce_r.get("neto_nc_por_periodo", {}),
             nce_r.get("iva_nc_por_periodo", {}),
         )
-        per_e = periodos_orden_crono(
+        per_e = sit.periodos_orden_crono(
             tpp_e,
             nce_e.get("neto_nc_por_periodo", {}),
             nce_e.get("iva_nc_por_periodo", {}),
         )
-        tres_r = {c: tot_r[c] for c in COLUMNAS_TOTAL_RESUMEN}
-        tdet_r = {c: tot_r[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
-        tres_e = {c: tot_e[c] for c in COLUMNAS_TOTAL_RESUMEN}
-        tdet_e = {c: tot_e[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
+        tres_r = {c: tot_r[c] for c in sit.COLUMNAS_TOTAL_RESUMEN}
+        tdet_r = {c: tot_r[c] for c in sit.COLUMNAS_DETALLE_SIN_RESUMEN}
+        tres_e = {c: tot_e[c] for c in sit.COLUMNAS_TOTAL_RESUMEN}
+        tdet_e = {c: tot_e[c] for c in sit.COLUMNAS_DETALLE_SIN_RESUMEN}
 
         salida = io.BytesIO()
-        escribir_excel_informe_dual(
+        sit.escribir_excel_informe_dual(
             salida,
             df_recibidos=df_r,
             totales_por_periodo_rec=tpp_r,
@@ -2274,7 +2268,7 @@ def procesar():
             notas_credito_extras_rec=nce_r,
             totales_resumen_rec=tres_r,
             totales_detalle_rec=tdet_r,
-            suma_total_rec=round(total_resumen_pantalla(tot_r), 2),
+            suma_total_rec=round(sit.total_resumen_pantalla(tot_r), 2),
             tabla_contrapartes_rec=tabla_r,
             df_emitidos=df_e,
             totales_por_periodo_emit=tpp_e,
@@ -2282,9 +2276,9 @@ def procesar():
             notas_credito_extras_emit=nce_e,
             totales_resumen_emit=tres_e,
             totales_detalle_emit=tdet_e,
-            suma_total_emit=round(total_resumen_pantalla(tot_e), 2),
+            suma_total_emit=round(sit.total_resumen_pantalla(tot_e), 2),
             tabla_contrapartes_emit=tabla_e,
-            columnas_orden=COLUMNAS_A_AJUSTAR,
+            columnas_orden=sit.COLUMNAS_A_AJUSTAR,
             resumen_imputacion_rec=res_imp_r,
             resumen_imputacion_emit=res_imp_e,
             con_columnas_imputacion_en_contrapartes=con_cols_imp,
@@ -2311,21 +2305,21 @@ def procesar():
             procesamiento_dual=True,
             totales_resumen_recibidos=tres_r,
             totales_detalle_recibidos=tdet_r,
-            suma_total_recibidos=round(total_resumen_pantalla(tot_r), 2),
+            suma_total_recibidos=round(sit.total_resumen_pantalla(tot_r), 2),
             totales_resumen_emitidos=tres_e,
             totales_detalle_emitidos=tdet_e,
-            suma_total_emitidos=round(total_resumen_pantalla(tot_e), 2),
-            columnas_orden=COLUMNAS_A_AJUSTAR,
+            suma_total_emitidos=round(sit.total_resumen_pantalla(tot_e), 2),
+            columnas_orden=sit.COLUMNAS_A_AJUSTAR,
             totales_por_periodo_recibidos=tpp_r,
             periodos_orden_recibidos=per_r,
-            resumen_total_periodo_recibidos=totales_resumen_por_periodo(tpp_r),
+            resumen_total_periodo_recibidos=sit.totales_resumen_por_periodo(tpp_r),
             total_neto_nc_recibidos=nce_r["total_neto_nc"],
             total_iva_nc_recibidos=nce_r["total_iva_nc"],
             neto_nc_por_periodo_recibidos=nce_r["neto_nc_por_periodo"],
             iva_nc_por_periodo_recibidos=nce_r["iva_nc_por_periodo"],
             totales_por_periodo_emitidos=tpp_e,
             periodos_orden_emitidos=per_e,
-            resumen_total_periodo_emitidos=totales_resumen_por_periodo(tpp_e),
+            resumen_total_periodo_emitidos=sit.totales_resumen_por_periodo(tpp_e),
             total_neto_nc_emitidos=nce_e["total_neto_nc"],
             total_iva_nc_emitidos=nce_e["total_iva_nc"],
             neto_nc_por_periodo_emitidos=nce_e["neto_nc_por_periodo"],
@@ -2357,7 +2351,7 @@ def procesar():
             totales_por_periodo,
             notas_credito_extras,
             tabla_contrapartes,
-        ) = procesar_archivo(
+        ) = sit.procesar_archivo(
             buffer,
             0,
             nombre_archivo=nombre,
@@ -2371,23 +2365,23 @@ def procesar():
             "index.html", error=tr(lg, "err_processing", exc=exc)
         )
 
-    tabla_contrapartes = enriquecer_contrapartes_con_imputacion(
+    tabla_contrapartes = sit.enriquecer_contrapartes_con_imputacion(
         tabla_contrapartes,
         mapa_imputaciones if (con_cols_imp and not emitidos) else None,
     )
     res_imp = (
-        resumen_totales_por_imputacion(tabla_contrapartes) if con_cols_imp and not emitidos else None
+        sit.resumen_totales_por_imputacion(tabla_contrapartes) if con_cols_imp and not emitidos else None
     )
 
     salida = io.BytesIO()
-    periodos_orden = periodos_orden_crono(
+    periodos_orden = sit.periodos_orden_crono(
         totales_por_periodo,
         notas_credito_extras.get("neto_nc_por_periodo", {}),
         notas_credito_extras.get("iva_nc_por_periodo", {}),
     )
-    totales_resumen = {c: totales[c] for c in COLUMNAS_TOTAL_RESUMEN}
-    totales_detalle = {c: totales[c] for c in COLUMNAS_DETALLE_SIN_RESUMEN}
-    escribir_excel_informe_completo(
+    totales_resumen = {c: totales[c] for c in sit.COLUMNAS_TOTAL_RESUMEN}
+    totales_detalle = {c: totales[c] for c in sit.COLUMNAS_DETALLE_SIN_RESUMEN}
+    sit.escribir_excel_informe_completo(
         df_ajustado,
         salida,
         emitidos=emitidos,
@@ -2397,8 +2391,8 @@ def procesar():
         notas_credito_extras=notas_credito_extras,
         totales_resumen=totales_resumen,
         totales_detalle=totales_detalle,
-        suma_total=round(total_resumen_pantalla(totales), 2),
-        columnas_orden=COLUMNAS_A_AJUSTAR,
+        suma_total=round(sit.total_resumen_pantalla(totales), 2),
+        columnas_orden=sit.COLUMNAS_A_AJUSTAR,
         tabla_contrapartes=tabla_contrapartes,
         resumen_imputacion=res_imp,
         con_columnas_imputacion_en_contrapartes=con_cols_imp,
@@ -2420,7 +2414,7 @@ def procesar():
             MIME_TXT,
         )
 
-    resumen_total_periodo = totales_resumen_por_periodo(totales_por_periodo)
+    resumen_total_periodo = sit.totales_resumen_por_periodo(totales_por_periodo)
 
     return render_template(
         "index.html",
@@ -2429,8 +2423,8 @@ def procesar():
         emitidos=emitidos,
         totales_resumen=totales_resumen,
         totales_detalle=totales_detalle,
-        columnas_orden=COLUMNAS_A_AJUSTAR,
-        suma_total=round(total_resumen_pantalla(totales), 2),
+        columnas_orden=sit.COLUMNAS_A_AJUSTAR,
+        suma_total=round(sit.total_resumen_pantalla(totales), 2),
         totales_por_periodo=totales_por_periodo,
         periodos_orden=periodos_orden,
         resumen_total_periodo=resumen_total_periodo,
@@ -2641,6 +2635,8 @@ def arca_descarga_lote():
         reiniciar_pasos(job_id)
 
     def _worker() -> None:
+        from cuit_en_arca.lote import ejecutar_lote_arca
+
         try:
             on_log(f"Iniciando descarga de Mis Comprobantes ({len(filas)} fila(s))…")
             resultado = ejecutar_lote_arca(
@@ -3562,6 +3558,13 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
 
     filas_dict = _filas_ap_a_dict(filas)
 
+    repeticion = (request.form.get("ap_repeticion_semanal") or "").strip().lower() in (
+        "1",
+        "on",
+        "true",
+        "yes",
+    )
+
     if solo_ejecucion:
         prev = cargar_config()
         usuario_cupo = _usuario_cupo_web() or (prev.usuario_cupo or "").strip()
@@ -3570,6 +3573,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
             dia_semana=prev.dia_semana,
             hora=prev.hora,
             minuto=prev.minuto,
+            repeticion_semanal=repeticion,
             sistemas=sistemas,
             carpeta_destino=carpeta,
             filas=filas_dict,
@@ -3591,6 +3595,7 @@ def _cfg_ap_desde_peticion(lg: str, *, solo_ejecucion: bool = False):
         dia_semana=max(0, min(6, dia)),
         hora=max(0, min(23, hora)),
         minuto=max(0, min(59, minuto)),
+        repeticion_semanal=repeticion,
         sistemas=sistemas,
         carpeta_destino=carpeta,
         filas=filas_dict,
