@@ -145,7 +145,7 @@ def ejecutar_lote_arca(
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
     usuario_cupo: str | None = None,
-    registrar_valor_mc: Callable[[int, int], None] | None = None,
+    registrar_valor_mc: Callable[[], None] | None = None,
 ) -> ResultadoLoteArca:
     _requiere_playwright()
 
@@ -157,8 +157,6 @@ def ejecutar_lote_arca(
     )
 
     from sumar_imp_total import procesar_comprobantes_a_excel_y_resumen
-
-    from auth_uso_valor import contadores_mc_desde_resultado
 
     total = len(filas)
     archivos: dict[str, bytes] = {}
@@ -402,8 +400,7 @@ def ejecutar_lote_arca(
                     f"Cupo CUIT descontado (fila {fila.fila_excel}, CUIT {cuit}).",
                 )
                 if registrar_valor_mc:
-                    mce, mcr = contadores_mc_desde_resultado(resultado)
-                    registrar_valor_mc(mce, mcr)
+                    registrar_valor_mc()
 
             if on_progreso:
                 on_progreso(

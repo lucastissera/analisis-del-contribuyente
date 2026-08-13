@@ -6,6 +6,8 @@ alwaysApply: false
 
 # Dashboard de uso — nueva solapa o servicio
 
+Unidad de todas las columnas de servicio: **CUIT procesados con éxito** (mismo criterio que el cupo). No contar filas de Excel, notificaciones ni archivos.
+
 Cuando agregues una **solapa** con procesamiento que deba reflejarse en el dashboard admin de valor generado:
 
 ## 1. Catálogo central (`uso_metricas.py`)
@@ -21,8 +23,8 @@ Con eso se actualizan solos: dashboard web, export Excel, uso mensual y reset al
 
 ## 2. Registro al procesar
 
-- Añadir método en ``RegistroValorUso`` (`auth_uso_valor.py`) si hace falta.
-- Pasar callback a la automatización (patrón ``registrar_valor_*``).
+- Añadir método en ``RegistroValorUso`` (`auth_uso_valor.py`) si hace falta (+1 CUIT OK).
+- Pasar callback a la automatización (patrón ``registrar_valor_*``); invocar **sin argumentos** tras cupo confirmado.
 - En la ruta Flask: ``reg_valor = _registro_valor_sesion()`` y pasar ``reg_valor.xxx if reg_valor else None``.
 - Incluir en **análisis programado** si el sistema corre en AP.
 
@@ -32,7 +34,7 @@ Añadir ``meta_key`` en ``auth._OVERLAY_SYNC_KEYS``.
 
 ## 4. i18n
 
-Clave ``admin_dashboard_valor_<dash_key>`` en ``i18n.py`` (es).
+Clave ``admin_dashboard_valor_<dash_key>`` en ``i18n.py`` (es), texto tipo «CUIT procesados en …».
 
 ## Servicios sin métrica hoy
 

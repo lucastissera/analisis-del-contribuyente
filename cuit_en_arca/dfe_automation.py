@@ -2244,7 +2244,7 @@ def ejecutar_dfe_lote(
     hay_cupo: Callable[[], bool] | None = None,
     on_cuit_exitoso: Callable[[], None] | None = None,
     usuario_cupo: str | None = None,
-    registrar_valor_dfe: Callable[[int], None] | None = None,
+    registrar_valor_dfe: Callable[[], None] | None = None,
 ) -> Path:
     """Procesa varias filas (CUIT) del DFE y guarda todo en ``DFE yyyy-mm-dd``.
 
@@ -2335,7 +2335,7 @@ def ejecutar_dfe_lote(
                 if on_cuit_fin:
                     on_cuit_fin(cuit_repr, res.razon_social, res.total_archivos, None)
                 if registrar_valor_dfe:
-                    registrar_valor_dfe(int(res.total_archivos or 0))
+                    registrar_valor_dfe()
                 resumen_lote.append(
                     {"cuit": cuit_repr, "razon_social": res.razon_social or "", "error": None}
                 )

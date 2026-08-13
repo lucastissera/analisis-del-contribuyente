@@ -6,7 +6,7 @@ import io
 import logging
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable
+from typing import Any
 
 from uso_metricas import (
     METRICAS_USO,
@@ -197,68 +197,39 @@ def _sync_uso_remoto_si_corresponde(username: str, incrementos: dict[str, int]) 
         _LOG.debug("Sync remoto de uso omitido", exc_info=True)
 
 
-def contar_comprobantes_en_archivo(datos: bytes, nombre: str) -> int:
-    try:
-        from sumar_imp_total import leer_tabla
-
-        df = leer_tabla(io.BytesIO(datos), nombre_archivo=nombre or "comprobantes.csv")
-        return max(0, len(df))
-    except Exception as exc:
-        _LOG.debug("No se pudo contar comprobantes en %s: %s", nombre, exc)
-        return 0
+def registrar_uso_mc(username: str, cuits: int = 1) -> None:
+    _incrementar_uso(username, uso_mc_cuits=max(0, int(cuits)))
 
 
-def contadores_mc_desde_resultado(resultado) -> tuple[int, int]:
-    mce = (
-        contar_comprobantes_en_archivo(resultado.emitidos[0], resultado.emitidos[1])
-        if getattr(resultado, "emitidos", None)
-        else 0
-    )
-    mcr = (
-        contar_comprobantes_en_archivo(resultado.recibidos[0], resultado.recibidos[1])
-        if getattr(resultado, "recibidos", None)
-        else 0
-    )
-    return mce, mcr
-
-
-def registrar_uso_mc(username: str, *, mce: int = 0, mcr: int = 0) -> None:
-    _incrementar_uso(
-        username,
-        uso_mce_comprobantes=max(0, int(mce)),
-        uso_mcr_comprobantes=max(0, int(mcr)),
-    )
-
-
-def registrar_uso_dfe(username: str, notificaciones: int) -> None:
-    _incrementar_uso(username, uso_dfe_notificaciones=max(0, int(notificaciones)))
+def registrar_uso_dfe(username: str, cuits: int = 1) -> None:
+    _incrementar_uso(username, uso_dfe_cuits=max(0, int(cuits)))
 
 
 def registrar_uso_vl(username: str, cuits: int = 1) -> None:
     _incrementar_uso(username, uso_vl_cuits=max(0, int(cuits)))
 
 
-def registrar_uso_np(username: str) -> None:
-    _incrementar_uso(username, uso_np_cuits=1)
+def registrar_uso_np(username: str, cuits: int = 1) -> None:
+    _incrementar_uso(username, uso_np_cuits=max(0, int(cuits)))
 
 
 @dataclass
 class RegistroValorUso:
-    """Callbacks de registro de uso por servicio (extensible vía ``uso_metricas.METRICAS_USO``)."""
+    """Callbacks de registro de uso por servicio (CUIT OK; extensible vía ``uso_metricas.METRICAS_USO``)."""
 
     usuario: str
 
-    def mc(self, mce: int = 0, mcr: int = 0) -> None:
-        registrar_uso_mc(self.usuario, mce=mce, mcr=mcr)
+    def mc(self, cuits: int = 1) -> None:
+        registrar_uso_mc(self.usuario, cuits=cuits)
 
-    def dfe(self, notificaciones: int = 0) -> None:
-        registrar_uso_dfe(self.usuario, notificaciones)
+    def dfe(self, cuits: int = 1) -> None:
+        registrar_uso_dfe(self.usuario, cuits=cuits)
 
     def vl(self, cuits: int = 1) -> None:
         registrar_uso_vl(self.usuario, cuits=cuits)
 
-    def np(self) -> None:
-        registrar_uso_np(self.usuario)
+    def np(self, cuits: int = 1) -> None:
+        registrar_uso_np(self.usuario, cuits=cuits)
 
 
 def fabricar_registro_valor(username: str | None) -> RegistroValorUso | None:

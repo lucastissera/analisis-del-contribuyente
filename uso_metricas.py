@@ -1,8 +1,10 @@
 """Registro central de métricas de uso por servicio (dashboard admin).
 
+Unidad comercial: **CUIT procesados con éxito** por servicio (mismo criterio que el cupo).
+
 Al agregar una solapa/servicio nuevo con conteo de uso:
 1. Añadir entrada en ``METRICAS_USO`` (servicio_id = clave en ``SERVICIOS_IDS``).
-2. Registrar el uso en la automatización (``registrar_valor_*`` / ``RegistroValorUso``).
+2. Registrar el uso en la automatización (``registrar_valor_*`` / ``RegistroValorUso``): +1 CUIT OK.
 3. Añadir ``meta_key`` en ``auth._OVERLAY_SYNC_KEYS`` (sync portable).
 4. Texto i18n ``admin_dashboard_valor_<dash_key>`` en ``i18n.py``.
 
@@ -28,27 +30,19 @@ class MetricaUsoServicio:
 METRICAS_USO: tuple[MetricaUsoServicio, ...] = (
     MetricaUsoServicio(
         servicio_id="procesador",
-        meta_key="uso_mce_comprobantes",
-        mes_key="mce",
-        dash_key="mce_comprobantes",
-        i18n_label="admin_dashboard_valor_mce",
-        excel_label="Comprob. emitidos (MCE)",
-    ),
-    MetricaUsoServicio(
-        servicio_id="procesador",
-        meta_key="uso_mcr_comprobantes",
-        mes_key="mcr",
-        dash_key="mcr_comprobantes",
-        i18n_label="admin_dashboard_valor_mcr",
-        excel_label="Comprob. recibidos (MCR)",
+        meta_key="uso_mc_cuits",
+        mes_key="mc",
+        dash_key="mc_cuits",
+        i18n_label="admin_dashboard_valor_mc",
+        excel_label="CUIT Mis Comprobantes",
     ),
     MetricaUsoServicio(
         servicio_id="dfe",
-        meta_key="uso_dfe_notificaciones",
+        meta_key="uso_dfe_cuits",
         mes_key="dfe",
-        dash_key="dfe_notificaciones",
+        dash_key="dfe_cuits",
         i18n_label="admin_dashboard_valor_dfe",
-        excel_label="Notificaciones DFE",
+        excel_label="CUIT DFE",
     ),
     MetricaUsoServicio(
         servicio_id="vl",

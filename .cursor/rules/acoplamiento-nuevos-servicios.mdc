@@ -1,0 +1,34 @@
+---
+description: Al agregar servicios, evitar acoplamientos que pisen o descalibran lo que ya funciona
+alwaysApply: true
+---
+
+# Nuevos servicios — no pisar ni descalibrar lo existente
+
+Al crear o extender un **servicio** (solapa, ruta, automatización, métrica, flag en `SERVICIOS_IDS`, etc.), el criterio de control es: **aislar el cambio**. Lo que ya corre bien no se toca salvo necesidad demostrada.
+
+## Antes de tocar código compartido
+
+1. Identificar el perímetro del servicio nuevo (rutas, módulos, claves de auth, métricas).
+2. Listar dependencias compartidas que vas a tocar (`app.py`, `auth_registro.py`, `auth.py`, `uso_metricas.py`, `i18n.py`, templates base, Playwright/sesión ARCA, cupos, etc.).
+3. Preferir **extender por adición** (nueva clave, nuevo módulo, nuevo callback) frente a **reescribir** lógica común.
+
+## Prohibido sin justificación explícita
+
+- Cambiar defaults, firmas o comportamiento de servicios ya habilitados (`procesador`, `dfe`, `vl`, `np`, etc.) «de paso».
+- Reutilizar o renombrar `servicio_id` / `meta_key` / `mes_key` existentes.
+- Alterar `_normalizar_servicios_meta`, cupos compartidos o gates de ruta de forma que cambie el acceso de servicios ajenos.
+- Mezclar estado/sesión/archivos de un servicio con otro (mismas carpetas, mismas claves de session, mismos selectores UI globales) sin aislamiento.
+- Refactors amplios en código compartido «para acomodar» el servicio nuevo: si hace falta, acotar el diff al mínimo y verificar los servicios vecinos.
+
+## Cómo acoplar bien
+
+- Registrar el servicio en `SERVICIOS_IDS` / defaults **solo** con su clave nueva; no reordenar ni redefinir defaults ajenos salvo pedido explícito.
+- Rutas: entrada propia en `_RUTAS_POR_SERVICIO`; no ampliar prefijos de otro servicio.
+- Métricas/dashboard: seguir `.cursor/rules/dashboard-uso-servicios.mdc` con claves nuevas.
+- Lógica de negocio: módulo o paquete propio; el código compartido solo orquesta (gate, i18n, registro de uso).
+- Si un servicio existente debe cambiar por el nuevo: **decirlo al usuario** y limitar el cambio a ese contrato.
+
+## Verificación mínima
+
+Tras integrar: el servicio nuevo funciona **y** los habilitados que tocan las mismas capas (auth, rutas, ARCA, cupo, dashboard) siguen con el mismo comportamiento observable. Si hay duda, no «arreglar» preventivamente el vecino: preguntar.

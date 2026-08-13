@@ -1,5 +1,9 @@
 # Instrucciones para agentes (Cursor / IA)
 
+## Nuevos servicios (parámetro de control)
+
+Al establecer o extender servicios: **no pisar ni descalibrar** los que ya funcionan. Preferir adición aislada (clave/módulo/ruta propios) sobre reescritura de lógica compartida. Detalle en `.cursor/rules/acoplamiento-nuevos-servicios.mdc`.
+
 ## Build portable (solo cuando lo pida el usuario)
 
 El ejecutable vive en:
