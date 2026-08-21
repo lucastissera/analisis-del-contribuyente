@@ -1,0 +1,32 @@
+{
+  "latest": "2026.8.3",
+  "releases": [
+    {
+      "version": "2026.8.3",
+      "fecha": "2026-08-20",
+      "cambios": [
+        "Indicador de versión arriba a la izquierda en la sesión: si es la última, lo aclara; si no, avisa la versión disponible.",
+        "Al hacer clic en la versión disponible (o en el estado), se abre el listado de cambios por versión, de la más reciente a la más antigua.",
+        "Paquete de soporte: ZIP con versión, resumen de integridad y logs (sin claves ni auth_remote.enc).",
+        "Tras el login en ARCA, si aparece el aviso de correo electrónico, se cierra con «Recordar más tarde».",
+        "El portable ya no lleva auth_users.enc ni auth_remote.enc: usuarios y cupo viven solo en el servidor.",
+        "Tras el login, el token de este equipo queda en AppData (no en la carpeta del .exe)."
+      ]
+    },
+    {
+      "version": "2026.8.2",
+      "fecha": "2026-08-20",
+      "cambios": [
+        "Actualizador por carpeta (aplicar_update): reemplaza el programa y no pisa auth_remote.enc ni el perfil del navegador.",
+        "Chromium de ARCA solo se copia si falta o cambió de versión."
+      ]
+    },
+    {
+      "version": "2026.8.1",
+      "fecha": "2026-08-17",
+      "cambios": [
+        "Portable onedir previo al instalador/actualizador dirigido."
+      ]
+    }
+  ]
+}

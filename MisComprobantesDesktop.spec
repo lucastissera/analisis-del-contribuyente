@@ -63,6 +63,8 @@ a = Analysis(
         "uso_metricas",
         "legal_aceptacion",
         "app_branding",
+        "app_version",
+        "soporte_paquete",
         "splash_desktop",
         "sumar_imp_total",
         "apoc_listado",

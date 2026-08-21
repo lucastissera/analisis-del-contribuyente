@@ -62,14 +62,15 @@ No hace falta instalar Python en la PC destino.
 
 ### Qué distribuir
 
-Después de compilar (ver más abajo), hay que entregar **toda la carpeta**, no solo el ejecutable:
+Canal habitual: el **actualizador** (una carpeta por corrida; no pisa el perfil del navegador).
 
-| Contenido | Ubicación |
-|-----------|-----------|
-| Ejecutable | `dist\AnalisisIntegralContribuyente\AnalisisIntegralContribuyente.exe` |
-| Librerías y recursos | `dist\AnalisisIntegralContribuyente\_internal\` |
+1. Compilar el portable: `build_windows.bat` o `python tools/portable_build.py`
+2. Armar el instalador: `build_installer.bat` o `python tools/portable_installer.py`
+3. Entregar `dist\instalador\AIC-Update-<versión>.exe`
 
-Convéniente: comprimir en **ZIP** la carpeta `AnalisisIntegralContribuyente` completa y que el usuario la descomprima donde quiera (Escritorio, `C:\Programas\`, etc.).
+En Estudio DyC: cerrar el sistema de ese usuario y ejecutar **solo** `aplicar_update.bat` (o `aplicar_update.bat "D:\sistemas\juan"`). Cuando termine, repetir para el siguiente. El comando elige el paquete y no recopia perfil ni Chromium si ya están.
+
+Rescate / PC nueva sin carpeta previa: ZIP de **toda** la carpeta `dist\AnalisisIntegralContribuyente\` (exe + `_internal` + `ms-playwright`), no solo el `.exe`.
 
 ### Cómo usarla en otra PC
 
@@ -154,12 +155,12 @@ Marcá cada ítem al publicar una versión nueva. El orden sugiere: código list
 #### Portable Windows
 
 - [ ] ¿Nuevos archivos en `templates/`, `static/`, JSON u otros datos? → actualizá `datas` en `MisComprobantesDesktop.spec` si hace falta.
-- [ ] Ejecutá `build_windows.bat` o `python tools/portable_build.py` (genera `auth_users.enc` cifrado si hay claves en la raíz).
-- [ ] (Opcional) Con `watch_portable.bat` activo, los guardados en el repo actualizan `dist\…` solos; si no, ejecutá `build_windows.bat` o `python tools/portable_build.py` antes de empaquetar el ZIP.
+- [ ] Ejecutá `build_windows.bat` o `python tools/portable_build.py`.
+- [ ] (Opcional) Con `watch_portable.bat` activo, los guardados en el repo actualizan `dist\…` solos; si no, ejecutá `build_windows.bat` o `python tools/portable_build.py` antes de armar el actualizador.
 - [ ] Smoke test en otra carpeta o otra PC: abrir `AnalisisIntegralContribuyente.exe`, login, procesar, plantillas si aplica.
-- [ ] Usuarios: `auth_users.enc` en `dist\…`, o `auth_remote.txt` apuntando a `/api/auth-users` (Neon vía Render).
-- [ ] Generá el **ZIP** de toda la carpeta `dist\AnalisisIntegralContribuyente\` (no solo el `.exe`).
-- [ ] Nombrá el ZIP con versión o fecha (ej. `AnalisisIntegralContribuyente_2026-05-17.zip`) para saber qué build es.
+- [ ] Usuarios: solo Render/Neon. El portable **no** lleva `auth_users.enc` ni `auth_remote.enc`. Primero push a Render, después compilar.
+- [ ] `python tools/portable_installer.py` (o `build_installer.bat`) → `dist\instalador\AIC-Update-<versión>.exe`.
+- [ ] Entregar el actualizador. ZIP de `dist\AnalisisIntegralContribuyente\` solo como rescate.
 
 #### Cierre
 

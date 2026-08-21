@@ -7,11 +7,39 @@
 {% if modo_escritorio %}
 <script src="{{ url_for('static', filename='desktop_vivo.js') }}"></script>
 {% endif %}
-  {% if mostrar_volver | default(true) %}
-  <div class="barra-volver">
-    <a href="{{ volver_url | default(url_for('index')) }}">&larr; {{ volver_texto | default(t('volver_inicio')) }}</a>
+  <div class="barra-izquierda">
+    {% if current_user %}
+    <div class="barra-version" id="barra-version">
+      <div class="barra-version-num">{{ t('version_local', version=app_version_local) }}</div>
+      <button
+        type="button"
+        class="barra-version-estado"
+        id="btn-changelog-version"
+        data-local="{{ app_version_local }}"
+        data-tpl-ultima="{{ t('version_es_ultima') }}"
+        data-tpl-disponible="{{ t('version_disponible', version='__V__') }}"
+        data-tpl-sin-red="{{ t('version_sin_red') }}"
+      >{{ t('version_es_ultima') }}</button>
+      <a
+        class="barra-version-soporte"
+        href="{{ url_for('soporte_paquete') }}"
+        title="{{ t('version_soporte_help') }}"
+      >{{ t('version_soporte') }}</a>
+    </div>
+    <dialog class="modal-changelog" id="modal-changelog">
+      <form method="dialog" class="modal-changelog-caja">
+        <h2>{{ t('version_changelog_titulo') }}</h2>
+        <div class="modal-changelog-lista" id="modal-changelog-lista"></div>
+        <button type="submit" class="modal-changelog-cerrar">{{ t('version_changelog_cerrar') }}</button>
+      </form>
+    </dialog>
+    {% endif %}
+    {% if mostrar_volver | default(true) %}
+    <div class="barra-volver">
+      <a href="{{ volver_url | default(url_for('index')) }}">&larr; {{ volver_texto | default(t('volver_inicio')) }}</a>
+    </div>
+    {% endif %}
   </div>
-  {% endif %}
   {% if (mostrar_tema | default(true)) or (mostrar_logout | default(true)) %}
   <div class="barra-derecha">
     {% if mostrar_tema | default(true) %}
@@ -84,3 +112,6 @@
   </div>
   {% endif %}
 </div>
+{% if current_user %}
+<script src="{{ url_for('static', filename='app_version_ui.js') }}"></script>
+{% endif %}

@@ -251,7 +251,68 @@ def _locator_enlace_mis_comprobantes(root):
     return None
 
 
+_RE_BTN_RECORDAR_CORREO = re.compile(r"Recordar\s+m[aá]s\s+tarde", re.I)
+_RE_TITULO_CORREO_ARCA = re.compile(
+    r"Registr[aá]\s+y\s+verific[aá]\s+tu\s+correo",
+    re.I,
+)
+
+
+def _pagina_desde_root(root):
+    try:
+        return root.page
+    except Exception:
+        return root
+
+
+def _cerrar_popup_correo_arca(root) -> bool:
+    """Tras el login, ARCA a veces pide registrar correo. Cierra con «Recordar más tarde»."""
+    vistos: list = []
+    page = _pagina_desde_root(root)
+    for ctx in (root, page):
+        if ctx is None or ctx in vistos:
+            continue
+        vistos.append(ctx)
+        try:
+            btn = ctx.get_by_role("button", name=_RE_BTN_RECORDAR_CORREO)
+            if btn.count() > 0 and btn.first.is_visible(timeout=500):
+                try:
+                    btn.first.click(force=True, timeout=2500)
+                except Exception:
+                    clic_humano(btn.first)
+                pausa_humana(0.2, 0.4)
+                return True
+        except Exception:
+            pass
+        try:
+            titulo = ctx.get_by_text(_RE_TITULO_CORREO_ARCA)
+            if titulo.count() > 0 and titulo.first.is_visible(timeout=400):
+                btn = ctx.locator("button").filter(has_text=_RE_BTN_RECORDAR_CORREO)
+                if btn.count() > 0:
+                    try:
+                        btn.first.click(force=True, timeout=2500)
+                    except Exception:
+                        clic_humano(btn.first)
+                    pausa_humana(0.2, 0.4)
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _descartar_popup_correo_arca(page, *, intentos: int = 4) -> None:
+    """El modal puede tardar unos segundos en aparecer después del login."""
+    for i in range(max(1, intentos)):
+        if _cerrar_popup_correo_arca(page):
+            pausa_humana(0.2, 0.35)
+            _cerrar_popup_correo_arca(page)
+            return
+        if i + 1 < intentos:
+            pausa_humana(0.3, 0.5)
+
+
 def _locator_buscador_servicios(root):
+    _cerrar_popup_correo_arca(root)
     selectores = (
         'input[placeholder*="Buscar" i]',
         'input[placeholder*="servicio" i]',
@@ -713,9 +774,11 @@ def _esperar_post_login(page, timeout_sec: float = 25) -> None:
     limite = time.time() + timeout_sec
     while time.time() < limite:
         if not _pagina_es_login_afip(page):
+            _descartar_popup_correo_arca(page)
             return
         pausa_humana(0.4, 0.8)
     _esperar_pagina(page, timeout=15_000)
+    _descartar_popup_correo_arca(page)
 
 
 def _ir_al_portal_arca(page) -> None:

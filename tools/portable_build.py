@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Compila el portable con PyInstaller, genera ``auth_users.enc`` (cifrado) e instala Chromium
+Compila el portable con PyInstaller e instala Chromium
 en ``dist/AnalisisIntegralContribuyente/ms-playwright`` para descarga ARCA en el .exe.
+
+No copia ``auth_users.enc`` ni ``auth_remote.enc``: login y cupo van al servidor.
 
 Uso: desde la raíz del proyecto
   python tools/portable_build.py
@@ -23,8 +25,6 @@ from app_branding import APP_EXE_BASENAME
 
 DIST_DIR = ROOT / "dist" / APP_EXE_BASENAME
 SPEC = ROOT / "MisComprobantesDesktop.spec"
-AUTH_SRC_JSON = ROOT / "auth_users.json"
-AUTH_SRC_ENC = ROOT / "auth_users.enc"
 BROWSERS_DIR = DIST_DIR / "ms-playwright"
 LOGO_PNG = ROOT / "static" / "logo.png"
 LOGO_ICO = ROOT / "static" / "logo.ico"
@@ -78,31 +78,25 @@ def _instalar_chromium_portable() -> int:
 
 
 def _copiar_usuarios_portable() -> None:
-    """Solo ``auth_users.enc`` en dist (nunca JSON en claro)."""
-    import json
-
-    from auth_crypto import escribir_archivo_cifrado, leer_archivo_usuarios
-
+    """El portable ya no lleva padrón local ni token de sync en la carpeta."""
     dest = DIST_DIR / "auth_users.enc"
-    if AUTH_SRC_ENC.is_file():
-        shutil.copy2(AUTH_SRC_ENC, dest)
-        print(f"Usuarios cifrados copiados: {dest}", flush=True)
-        return
-    if AUTH_SRC_JSON.is_file():
+    if dest.is_file():
         try:
-            with open(AUTH_SRC_JSON, encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"ERROR leyendo {AUTH_SRC_JSON}: {exc}", file=sys.stderr)
-            return
-        if isinstance(data, dict):
-            escribir_archivo_cifrado(dest, data)
-            print(f"Usuarios cifrados generados: {dest}", flush=True)
-            return
+            dest.unlink()
+            print(f"Eliminado padrón local del dist: {dest}", flush=True)
+        except OSError as exc:
+            print(f"AVISO: no se pudo borrar {dest}: {exc}", file=sys.stderr)
+    for nombre in ("auth_remote.enc", "auth_remote.txt"):
+        extra = DIST_DIR / nombre
+        if extra.is_file():
+            print(
+                f"AVISO: {extra.name} está en dist; el .exe nuevo no lo necesita. "
+                "No lo copies a las carpetas de DyC.",
+                flush=True,
+            )
     print(
-        "Aviso: no hay auth_users.enc ni auth_users.json en la raíz.\n"
-        "  • Neon/web: python tools/setup_auth_portable.py --token … -> auth_remote.enc\n"
-        "  • Local: python tools/encrypt_auth_users.py",
+        "Usuarios y cupo: solo servidor (Render/Neon). "
+        "No se copia auth_users.enc ni auth_remote.enc.",
         flush=True,
     )
 
@@ -124,7 +118,12 @@ def main() -> int:
         return 1
     ejemplo_remoto = ROOT / "auth_remote.example.txt"
     if ejemplo_remoto.is_file():
-        shutil.copy2(ejemplo_remoto, DIST_DIR / "auth_remote.example.txt")
+        dest_ej = DIST_DIR / "auth_remote.example.txt"
+        try:
+            if dest_ej.is_file():
+                dest_ej.unlink()
+        except OSError:
+            pass
     _copiar_usuarios_portable()
     _instalar_chromium_portable()
     # Authenticode antes del manifiesto: el hash del .exe debe incluir la firma.
@@ -138,13 +137,26 @@ def main() -> int:
         )
     print(
         f"\nListo: {DIST_DIR}\n"
-        "Distribuí la carpeta completa (exe + _internal + ms-playwright + manifest.signed.json).\n"
-        "IMPORTANTE cupo: generá auth_remote.enc con setup_auth_portable.py --token …\n"
-        "  (sync Neon). Sin esto el cupo NO se descuenta en el servidor.\n"
+        "Siguiente (actualizador, no se corre solo): python tools/portable_installer.py\n"
+        "  o build_installer.bat -> dist\\instalador\\AIC-Update-<version>.exe\n"
+        "El ZIP de la carpeta completa queda como rescate.\n"
+        "Login/cupo: Render (no hace falta auth_remote.enc ni auth_users.enc).\n"
+        "Orden: push a GitHub/Render primero, después este build y el instalador.\n"
         "Firma Authenticode: docs/FIRMA_AUTHENTICODE.md "
         "(AIC_SIGN_PFX; AIC_SIGN_REQUIRED=1 para fallar sin cert).\n",
         flush=True,
     )
+    if (os.environ.get("AIC_BUILD_INSTALLER") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        inst = ROOT / "tools" / "portable_installer.py"
+        print("AIC_BUILD_INSTALLER=1: compilando actualizador…", flush=True)
+        r_inst = subprocess.run([sys.executable, str(inst)], cwd=str(ROOT))
+        if r_inst.returncode != 0:
+            return r_inst.returncode
     return 0
 
 

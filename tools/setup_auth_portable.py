@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""Genera auth_users.enc (cifrado) y auth_remote.txt sin dejar JSON en claro.
+"""Genera archivos locales de desarrollo (auth_users.enc). Ya no hace falta para el portable.
 
-Uso (desde la raíz del proyecto):
+El .exe 2026.8.3+ habla con Render sin auth_remote.enc ni padrón junto al exe.
+
+Uso (solo desarrollo local, desde la raíz):
 
   set AUTH_ADMIN_PASSWORD=tu_clave
   python tools/setup_auth_portable.py
-
-  python tools/setup_auth_portable.py --usuario Lucas --password "tu_clave"
-
-Sync Neon / Render (opcional):
-
-  python tools/setup_auth_portable.py ^
-    --url https://analisisdelcontribuyente.onrender.com/api/auth-users ^
-    --token el-token-de-Render
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verifica que /api/auth-users ya no exporta el directorio (410) y que verificar responde."""
+"""Verifica que /api/auth-users no exporta el directorio y que /api/auth/verificar es público acotado."""
 
 from __future__ import annotations
 
@@ -23,26 +23,19 @@ except ImportError:
 
 
 def main() -> int:
-    from auth import _modo_remoto_activo, _remote_token, _remote_url, _url_api_auth_verificar
+    from app_branding import AUTH_USERS_API_URL
+    from auth import _remote_url, _url_api_auth_verificar
 
-    url = _remote_url()
-    token = _remote_token()
-    print("=== Verificar sync / auth remoto ===")
+    url = _remote_url() or AUTH_USERS_API_URL
+    print("=== Verificar auth remoto ===")
     print(f"  URL listado: {url or '(vacía)'}")
-    if not url or not token:
-        print("\nFAIL: falta AUTH_USERS_URL / AUTH_USERS_REMOTE_TOKEN (o auth_remote).")
-        return 1
-    if not _modo_remoto_activo():
-        print("\nFAIL: modo remoto desactivado.")
+    if not url:
+        print("\nFAIL: no hay URL del servidor.")
         return 1
 
     req = Request(
         url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "User-Agent": "verificar-sync-remoto",
-        },
+        headers={"Accept": "application/json", "User-Agent": "verificar-sync-remoto"},
     )
     try:
         with urlopen(req, timeout=60) as resp:
@@ -55,39 +48,24 @@ def main() -> int:
         except json.JSONDecodeError:
             payload = {}
         code = exc.code
-        if code == 410 and isinstance(payload, dict) and payload.get("error") == "gone":
-            print("  OK  /api/auth-users → 410 gone (directorio no exportado)")
+        if code in (401, 410):
+            print(f"  OK  /api/auth-users → {code} (directorio no público)")
         else:
             print(f"FAIL: HTTP {code} inesperado en /api/auth-users: {raw[:200]}")
             return 1
     else:
-        # Escape AUTH_EXPORT_AUTH_USERS=1 todavía activo
         users = payload.get("users") if isinstance(payload, dict) else {}
         if isinstance(users, dict) and users:
-            con_secreto = [
-                u
-                for u, m in users.items()
-                if isinstance(m, dict)
-                and str(m.get("password") or m.get("clave") or "").strip()
-            ]
-            if con_secreto:
-                print(f"FAIL: la API aún expone password para: {', '.join(con_secreto[:10])}")
-                return 1
-            print(
-                "  AVISO: /api/auth-users aún exporta usuarios "
-                "(¿AUTH_EXPORT_AUTH_USERS=1?). Preferible dejarlo en 410."
-            )
-        else:
-            print(f"  OK  /api/auth-users HTTP {code} sin directorio útil")
+            print("FAIL: /api/auth-users exportó usuarios sin autenticación.")
+            return 1
+        print(f"  OK  /api/auth-users HTTP {code} sin directorio útil")
 
-    verify = _url_api_auth_verificar()
+    verify = _url_api_auth_verificar() or url.replace("/auth-users", "/auth/verificar")
     print(f"  URL verificar: {verify}")
-    # Solo comprueba que el endpoint exista (400 sin body), no hace login.
     req_v = Request(
         verify,
         data=b"{}",
         headers={
-            "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "verificar-sync-remoto",
@@ -99,13 +77,18 @@ def main() -> int:
             _ = resp.read()
             print(f"  OK  /api/auth/verificar HTTP {getattr(resp, 'status', 200)}")
     except HTTPError as exc:
-        if exc.code in (400, 401):
-            print(f"  OK  /api/auth/verificar responde (HTTP {exc.code})")
+        if exc.code == 401:
+            print(
+                "FAIL: /api/auth/verificar exige token (¿Render todavía no tiene este cambio?)."
+            )
+            return 1
+        if exc.code in (400, 429):
+            print(f"  OK  /api/auth/verificar responde sin Bearer (HTTP {exc.code})")
         else:
             print(f"FAIL: /api/auth/verificar HTTP {exc.code}")
             return 1
 
-    print("\nOK: listado global cerrado; login portable vía /api/auth/verificar.")
+    print("\nOK: listado cerrado; login portable vía /api/auth/verificar sin auth_remote.enc.")
     return 0
 
 

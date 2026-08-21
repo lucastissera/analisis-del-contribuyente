@@ -713,10 +713,10 @@ def _consumir_cuit_remoto(username: str, cantidad: int = 1) -> bool:
     u_raw = (username or "").strip()
     token = (token_api_para_usuario(u_raw) or "").strip()
     if not url:
-        _set_error_cupo("Falta la URL del servidor en auth_remote.enc / auth_remote.txt.")
+        _set_error_cupo("No hay URL del servidor de cupo.")
         return False
     if not token:
-        _set_error_cupo("Falta el token remoto (auth_remote.enc o 2.ª línea de auth_remote.txt).")
+        _set_error_cupo("No hay token de este equipo. Cerrá sesión y volvé a entrar.")
         return False
     if not u_raw:
         _set_error_cupo("Usuario de cupo vacío.")

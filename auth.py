@@ -4,17 +4,19 @@ Modos (por prioridad):
 
 1. **Render / servidor:** ``AUTH_USERS_JSON`` con el listado completo (fuera del repo).
 
-2. **Remoto (portables):** ``AUTH_USERS_URL`` o ``auth_remote.enc`` / ``auth_remote.txt`` junto al .exe.
-   Descarga el JSON por HTTPS, lo guarda en caché fuera de la carpeta del sistema.
+2. **Remoto (portables):** la URL pública de Render está embebida. El login va a
+   ``POST /api/auth/verificar`` (usuario + contraseña). No hace falta ``auth_remote.enc``
+   ni ``auth_users.enc`` junto al .exe. El token de dispositivo queda en AppData.
 
 3. **Archivo local externo:** ``AUTH_USERS_PATH`` apunta a un JSON fuera del proyecto.
 
-4. **Archivo local cifrado (portable):** ``auth_users.enc`` junto al .exe (generado con
-   ``python tools/encrypt_auth_users.py``). No incluir JSON en claro en la distribución.
+4. **Desarrollo:** ``auth_users.json`` / ``auth_users.enc`` en la raíz (no commitear).
 
-5. **Desarrollo:** ``auth_users.json`` en la raíz (no commitear; ver ``auth_users.example.json``).
+5. **Respaldo:** ``AUTH_ADMIN_USER`` y ``AUTH_ADMIN_PASSWORD`` en el entorno.
 
-6. **Respaldo:** ``AUTH_ADMIN_USER`` y ``AUTH_ADMIN_PASSWORD`` en el entorno.
+Compatibilidad: si todavía hay ``auth_remote.enc`` / ``.txt`` junto al .exe, se leen
+la URL/token (portables viejos). El padrón ``auth_users.enc`` junto al .exe se ignora
+en el compilado.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
-from app_branding import APP_NAME, RENDER_PUBLIC_URL
+from app_branding import APP_NAME, AUTH_USERS_API_URL, RENDER_PUBLIC_URL
 
 _AUTH_DIR = Path(__file__).resolve().parent
 _LOG = logging.getLogger(__name__)
@@ -259,7 +261,11 @@ def _remote_url() -> str:
     if url:
         return url
     url_txt, _ = _leer_auth_remote_txt()
-    return url_txt
+    if url_txt:
+        return url_txt
+    if getattr(sys, "frozen", False):
+        return AUTH_USERS_API_URL
+    return ""
 
 
 def _normalizar_token_remoto(token: str) -> str:
@@ -667,23 +673,68 @@ def verificar_token_remoto(auth_header: str | None) -> bool:
 
 # Tokens de dispositivo emitidos por /api/auth/verificar (portable → cupo/uso).
 _device_tokens_sesion: dict[str, str] = {}
+_device_lock = threading.Lock()
+
+
+def _ruta_device_tokens() -> Path:
+    return _dir_datos_usuario() / "auth" / "device_api_tokens.enc"
+
+
+def _cargar_device_tokens_disco() -> dict[str, str]:
+    try:
+        from auth_crypto import leer_store_secreto
+
+        data = leer_store_secreto(_ruta_device_tokens(), None, {"tokens": {}})
+    except Exception:
+        return {}
+    toks = data.get("tokens") if isinstance(data, dict) else {}
+    if not isinstance(toks, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in toks.items():
+        u = str(k or "").strip()
+        t = str(v or "").strip()
+        if u and t:
+            out[u] = t
+    return out
+
+
+def _guardar_device_tokens_disco(tokens: dict[str, str]) -> None:
+    from auth_crypto import escribir_store_secreto
+
+    escribir_store_secreto(_ruta_device_tokens(), {"version": 1, "tokens": tokens})
 
 
 def recordar_device_token(usuario: str, token: str) -> None:
     u = (usuario or "").strip()
     t = (token or "").strip()
-    if u and t:
+    if not u or not t:
+        return
+    with _device_lock:
         _device_tokens_sesion[u] = t
+        disco = _cargar_device_tokens_disco()
+        disco[u] = t
+        try:
+            _guardar_device_tokens_disco(disco)
+        except Exception:
+            _LOG.debug("No se pudo guardar token de dispositivo local", exc_info=True)
 
 
 def token_api_para_usuario(usuario: str | None = None) -> str:
-    """Preferir token de dispositivo del usuario; si no, Bearer global de sync."""
+    """Token de dispositivo del usuario (memoria o AppData). Sin Bearer global."""
     u = (usuario or "").strip()
     if u:
-        t = (_device_tokens_sesion.get(u) or "").strip()
+        with _device_lock:
+            t = (_device_tokens_sesion.get(u) or "").strip()
         if t:
             return t
-    return _remote_token()
+        disco = _cargar_device_tokens_disco()
+        t = (disco.get(u) or "").strip()
+        if t:
+            with _device_lock:
+                _device_tokens_sesion[u] = t
+            return t
+    return ""
 
 
 def _url_api_auth_verificar() -> str:
@@ -710,9 +761,6 @@ def _intentar_verificar_remoto(
     """
     verify_url = _url_api_auth_verificar()
     if not verify_url.lower().startswith("https://"):
-        return None
-    token = _remote_token()
-    if not token:
         return None
     device_id = ""
     public_key = ""
@@ -748,8 +796,10 @@ def _intentar_verificar_remoto(
         "User-Agent": f"{APP_NAME}/auth-verify",
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
     }
+    token = _remote_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = Request(verify_url, data=body, headers=headers, method="POST")
     try:
         with urlopen(req, timeout=20) as resp:
@@ -833,7 +883,9 @@ def _usuarios_desde_entorno() -> dict[str, CuentaUsuario]:
 
 
 def _cuentas_archivo_local() -> dict[str, CuentaUsuario]:
-    """Usuarios en auth_users.enc / .json (junto al .exe en portable o raíz en dev)."""
+    """Usuarios en auth_users.enc / .json (solo desarrollo; el .exe no usa padrón local)."""
+    if getattr(sys, "frozen", False):
+        return {}
     path = _auth_users_file()
     if not path.is_file():
         return {}

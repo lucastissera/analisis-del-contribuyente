@@ -560,6 +560,7 @@ def _session_idle_and_login():
         "olvide_contrasena",
         "guia_usuario",
         "health",
+        "api_app_version",
         None,
     ):
         return None
@@ -617,6 +618,7 @@ def _verificar_aceptacion_legal_pendiente():
         "api_uso_registrar",
         "api_estado_altas",
         "health",
+        "api_app_version",
         None,
     ):
         return None
@@ -668,10 +670,13 @@ def _mostrar_ui_cuit_arca() -> bool:
 
 @app.context_processor
 def _inject_ui_flags():
+    from app_branding import APP_VERSION
+
     return {
         "mostrar_cuit_arca_ui": _mostrar_ui_cuit_arca(),
         "ejecutable_escritorio_frozen": getattr(sys, "frozen", False),
         "modo_escritorio": getattr(sys, "frozen", False),
+        "app_version_local": APP_VERSION,
     }
 
 
@@ -766,9 +771,11 @@ def _verificar_cupo_inicio(lg: str) -> str | None:
     if not user:
         return None
     if getattr(sys, "frozen", False):
-        from auth import _modo_remoto_activo, _remote_token, forzar_sync_usuarios_remoto
+        from auth import _modo_remoto_activo, forzar_sync_usuarios_remoto, token_api_para_usuario
 
-        if not _modo_remoto_activo() or not _remote_token():
+        if not _modo_remoto_activo():
+            return tr(lg, "err_cupo_portable_sin_remoto")
+        if not token_api_para_usuario(user):
             return tr(lg, "err_cupo_portable_sin_remoto")
         forzar_sync_usuarios_remoto()
     from auth_registro import (
@@ -1847,6 +1854,32 @@ def health():
             or os.environ.get("AIC_BUILD_ID")
             or "a1-login-fix",
         }
+    )
+
+
+@app.get("/api/app-version")
+def api_app_version():
+    """Versión local, última publicada y changelog (sin auth)."""
+    from app_version import estado_version
+
+    return jsonify(estado_version())
+
+
+@app.get("/soporte/paquete")
+def soporte_paquete():
+    """ZIP de diagnóstico para soporte. Requiere sesión. Sin claves."""
+    if not session.get("user"):
+        return redirect(url_for("login", next=request.path))
+    from app_branding import APP_VERSION
+    from soporte_paquete import armar_zip_soporte
+
+    raw = armar_zip_soporte()
+    nombre = f"soporte_AIC_{APP_VERSION}.zip"
+    return send_file(
+        io.BytesIO(raw),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=nombre,
     )
 
 
@@ -3869,10 +3902,11 @@ def api_auth_users():
 @app.post("/api/auth/verificar")
 @csrf.exempt
 def api_auth_verificar():
-    """Valida usuario/contraseña y emite token de dispositivo (Bearer global)."""
-    auth = _auth_api_remota()
-    if auth is None or auth[0] != "global":
-        return jsonify({"error": "unauthorized"}), 401
+    """Valida usuario/contraseña y emite token de dispositivo.
+
+    Público (rate-limit por usuario). El Bearer global de sync ya no es obligatorio.
+    Cupo/uso siguen exigiendo el token de dispositivo, no este endpoint.
+    """
     data = request.get_json(silent=True) or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""

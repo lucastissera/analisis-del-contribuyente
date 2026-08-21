@@ -38,4 +38,4 @@ build_windows.bat
 
 `dist/AnalisisIntegralContribuyente/AnalisisIntegralContribuyente.exe` (+ `_internal` + `ms-playwright`).
 
-No versionar `dist/` ni `build/` (están en `.gitignore`).
+El **actualizador** (`python tools/portable_installer.py`) tampoco se arma solo: solo si el usuario lo pide. No versionar `dist/` ni `build/` (están en `.gitignore`).

@@ -7,6 +7,96 @@
   gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
+.barra-izquierda {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  max-width: 18rem;
+}
+.barra-version {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-muted-2, var(--text-muted));
+}
+.barra-version-num {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.barra-version-estado {
+  display: block;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--color-link);
+  cursor: pointer;
+  text-align: left;
+}
+.barra-version-estado:hover {
+  text-decoration: underline;
+}
+.barra-version-estado-nueva {
+  font-weight: 600;
+}
+.barra-version-soporte {
+  display: inline-block;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--color-link);
+  text-decoration: none;
+}
+.barra-version-soporte:hover {
+  text-decoration: underline;
+}
+.modal-changelog {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  max-width: min(36rem, 94vw);
+  width: 36rem;
+}
+.modal-changelog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+.modal-changelog-caja {
+  margin: 0;
+  padding: 1rem 1.15rem 1.1rem;
+}
+.modal-changelog-caja h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+.modal-changelog-lista {
+  max-height: 60vh;
+  overflow: auto;
+  font-size: 0.88rem;
+}
+.modal-changelog-lista article {
+  margin-bottom: 1rem;
+}
+.modal-changelog-lista h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+.modal-changelog-lista ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+.modal-changelog-cerrar {
+  margin-top: 0.75rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--bg-body);
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
 .barra-volver {
   font-size: 0.9rem;
   flex-shrink: 0;
